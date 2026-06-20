@@ -403,6 +403,27 @@ PRESET_PROMPTS = [
 st.markdown("""
 <style>
 /* ═══════════════════════════════════════════════
+   MOBILE RESPONSIVE TABLE FIX
+   ═══════════════════════════════════════════════ */
+/* Wrap the table in a scrollable div */
+.stDataFrame, .stTable {
+    max-width: 100% !important;
+    overflow-x: auto !important;
+    display: block !important;
+}
+
+/* Force table cells to stay within the viewport */
+table {
+    width: 100% !important;
+    table-layout: auto !important;
+    word-wrap: break-word !important;
+}
+
+/* Ensure the container doesn't overflow */
+[data-testid="stChatMessage"] {
+    overflow-x: hidden !important;
+}
+/* ═══════════════════════════════════════════════
    ANIMATED AURORA GRADIENT BACKGROUND
    ═══════════════════════════════════════════════ */
 @keyframes aurora {
