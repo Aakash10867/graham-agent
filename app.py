@@ -3,6 +3,12 @@ GRAHAM INVESTMENT AGENT — Web App (Visual Overhaul)
 ====================================================
 Same logic as original. Radically different skin.
 """
+# --- SQLITE PATCH FOR STREAMLIT CLOUD ---
+__import__('pysqlite3')
+import sys
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+# ----------------------------------------
+
 import os
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 import streamlit as st
