@@ -1,9 +1,4 @@
 import requests
-"""
-GRAHAM INVESTMENT AGENT — Web App (Visual Overhaul)
-====================================================
-Same logic as original. Radically different skin.
-"""
 # --- SQLITE PATCH FOR STREAMLIT CLOUD ---
 __import__('pysqlite3')
 import sys
