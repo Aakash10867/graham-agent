@@ -313,51 +313,64 @@ header {visibility: hidden;}
 }
 
 /* ═══════════════════════════════════════════════
-   WELCOME CARD (empty state)
+   WELCOME CARD (Terminal Dashboard)
    ═══════════════════════════════════════════════ */
 .welcome-card {
-    background: rgba(255, 255, 255, 0.03);
+    background: rgba(15, 12, 41, 0.4);
     backdrop-filter: blur(20px);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 20px;
+    border: 1px solid rgba(0, 245, 212, 0.15);
+    border-radius: 8px; /* Sharper corners */
     padding: 2.5rem 2rem;
     text-align: center;
     margin: 2rem auto;
-    max-width: 520px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+    max-width: 550px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4), inset 0 0 20px rgba(0, 245, 212, 0.05);
 }
 
 .welcome-card h2 {
     font-family: 'Space Grotesk', sans-serif !important;
-    font-size: 1.3rem;
-    color: rgba(230, 235, 245, 0.9);
-    margin-bottom: 1rem;
-    font-weight: 600;
+    font-size: 1.2rem;
+    color: #00f5d4; /* Neon terminal green/cyan */
+    margin-bottom: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 2px;
 }
 
 .welcome-card p {
-    color: rgba(200, 210, 230, 0.5);
-    font-size: 0.88rem;
-    line-height: 1.7;
+    color: rgba(200, 210, 230, 0.6);
+    font-size: 0.9rem;
+    font-family: 'Inter', sans-serif !important;
+    line-height: 1.6;
     margin: 0;
 }
 
 .welcome-pills {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 10px;
     justify-content: center;
-    margin-top: 1.4rem;
+    margin-top: 1.8rem;
 }
 
 .welcome-pill {
-    background: rgba(0, 245, 212, 0.08);
-    border: 1px solid rgba(0, 245, 212, 0.15);
-    border-radius: 50px;
-    padding: 6px 16px;
-    color: rgba(0, 245, 212, 0.7);
-    font-size: 0.78rem;
-    letter-spacing: 0.3px;
+    background: rgba(0, 245, 212, 0.05);
+    border: 1px solid rgba(0, 245, 212, 0.25);
+    border-radius: 4px; /* Tech/Command box look instead of round pill */
+    padding: 8px 16px;
+    color: #00f5d4;
+    font-family: 'Space Grotesk', sans-serif !important;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 1px;
+    transition: all 0.2s ease;
+}
+
+.welcome-pill:hover {
+    background: rgba(0, 245, 212, 0.15);
+    border-color: rgba(0, 245, 212, 0.5);
+    box-shadow: 0 0 15px rgba(0, 245, 212, 0.2);
+    cursor: default;
 }
 
 /* ═══════════════════════════════════════════════
