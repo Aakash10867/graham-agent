@@ -878,15 +878,6 @@ if prompt := st.chat_input("Ask about a stock, Graham's principles, or anything.
     with st.chat_message("user", avatar=USER_AVATAR):
         st.markdown(prompt)
 
-    # Handle new input
-if prompt := st.chat_input("Ask about a stock, Graham's principles, or anything..."):
-    # 1. Save user message to state
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    
-    # 2. Display user message in UI
-    with st.chat_message("user", avatar=USER_AVATAR):
-        st.markdown(prompt)
-
     # 3. Handle agent response
     with st.chat_message("assistant", avatar=AGENT_AVATAR):
         with st.spinner("Executing multi-factor analysis..."):
