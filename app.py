@@ -990,6 +990,48 @@ collection = load_books()
 # TOOL FUNCTIONS
 # ──────────────────────────────────────────────
 
+def show_stock_chart(ticker: str) -> dict:
+    """Render a 13-month closing price chart for a stock directly in the terminal UI.
+    Use this EXPLICITLY when the user asks to see a chart, graph, visual plot, 
+    or trajectory of a stock's price.
+    
+    Args:
+        ticker: Stock ticker symbol (e.g. AAPL, RELIANCE.NS, TCS).
+    """
+    try:
+        import datetime
+        import pandas as pd
+        import yfinance as yf
+        import streamlit as st
+        
+        resolved = _resolve_ticker(ticker)
+        resolved_upper = str(resolved).strip().upper()
+        
+        # 13-month lookback
+        end_dt = datetime.date.today()
+        start_dt = end_dt - datetime.timedelta(days=395)
+        
+        data_feed = yf.Ticker(resolved_upper).history(start=start_dt, end=end_dt)
+        
+        # Indian market fallback
+        if data_feed.empty and not resolved_upper.endswith((".NS", ".BSE")):
+            data_feed = yf.Ticker(f"{resolved_upper}.NS").history(start=start_dt, end=end_dt)
+            if not data_feed.empty:
+                resolved_upper = f"{resolved_upper}.NS"
+                
+        if not data_feed.empty:
+            st.write(f"### 📈 13-Month Trend: {resolved_upper}")
+            close_series = pd.DataFrame(data_feed["Close"])
+            close_series.columns = [f"{resolved_upper} Close"]
+            st.line_chart(close_series, color="#00f5d4")
+            return {"success": f"Chart successfully rendered to the UI for {resolved_upper}."}
+        else:
+            return {"error": f"Failed to fetch chart data for {resolved_upper}. The ticker might be invalid."}
+            
+    except Exception as e:
+        return {"error": f"Chart rendering failed: {str(e)}"}
+
+
 def search_book(query: str) -> dict:
     """Search the combined knowledge base of Graham, Greenblatt, and Dorsey.
     Use this when you need specific philosophical frameworks, formulas, or rules
@@ -1675,6 +1717,9 @@ def find_investments(market: str) -> dict:
 # ──────────────────────────────────────────────
 # TOOLS REGISTRY
 # ──────────────────────────────────────────────
+# ──────────────────────────────────────────────
+# TOOLS REGISTRY
+# ──────────────────────────────────────────────
 TOOLS = [
     search_book,
     get_stock_data,
@@ -1688,6 +1733,7 @@ TOOLS = [
     get_dividend_history,
     calculate_graham_value,
     find_investments,
+    show_stock_chart,
 ]
 
 tool_functions = {
@@ -1703,6 +1749,7 @@ tool_functions = {
     "get_dividend_history": get_dividend_history,
     "calculate_graham_value": calculate_graham_value,
     "find_investments": find_investments,
+    "show_stock_chart": show_stock_chart,
 }
 
 
@@ -1777,6 +1824,7 @@ You have 11 tools available. Pick the right combination for each question — yo
 10. get_dividend_history — Get complete dividend payment history, annual totals, growth rate, and yield.
 11. calculate_graham_value — Compute Grahams intrinsic value formula (V = EPS x (8.5 + 2g) x 4.4/Y) and margin of safety.
 12. find_investments — Screen ~80 stocks (Nifty 50 + US Large Cap 30) against ALL 4 frameworks and return two tiers: Perfect Consensus (4/4 pass) and Strong Consensus (3/4 pass), top 3 each. Use when the user asks to find, discover, or recommend stocks, or wants investment ideas. Call with market='india', 'us', or 'all'.
+13. show_stock_chart — Renders a visual 13-month line chart of a stock's closing price directly in the UI. Use this whenever the user asks for a chart, graph, or visual trajectory.
 
 TOOL SELECTION RULES:
 - For a comprehensive stock analysis: call get_stock_data + get_historical_trends + get_financial_statements (income) + calculate_graham_value + search_book.
@@ -1789,6 +1837,7 @@ TOOL SELECTION RULES:
 - For "find me stocks" or "recommend stocks" or "where should I invest" or "best stocks" or "screen": call find_investments, THEN call search_book to explain WHY each investment tier is attractive. Follow the SCREENING OUTPUT PROTOCOL below.
 - When comparing two stocks: call the relevant tools for BOTH tickers and synthesize.
 - Always prefer calling a tool over guessing. If in doubt, call it.
+- For "show me a chart" or "graph" questions: use show_stock_chart.
 
 SCREENING OUTPUT PROTOCOL (use ONLY when find_investments is called):
 After calling find_investments, you MUST also call search_book with queries like "margin of safety value investing" and "economic moat competitive advantage" and "magic formula return on capital" to ground your explanation in the actual books. Then present results as follows:
@@ -1890,48 +1939,9 @@ def agent_turn(user_message):
                 function_responses = []
                 for fc in response.function_calls:
                     if fc.name in tool_functions:
-                        # Your original tool execution
                         result = tool_functions[fc.name](**fc.args)
-                        
-                        # ── INDEPENDENT VISUAL ADD-ON (Does not alter the loop) ──
-                        if fc.name == "get_price_history" and isinstance(result, dict) and "error" not in result:
-                            try:
-                                import datetime
-                                import pandas as pd
-                                import yfinance as yf
-                                
-                                # Isolate the ticker symbol cleanly
-                                ticker_input = fc.args.get("ticker", "")
-                                resolved = _resolve_ticker(ticker_input) if '_resolve_ticker' in globals() else ticker_input
-                                resolved_upper = str(resolved).strip().upper()
-                                
-                                # Set up a strict 13-month lookback
-                                end_dt = datetime.date.today()
-                                start_dt = end_dt - datetime.timedelta(days=395)
-                                
-                                # Attempt fetch
-                                data_feed = yf.Ticker(resolved_upper).history(start=start_dt, end=end_dt)
-                                
-                                # Try automatic suffix correction for Indian markets if empty
-                                if data_feed.empty and not resolved_upper.endswith((".NS", ".BSE")):
-                                    data_feed = yf.Ticker(f"{resolved_upper}.NS").history(start=start_dt, end=end_dt)
-                                    if not data_feed.empty:
-                                        resolved_upper = f"{resolved_upper}.NS"
-                                
-                                # Render the single chart only if data is verified
-                                if not data_feed.empty:
-                                    st.write(f"### 📈 13-Month Closing Trend: {resolved_upper}")
-                                    close_series = pd.DataFrame(data_feed["Close"])
-                                    close_series.columns = [f"{resolved_upper} Close"]
-                                    st.line_chart(close_series, color="#00f5d4")
-                            except Exception:
-                                pass # Completely independent failure barrier
-                        # ──────────────────────────────────────────────────────────
-                        
                     else:
                         result = {"error": f"Unknown tool: {fc.name}"}
-                    
-                    # Your original response serialization
                     function_responses.append(
                         types.Part.from_function_response(name=fc.name, response=result)
                     )
