@@ -617,23 +617,41 @@ if not st.session_state.messages:
     </div>
     """, unsafe_allow_html=True)
 
+
+# Define your avatars
+USER_AVATAR = "👤"
+AGENT_AVATAR = "📈"
+
 # Display past messages
 for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
+    # Assign the correct avatar based on the role
+    avatar = USER_AVATAR if msg["role"] == "user" else AGENT_AVATAR
+    with st.chat_message(msg["role"], avatar=avatar):
         st.markdown(msg["content"])
 
 # Handle new input
 if prompt := st.chat_input("Ask about a stock, Graham's principles, or anything..."):
+    # 1. Save user message to state
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
+    
+    # 2. Display user message in UI
+    with st.chat_message("user", avatar=USER_AVATAR):
         st.markdown(prompt)
 
-    with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
+    # 3. Handle agent response
+    with st.chat_message("assistant", avatar=AGENT_AVATAR):
+        with st.spinner("Analyzing..."):
             try:
+                # Generate and display the answer
                 answer = agent_turn(prompt)
+                st.markdown(answer)
+                # Save agent message to state ONLY if successful
+                st.session_state.messages.append({"role": "assistant", "content": answer})
+                
             except Exception as e:
-                answer = f"Something went wrong: {str(e)}"
-        st.markdown(answer)
-
-    st.session_state.messages.append({"role": "assistant", "content": answer})
+                # Graceful error handling
+                error_msg = str(e)
+                if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+                    st.error("⚠️ **API Rate Limit Exceeded.** The Gemini API has reached its limit. Please wait a moment and try again.")
+                else:
+                    st.error(f"🛑 **System Error:** Unable to process request. \n\n`{error_msg[:100]}...`")
