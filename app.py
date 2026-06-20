@@ -27,6 +27,7 @@ import re
 import requests
 import pandas as pd
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ──────────────────────────────────────────────
 # FREE MODEL FALLBACK LIST
@@ -171,6 +172,32 @@ TICKER_ALIASES = {
     "MASTERCARD": "MA",
 }
 
+# ──────────────────────────────────────────────
+# SCREENING UNIVERSE — stocks to scan
+# ──────────────────────────────────────────────
+SCREENING_UNIVERSE = {
+    "Nifty 50": [
+        "RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS", "ICICIBANK.NS",
+        "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "LT.NS", "HINDUNILVR.NS",
+        "KOTAKBANK.NS", "AXISBANK.NS", "BAJFINANCE.NS", "ASIANPAINT.NS",
+        "MARUTI.NS", "TATAMOTORS.NS", "SUNPHARMA.NS", "TITAN.NS",
+        "WIPRO.NS", "HCLTECH.NS", "ULTRACEMCO.NS", "NTPC.NS",
+        "POWERGRID.NS", "TATASTEEL.NS", "NESTLEIND.NS", "TECHM.NS",
+        "BAJAJ-AUTO.NS", "INDUSINDBK.NS", "JSWSTEEL.NS", "M&M.NS",
+        "ADANIENT.NS", "ADANIPORTS.NS", "COALINDIA.NS", "ONGC.NS",
+        "BAJAJFINSV.NS", "BRITANNIA.NS", "CIPLA.NS", "DRREDDY.NS",
+        "EICHERMOT.NS", "GRASIM.NS", "HEROMOTOCO.NS", "HINDALCO.NS",
+        "DIVISLAB.NS", "SBILIFE.NS", "HDFCLIFE.NS", "TATACONSUM.NS",
+        "SHREECEM.NS", "TATAPOWER.NS", "BEL.NS", "HAL.NS",
+    ],
+    "US Large Cap": [
+        "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA",
+        "BRK-B", "JPM", "V", "JNJ", "WMT", "PG", "MA", "UNH",
+        "HD", "DIS", "KO", "PEP", "NFLX", "COST", "ABBV", "MRK",
+        "CRM", "AMD", "INTC", "GS", "BA", "CAT", "GE",
+    ],
+}
+
 
 # ──────────────────────────────────────────────
 # TICKER RESOLUTION HELPERS
@@ -239,6 +266,96 @@ def _resolve_ticker(query):
 
 
 # ──────────────────────────────────────────────
+# SCREENER ENGINE
+# ──────────────────────────────────────────────
+def _fetch_single_ticker(ticker):
+    """Fetch key metrics + trajectory data for one ticker. Returns dict or None."""
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        if not info or not info.get("regularMarketPrice"):
+            return None
+
+        pe = info.get("trailingPE")
+
+        data = {
+            "ticker": ticker,
+            "name": info.get("longName") or info.get("shortName", ticker),
+            "sector": info.get("sector", "N/A"),
+            "price": info.get("regularMarketPrice") or info.get("currentPrice"),
+            "pe": pe,
+            "pb": info.get("priceToBook"),
+            "roe": info.get("returnOnEquity"),
+            "de": info.get("debtToEquity"),
+            "dividend_yield": info.get("dividendYield"),
+            "eps": info.get("trailingEps"),
+            "earnings_yield": round(1.0 / pe * 100, 2) if pe and pe > 0 else None,
+            "profit_margin": info.get("profitMargins"),
+            "market_cap": info.get("marketCap"),
+            "rev_growth": None,
+            "ni_growth": None,
+            "debt_growth": None,
+        }
+
+        # Trajectory: 1-year YoY growth from financial statements
+        try:
+            income_stmt = stock.financials
+            if income_stmt is not None and not income_stmt.empty and len(income_stmt.columns) >= 2:
+                cols = sorted(income_stmt.columns)[-2:]
+
+                try:
+                    rev = [income_stmt.loc["Total Revenue", c] for c in cols]
+                    if all(pd.notna(v) and v > 0 for v in rev):
+                        data["rev_growth"] = round((rev[1] / rev[0] - 1) * 100, 2)
+                except (KeyError, ZeroDivisionError):
+                    pass
+
+                try:
+                    ni = [income_stmt.loc["Net Income", c] for c in cols]
+                    if all(pd.notna(v) for v in ni) and ni[0] != 0:
+                        data["ni_growth"] = round((ni[1] / ni[0] - 1) * 100, 2)
+                except (KeyError, ZeroDivisionError):
+                    pass
+        except Exception:
+            pass
+
+        try:
+            balance_sheet = stock.balance_sheet
+            if balance_sheet is not None and not balance_sheet.empty and len(balance_sheet.columns) >= 2:
+                cols = sorted(balance_sheet.columns)[-2:]
+                try:
+                    debt = [balance_sheet.loc["Total Debt", c] for c in cols]
+                    if all(pd.notna(v) for v in debt) and debt[0] > 0:
+                        data["debt_growth"] = round((debt[1] / debt[0] - 1) * 100, 2)
+                except (KeyError, ZeroDivisionError):
+                    pass
+        except Exception:
+            pass
+
+        return data
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=21600, show_spinner="Scanning stock universe (fundamentals + trajectory)... First run takes ~60s, then cached for 6 hours.")
+def _fetch_universe_data():
+    """Fetch metrics for all stocks in the screening universe (parallel)."""
+    all_tickers = []
+    for group in SCREENING_UNIVERSE.values():
+        all_tickers.extend(group)
+
+    results = {}
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(_fetch_single_ticker, t): t for t in all_tickers}
+        for future in as_completed(futures):
+            data = future.result()
+            if data:
+                results[data["ticker"]] = data
+
+    return results
+
+
+# ──────────────────────────────────────────────
 # PAGE CONFIG
 # ──────────────────────────────────────────────
 st.set_page_config(
@@ -271,6 +388,12 @@ PRESET_PROMPTS = [
      "Who are the major shareholders of {company}? Show institutional holders and any recent insider transactions."),
     ("⚖️ Compare Stocks",
      "Compare {company} as investments — valuation, growth, profitability, and which is the better buy."),
+    ("🔍 Find Indian Investments",
+     "Find the best Indian stocks to invest in right now. Show me which Nifty 50 stocks pass all 4 frameworks and which pass 3 out of 4, with top 3 from each tier. Explain why each tier is a good investment using the book philosophies."),
+    ("🔍 Find US Investments",
+     "Find the best US stocks to invest in right now. Show me which large cap stocks pass all 4 frameworks and which pass 3 out of 4, with top 3 from each tier. Explain why each tier is a good investment using the book philosophies."),
+    ("🌍 Find Best Global Picks",
+     "Screen all stocks across India and US markets. Show me the best investment candidates that pass all 4 frameworks or 3 out of 4. Explain why each category is good for long-term returns based on Graham, Greenblatt, and Dorsey."),
 ]
 
 # ──────────────────────────────────────────────
@@ -1367,6 +1490,121 @@ def calculate_graham_value(ticker: str) -> dict:
         return {"error": f"Failed to calculate Graham value for {resolved}: {str(e)}"}
 
 
+def find_investments(market: str) -> dict:
+    """Find the best investment candidates by scoring stocks against ALL 4 frameworks.
+    Returns two tiers: Perfect Consensus (4/4 pass) and Strong Consensus (3/4 pass),
+    with the top 3 from each tier and which frameworks each stock passed or failed.
+
+    Use this when the user asks to find, discover, or recommend stocks to invest in,
+    or asks which stocks are the best buys, or wants investment ideas.
+
+    This screens ~80 stocks (Nifty 50 + US Large Cap 30). First call takes ~60 seconds
+    to fetch all data; subsequent calls are cached for 6 hours.
+
+    The 4 frameworks scored are:
+    1. Graham — P/E <= 15 AND P/B <= 1.5 (deep value)
+    2. Greenblatt — ROE > 15% AND Earnings Yield > 5% (magic formula / capital efficiency)
+    3. Dorsey — ROE > 15% AND D/E < 50% (quality + financial health; moat is qualitative)
+    4. Trajectory — (Revenue Growth > 0% OR Net Income Growth > 0%) AND (Debt Growth < 0% OR D/E < 50%)
+
+    Args:
+        market: Which market to screen. Must be one of:
+                india — Nifty 50 stocks only
+                us — US Large Cap stocks only
+                all — Both markets combined
+    """
+    universe_data = _fetch_universe_data()
+
+    tier_4 = []  # Perfect consensus: 4/4
+    tier_3 = []  # Strong consensus: 3/4
+
+    screened_count = 0
+
+    for ticker, m in universe_data.items():
+        is_indian = ticker.endswith(".NS") or ticker.endswith(".BO")
+        if market == "india" and not is_indian:
+            continue
+        if market == "us" and is_indian:
+            continue
+
+        screened_count += 1
+
+        pe = m.get("pe")
+        pb = m.get("pb")
+        roe = m.get("roe")
+        de = m.get("de")
+        ey = m.get("earnings_yield")
+        rev_g = m.get("rev_growth")
+        ni_g = m.get("ni_growth")
+        debt_g = m.get("debt_growth")
+
+        # Score each framework
+        graham = bool(pe and pb and pe <= 15 and pb <= 1.5)
+        greenblatt = bool(roe and ey and roe > 0.15 and ey > 5)
+        dorsey = bool(roe and de is not None and roe > 0.15 and de < 50)
+
+        # Trajectory: growth positive AND debt under control
+        growth_ok = (rev_g is not None and rev_g > 0) or (ni_g is not None and ni_g > 0)
+        debt_ok = (debt_g is not None and debt_g < 0) or (de is not None and de < 50)
+        trajectory = bool(growth_ok and debt_ok)
+
+        results_map = {
+            "Graham": graham,
+            "Greenblatt": greenblatt,
+            "Dorsey": dorsey,
+            "Trajectory": trajectory,
+        }
+        score = sum(results_map.values())
+
+        if score >= 3:
+            entry = {
+                "ticker": ticker,
+                "name": m.get("name", ticker),
+                "sector": m.get("sector", "N/A"),
+                "price": round(m["price"], 2) if m.get("price") else "N/A",
+                "pe": round(pe, 2) if pe else "N/A",
+                "pb": round(pb, 2) if pb else "N/A",
+                "roe_pct": round(roe * 100, 2) if roe else "N/A",
+                "de_pct": round(de, 2) if de is not None else "N/A",
+                "earnings_yield_pct": round(ey, 2) if ey else "N/A",
+                "dividend_yield_pct": round(m["dividend_yield"] * 100, 2) if m.get("dividend_yield") else "N/A",
+                "rev_growth_pct": rev_g if rev_g is not None else "N/A",
+                "ni_growth_pct": ni_g if ni_g is not None else "N/A",
+                "debt_growth_pct": debt_g if debt_g is not None else "N/A",
+                "score": f"{score}/4",
+                "passed": [name for name, passed in results_map.items() if passed],
+                "failed": [name for name, passed in results_map.items() if not passed],
+            }
+
+            if score == 4:
+                tier_4.append(entry)
+            else:
+                tier_3.append(entry)
+
+    # Sort each tier: by P/E ascending (cheapest first) as a tiebreaker
+    def sort_key(x):
+        return x["pe"] if isinstance(x["pe"], (int, float)) else 999
+
+    tier_4.sort(key=sort_key)
+    tier_3.sort(key=sort_key)
+
+    return {
+        "market": market,
+        "stocks_screened": screened_count,
+        "perfect_consensus_4_of_4": {
+            "count": len(tier_4),
+            "top_3": tier_4[:3],
+            "investment_style": "Rare finds where deep value, capital efficiency, quality, and positive momentum ALL align. These represent the strongest quantitative buy signals across all philosophies.",
+        },
+        "strong_consensus_3_of_4": {
+            "count": len(tier_3),
+            "top_3": tier_3[:3],
+            "investment_style": "Strong candidates that pass 3 frameworks. The single failing framework identifies the specific risk to monitor. Still well above average conviction.",
+        },
+        "note": "Screened Nifty 50 + US Large Cap 30. Dorsey moat is qualitative and checked only on quantitative criteria (ROE, D/E) here. Data cached for 6 hours. After presenting results, use search_book to explain WHY each investment style delivers returns, citing Graham, Greenblatt, and Dorsey.",
+    }
+
+
 # ──────────────────────────────────────────────
 # TOOLS REGISTRY
 # ──────────────────────────────────────────────
@@ -1382,6 +1620,7 @@ TOOLS = [
     get_ownership_info,
     get_dividend_history,
     calculate_graham_value,
+    find_investments,
 ]
 
 tool_functions = {
@@ -1396,6 +1635,7 @@ tool_functions = {
     "get_ownership_info": get_ownership_info,
     "get_dividend_history": get_dividend_history,
     "calculate_graham_value": calculate_graham_value,
+    "find_investments": find_investments,
 }
 
 
@@ -1469,6 +1709,7 @@ You have 11 tools available. Pick the right combination for each question — yo
 9. get_ownership_info — Get major shareholders, institutional holders, and insider transactions.
 10. get_dividend_history — Get complete dividend payment history, annual totals, growth rate, and yield.
 11. calculate_graham_value — Compute Grahams intrinsic value formula (V = EPS x (8.5 + 2g) x 4.4/Y) and margin of safety.
+12. find_investments — Screen ~80 stocks (Nifty 50 + US Large Cap 30) against ALL 4 frameworks and return two tiers: Perfect Consensus (4/4 pass) and Strong Consensus (3/4 pass), top 3 each. Use when the user asks to find, discover, or recommend stocks, or wants investment ideas. Call with market='india', 'us', or 'all'.
 
 TOOL SELECTION RULES:
 - For a comprehensive stock analysis: call get_stock_data + get_historical_trends + get_financial_statements (income) + calculate_graham_value + search_book.
@@ -1478,8 +1719,26 @@ TOOL SELECTION RULES:
 - For "what do analysts think" questions: use get_analyst_recommendations.
 - For "does X pay dividends" or dividend history questions: use get_dividend_history.
 - For "who owns X" or insider activity questions: use get_ownership_info.
+- For "find me stocks" or "recommend stocks" or "where should I invest" or "best stocks" or "screen": call find_investments, THEN call search_book to explain WHY each investment tier is attractive. Follow the SCREENING OUTPUT PROTOCOL below.
 - When comparing two stocks: call the relevant tools for BOTH tickers and synthesize.
 - Always prefer calling a tool over guessing. If in doubt, call it.
+
+SCREENING OUTPUT PROTOCOL (use ONLY when find_investments is called):
+After calling find_investments, you MUST also call search_book with queries like "margin of safety value investing" and "economic moat competitive advantage" and "magic formula return on capital" to ground your explanation in the actual books. Then present results as follows:
+
+### Perfect Consensus (4/4 Frameworks Pass)
+Show the top 3 stocks in a table with key metrics. Then explain:
+- WHY this tier represents the strongest buy signal, citing specific concepts from the books (Graham margin of safety, Greenblatt capital efficiency, Dorsey moat durability)
+- What kind of returns and risk profile an investor should expect (long-term compounding, downside protection)
+- Use specific philosophy from the book passages you retrieved
+
+### Strong Consensus (3/4 Frameworks Pass)
+Show the top 3 stocks in a table with key metrics AND which framework they failed. Then explain:
+- What the failing framework means as a specific risk (e.g., failing Graham means overvalued despite quality; failing Trajectory means growth is slowing)
+- Why 3/4 is still a strong signal and what kind of investor this suits
+- Ground the explanation in book concepts
+
+If no stocks pass 4/4, say so clearly. If fewer than 3 pass in a tier, show however many exist.
 
 CRITICAL RULES:
 - For full analyses, you MUST call get_stock_data AND get_historical_trends.
@@ -1614,7 +1873,27 @@ if not st.session_state.messages:
                     label, template = PRESET_PROMPTS[idx]
                     with cols[j]:
                         if st.button(label, key=f"preset_{idx}", use_container_width=True):
-                            st.session_state.pending_prompt = template.format(company=welcome_company)
+                            # Use company name if template has placeholder, otherwise send as-is
+                            if "{company}" in template:
+                                prompt_text = template.format(company=welcome_company)
+                            else:
+                                prompt_text = template
+                            st.session_state.pending_prompt = prompt_text
+                            st.rerun()
+    else:
+        # Show screener buttons even without a company name
+        st.markdown("")
+        st.caption("Or scan the market without a specific company:")
+        screener_presets = [p for p in PRESET_PROMPTS if "{company}" not in p[1]]
+        for i in range(0, len(screener_presets), 2):
+            cols = st.columns(2)
+            for j in range(2):
+                idx = i + j
+                if idx < len(screener_presets):
+                    label, template = screener_presets[idx]
+                    with cols[j]:
+                        if st.button(label, key=f"screener_{idx}", use_container_width=True):
+                            st.session_state.pending_prompt = template
                             st.rerun()
 
 # ── Display past messages ──
