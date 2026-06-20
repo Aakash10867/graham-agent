@@ -914,6 +914,9 @@ st.markdown("""
         <circle cx="82" cy="25" r="6" fill="#00f5d4" style="filter: drop-shadow(0 0 8px #00f5d4);" />
         <polygon points="82,15 90,25 74,25" fill="#00f5d4" transform="rotate(45 82 25)" />
     </svg>
+    <h1>AlphaConsensus Terminal</h1>
+</div>
+""", unsafe_allow_html=True)
 
 st.caption("Quantitative Multi-Agent Investment Committee. Operating on Graham, Greenblatt, and Dorsey frameworks.")
 
