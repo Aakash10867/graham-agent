@@ -644,8 +644,18 @@ header {visibility: hidden;}
 }
 
 /* ═══════════════════════════════════════════════
-   KILL RED FOCUS OUTLINE
+   KILL RED FOCUS OUTLINE (UPDATED)
    ═══════════════════════════════════════════════ */
+
+/* 1. Nuke the Streamlit wrapper's default focus shadow */
+[data-testid="stChatInput"] > div:focus-within,
+[data-testid="stChatInputContainer"] > div:focus-within {
+    outline: none !important;
+    box-shadow: none !important;
+    border: none !important;
+}
+
+/* 2. Strip internal baseweb outlines */
 [data-testid="stChatInput"] [data-baseweb="textarea"] {
     outline: none !important;
     box-shadow: none !important;
@@ -655,14 +665,17 @@ header {visibility: hidden;}
     outline: none !important;
     box-shadow: none !important;
     border-color: rgba(0, 245, 212, 0.3) !important;
+    background-color: transparent !important;
 }
 
+/* 3. Re-apply our neon glow instead of the red ring */
 [data-testid="stChatInput"] [data-baseweb="base-input"]:focus-within {
     border-color: rgba(0, 245, 212, 0.6) !important;
     box-shadow: 0 0 15px rgba(0, 245, 212, 0.1) !important;
 }
 
-*:focus-visible {
+/* 4. Global fallback for any residual focus states */
+*:focus, *:active, *:focus-visible {
     outline: none !important;
 }
 
