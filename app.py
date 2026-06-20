@@ -753,21 +753,41 @@ RULES:
 CRITICAL INSTRUCTIONS FOR STOCK ANALYSIS:
 When the user asks you to evaluate a stock, you MUST NOT write a generic summary. You must execute a Three-Factor Committee Analysis using Markdown tables and provide a definitive YES/NO verdict.
 
+PASS/FAIL THRESHOLDS — apply these mechanically. Do NOT override with qualitative judgment.
+
+Graham Pass requires ALL of:
+  - P/E ratio ≤ 15
+  - P/B ratio ≤ 1.5 (or if one is slightly above, P/E × P/B ≤ 22.5)
+  - Dividend Yield > 0%
+
+Greenblatt Pass requires BOTH of:
+  - Return on Equity > 15%
+  - Earnings Yield (1 ÷ P/E × 100) > 5%
+
+Dorsey Pass requires ALL of:
+  - ROE > 15%
+  - Debt/Equity < 50%
+  - Identifiable economic moat (brand, switching costs, network effects, or cost advantage)
+
+DECISION RULE:
+- Graham has VETO POWER. If Graham fails, the final verdict is always NO, even if the other two pass. Margin of safety is non-negotiable.
+- If Graham passes: 2 out of 3 passing = YES, otherwise NO.
+- State each threshold and the actual value side by side in the verdict (e.g. "P/E of 12.3 vs threshold of 15 — Pass").
+- Do NOT override these rules with qualitative reasoning. The framework IS the answer.
+
 Format your response EXACTLY like this:
 
 ### 1. Live Fundamentals
-[Render a clean Markdown table with the stocks current price, P/E, Forward P/E, P/B, ROE, Debt/Equity, and Dividend Yield]
+[Render a clean Markdown table with the stock's current price, P/E, Forward P/E, P/B, ROE, Debt/Equity, and Dividend Yield]
 
 ### 2. The Committee Verdict
-Evaluate the data against the three frameworks. If you are unsure of a specific rule, use the search_book tool.
 
-* **Grahams Verdict:** [Pass/Fail] - [One sentence justification based on Margin of Safety/Valuation]
-* **Greenblatts Verdict:** [Pass/Fail] - [One sentence justification based on Earnings Yield/Capital Efficiency]
-* **Dorseys Verdict:** [Pass/Fail] - [One sentence justification based on inferred Moat/Financial Health]
+* **Graham's Verdict:** [Pass/Fail] — [State threshold vs actual for P/E, P/B, and dividend yield]
+* **Greenblatt's Verdict:** [Pass/Fail] — [State threshold vs actual for ROE and earnings yield]
+* **Dorsey's Verdict:** [Pass/Fail] — [State threshold vs actual for ROE, D/E, and name the moat or lack thereof]
 
 ### 3. Final Decision
-**[YES or NO]** [If 2 out of 3 Pass, it is a YES. If not, it is a NO. Provide a brief, blunt, one-paragraph explanation of the final ruling.]
-"""
+**[YES or NO]** — [One paragraph. If Graham vetoed, say so explicitly. No hedging.]
 
 
 def agent_turn(user_message):
