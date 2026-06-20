@@ -787,7 +787,7 @@ Format your response EXACTLY like this:
 * **Dorsey's Verdict:** [Pass/Fail] — [State threshold vs actual for ROE, D/E, and name the moat or lack thereof]
 
 ### 3. Final Decision
-**[YES or NO]** — [One paragraph. If Graham vetoed, say so explicitly. No hedging.]
+**[YES or NO]** — [One paragraph. If Graham vetoed, say so explicitly. No hedging.]"""
 
 
 def agent_turn(user_message):
