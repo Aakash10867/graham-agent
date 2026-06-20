@@ -1584,30 +1584,48 @@ def find_investments(market: str) -> dict:
             else:
                 tier_2.append(entry)
 
-    # Sort each tier: by P/E ascending (cheapest first) as a tiebreaker
-    def sort_key(x):
-        return x["pe"] if isinstance(x["pe"], (int, float)) else 999
+    # ──────────────────────────────────────────────
+    # CROSS-SECTIONAL RANK-SUM ENGINE
+    # ──────────────────────────────────────────────
+    def apply_rank_sum(tier_list):
+        if not tier_list:
+            return tier_list
+            
+        tier_list.sort(key=lambda x: x["pe"] if isinstance(x["pe"], (int, float)) else 9999)
+        for i, item in enumerate(tier_list): item["value_rank"] = i + 1
 
-    tier_4.sort(key=sort_key)
-    tier_3.sort(key=sort_key)
-    tier_2.sort(key=sort_key)
+        tier_list.sort(key=lambda x: x["roe_pct"] if isinstance(x["roe_pct"], (int, float)) else -9999, reverse=True)
+        for i, item in enumerate(tier_list): item["quality_rank"] = i + 1
+
+        tier_list.sort(key=lambda x: x["rev_growth_pct"] if isinstance(x["rev_growth_pct"], (int, float)) else -9999, reverse=True)
+        for i, item in enumerate(tier_list): item["momentum_rank"] = i + 1
+
+        for item in tier_list:
+            item["composite_rank_score"] = item["value_rank"] + item["quality_rank"] + item["momentum_rank"]
+
+        tier_list.sort(key=lambda x: x["composite_rank_score"])
+        return tier_list
+
+    tier_4 = apply_rank_sum(tier_4)
+    tier_3 = apply_rank_sum(tier_3)
+    tier_2 = apply_rank_sum(tier_2)
 
     return {
         "market": market,
         "stocks_screened": screened_count,
         "perfect_consensus_4_of_4": {
             "count": len(tier_4),
-            "top_3": tier_4[:3],
+            "top_10": tier_4[:10],
             "investment_style": "Rare finds where deep value, capital efficiency, quality, and positive momentum ALL align. These represent the strongest quantitative buy signals across all philosophies.",
         },
         "strong_consensus_3_of_4": {
             "count": len(tier_3),
-            "top_3": tier_3[:3],
+            "top_10": tier_3[:10],
             "investment_style": "Strong candidates that pass 3 frameworks. The single failing framework identifies the specific risk to monitor. Still well above average conviction.",
         },
         "moderate_consensus_2_of_4": {
             "count": len(tier_2),
-            "top_3": tier_2[:3],
+            "top_10": tier_2[:10],
             "investment_style": "Partial alignment — these stocks show strength in 2 areas but have 2 gaps. May suit investors with specific theses (e.g. a cheap turnaround, or a quality grower at a premium). Requires more due diligence on the failing frameworks before committing.",
         },
         "note": "Screened Nifty 50 + US Large Cap 30. Dorsey moat is qualitative and checked only on quantitative criteria (ROE, D/E) here. Data cached for 6 hours. After presenting results, use search_book to explain WHY each investment style delivers returns, citing Graham, Greenblatt, and Dorsey.",
