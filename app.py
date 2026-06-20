@@ -62,25 +62,42 @@ st.markdown("""
 }
 
 /* ═══════════════════════════════════════════════
-   FLOATING PARTICLE OVERLAY (pure CSS)
+   DEEP SPACE STARFIELD (Moving & Twinkling)
    ═══════════════════════════════════════════════ */
+@keyframes starDrift {
+    0% { 
+        background-position: 0 0; 
+        opacity: 0.4; 
+    }
+    50% { 
+        opacity: 0.9; /* Stars twinkle brighter mid-cycle */
+    }
+    100% { 
+        background-position: 0 -200px; /* Stars drift slowly upwards */
+        opacity: 0.4; 
+    }
+}
+
 .stApp::before {
     content: '';
     position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
+    top: -200px; left: 0; right: 0; bottom: 0; /* Overshoot top to allow seamless scrolling */
+    /* Generate hundreds of stars using radial gradients */
     background-image:
-        radial-gradient(2px 2px at 20% 30%, rgba(120, 200, 255, 0.3), transparent),
-        radial-gradient(2px 2px at 40% 70%, rgba(200, 120, 255, 0.2), transparent),
-        radial-gradient(1px 1px at 60% 20%, rgba(255, 200, 100, 0.3), transparent),
-        radial-gradient(2px 2px at 80% 50%, rgba(100, 255, 200, 0.2), transparent),
-        radial-gradient(1px 1px at 10% 80%, rgba(255, 150, 200, 0.25), transparent),
-        radial-gradient(1px 1px at 70% 90%, rgba(150, 200, 255, 0.2), transparent),
-        radial-gradient(2px 2px at 50% 10%, rgba(200, 255, 150, 0.15), transparent),
-        radial-gradient(1px 1px at 90% 15%, rgba(255, 100, 200, 0.2), transparent);
+        radial-gradient(1px 1px at 15% 25%, rgba(255, 255, 255, 1) 50%, transparent),
+        radial-gradient(2px 2px at 35% 65%, rgba(0, 245, 212, 0.8) 50%, transparent), /* Cyan stars */
+        radial-gradient(1.5px 1.5px at 55% 15%, rgba(255, 255, 255, 0.9) 50%, transparent),
+        radial-gradient(1px 1px at 75% 85%, rgba(200, 210, 230, 0.8) 50%, transparent),
+        radial-gradient(2px 2px at 85% 35%, rgba(255, 255, 255, 1) 50%, transparent),
+        radial-gradient(1px 1px at 25% 75%, rgba(0, 245, 212, 0.6) 50%, transparent),
+        radial-gradient(1.5px 1.5px at 95% 55%, rgba(255, 255, 255, 0.9) 50%, transparent),
+        radial-gradient(2px 2px at 5% 45%, rgba(200, 210, 230, 0.8) 50%, transparent),
+        radial-gradient(1px 1px at 45% 95%, rgba(255, 255, 255, 1) 50%, transparent);
+    background-size: 150px 150px; /* Creates a repeating grid of the stars above */
     pointer-events: none;
     z-index: 0;
-    animation: aurora 30s ease infinite reverse;
-    background-size: 300% 300%;
+    /* 12s animation makes it drift slowly, alternate makes it smoothly reverse */
+    animation: starDrift 12s ease-in-out infinite alternate;
 }
 
 /* ═══════════════════════════════════════════════
