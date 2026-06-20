@@ -79,7 +79,7 @@ st.markdown("""
     /* Oversize the layers massively so we don't see edges when moving diagonally */
     top: -100vh; left: -100vw; right: -100vw; bottom: -100vh;
     pointer-events: none;
-    z-index: 0;
+    z-index: -1;
 }
 
 /* LAYER 1: Distant Stars (Slow, moving straight up) */
@@ -488,36 +488,39 @@ header {visibility: hidden;}
 }
 
 /* ═══════════════════════════════════════════════
-   KILL RED FOCUS OUTLINE ON CHAT INPUT
+   KILL RED FOCUS OUTLINE (Streamlit uses box-shadow)
    ═══════════════════════════════════════════════ */
-[data-testid="stChatInput"]:focus-within {
-    outline: none !important;
-    border-color: rgba(0, 245, 212, 0.4) !important;
-    box-shadow: 0 0 20px rgba(0, 245, 212, 0.1) !important;
-}
-
-[data-testid="stChatInput"] textarea:focus {
+[data-testid="stChatInput"] *:focus,
+[data-testid="stChatInput"] *:focus-visible,
+[data-testid="stChatInput"] *:focus-within {
     outline: none !important;
     box-shadow: none !important;
     border-color: rgba(0, 245, 212, 0.5) !important;
 }
 
-/* Remove any red/pink outlines on all input elements */
-*:focus {
+div[data-baseweb] *:focus-visible {
     outline: none !important;
+    box-shadow: none !important;
 }
 
-/* Make the entire bottom dock fully translucent */
+/* ═══════════════════════════════════════════════
+   BOTTOM DOCK — ABOVE STARS + TRANSLUCENT
+   ═══════════════════════════════════════════════ */
 [data-testid="stBottom"] {
-    background: rgba(0, 0, 0, 0.05) !important;
-    backdrop-filter: blur(20px) !important;
-    -webkit-backdrop-filter: blur(20px) !important;
-    border: none !important;
+    z-index: 10 !important;
+    position: relative !important;
+    background: rgba(15, 12, 41, 0.4) !important;
+    backdrop-filter: blur(24px) !important;
+    -webkit-backdrop-filter: blur(24px) !important;
+    border-top: 1px solid rgba(0, 245, 212, 0.15) !important;
 }
 
-[data-testid="stBottom"] > div {
+[data-testid="stBottom"] > div,
+[data-testid="stBottom"] [data-testid="stVerticalBlock"] {
     background: transparent !important;
 }
+
+
 </style>
 """, unsafe_allow_html=True)
 
