@@ -609,10 +609,14 @@ def lookup_ticker(company_name: str) -> dict:
         company_name: The company name, e.g. "Groww", "Apple", "Tata Motors"
     """
     try:
-        results = yf.search(company_name, max_results=5)
-        if results and "quotes" in results:
+        url = f"https://query2.finance.yahoo.com/v1/finance/search?q={company_name}"
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(url, headers=headers, timeout=5)
+        data = response.json()
+
+        if "quotes" in data and len(data["quotes"]) > 0:
             matches = []
-            for q in results["quotes"]:
+            for q in data["quotes"][:5]:
                 matches.append({
                     "symbol": q.get("symbol"),
                     "name": q.get("longname") or q.get("shortname"),
@@ -624,31 +628,6 @@ def lookup_ticker(company_name: str) -> dict:
         return {"error": f"No ticker found for '{company_name}'. It may not be publicly listed."}
     except Exception as e:
         return {"error": f"Ticker lookup failed: {str(e)}"}
-
-def search_book(query: str) -> dict:
-    """Search the combined knowledge base of Graham, Greenblatt, and Dorsey.
-    Use this when you need specific philosophical frameworks, formulas, or rules 
-    from any of the three investment authors.
-    
-    Args:
-        query: What to search for, e.g. "magic formula return on capital" or "economic moat"
-    """
-    sem_results = collection.query(query_texts=[query], n_results=5)
-    
-    if not sem_results["documents"][0]:
-        return {"error": "No relevant passages found."}
-        
-    sem_docs = sem_results["documents"][0]
-    sem_meta = sem_results["metadatas"][0]
-    sem_dists = sem_results["distances"][0]
-
-    formatted = []
-    for text, meta, dist in zip(sem_docs, sem_meta, sem_dists):
-        author = meta.get("author", "Unknown")
-        # Prepend the author so the LLM explicitly knows the source
-        formatted.append(f"[Source: {author} | Relevance: {1-dist:.2f}]:\n{text}")
-
-    return {"passages": "\n\n".join(formatted)}
 
 
 def get_stock_data(company_query: str) -> dict:
