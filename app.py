@@ -1819,6 +1819,7 @@ You MUST output your response EXACTLY following the template below. Use proper M
 * **Verdict:** [YES or NO]
 * **Primary Driver:** [Strictly one sentence summarizing the 4-pillar vote count.]
 * **Context:** [Strictly one sentence highlighting the main risk or overriding factor.]
+* **Exit Strategy:** [Strictly one sentence detailing the exact quantitative or qualitative conditions that would trigger a SELL (e.g., P/E expands beyond historical norms, moat deteriorates, or growth turns negative). Only provide if Verdict is YES. If NO, put N/A.]
 </output_template>"""
 
 
