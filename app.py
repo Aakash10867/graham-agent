@@ -699,6 +699,29 @@ div[data-baseweb] [aria-invalid] {
     background: transparent !important;
     background-color: transparent !important;
 }
+
+/* ═══════════════════════════════════════════════
+   FLOATING ACTION BUTTON (MOBILE & DESKTOP)
+   ═══════════════════════════════════════════════ */
+button:has(p:contains("🔄")) {
+    position: fixed !important;
+    top: 65px !important; 
+    right: 15px !important;
+    z-index: 99999 !important;
+    width: auto !important;
+    padding: 4px 16px !important;
+    background: rgba(15, 12, 41, 0.85) !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+    border: 1px solid rgba(0, 245, 212, 0.4) !important;
+    border-radius: 50px !important;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 10px rgba(0, 245, 212, 0.1) !important;
+}
+
+button:has(p:contains("🔄")):hover {
+    background: rgba(0, 245, 212, 0.15) !important;
+    border-color: #00f5d4 !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -709,15 +732,12 @@ st.title("🏛️ AlphaConsensus Terminal")
 st.caption("Quantitative Multi-Agent Investment Committee. Operating on Graham, Greenblatt, and Dorsey frameworks.")
 
 # ──────────────────────────────────────────────
-# SIDEBAR CONTROLS
+# FLOATING RESET BUTTON
 # ──────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("### ⚙️ Engine Controls")
-    if st.button("🔄 Clear & Reset Terminal", use_container_width=True):
-        st.session_state.messages = []
-        st.session_state.chat_history = []
-        st.rerun()
-
+if st.button("🔄 Reset"):
+    st.session_state.messages = []
+    st.session_state.chat_history = []
+    st.rerun()
 
 
 # ──────────────────────────────────────────────
