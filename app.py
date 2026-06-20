@@ -1051,7 +1051,7 @@ CRITICAL RULES:
 - Do NOT copy the instruction text into your response.
 
 PASS/FAIL THRESHOLDS (Apply mechanically):
-1. Graham: PASS ONLY IF (P/E ≤ 15) AND (P/B ≤ 1.5) AND (Div Yield > 0%). 
+1. Graham: PASS IF (P/E ≤ 15) AND (P/B ≤ 1.5). 
 2. Greenblatt: PASS ONLY IF (ROE > 15%) AND (Earnings Yield > 5%).
 3. Dorsey: PASS ONLY IF (ROE > 15%) AND (Debt/Equity < 50%) AND (You explicitly identify a business moat).
 4. Trajectory: PASS ONLY IF (1Y Rev Growth > 0% OR 1Y Net Income Growth > 0%) AND (Debt Growth < 0% OR Current D/E < 50%).
@@ -1079,10 +1079,10 @@ You MUST output your response EXACTLY following the template below. Use proper M
 
 ### 2. The Committee Verdict
 
-* **Graham's Verdict:** [PASS or FAIL] — P/E is [X] (Limit 15). P/B is [Y] (Limit 1.5). Yield is [Z]% (Limit >0%).
-* **Greenblatt's Verdict:** [PASS or FAIL] — ROE is [X]% (Limit >15%). Earnings Yield is [Y]% (Limit >5%).
-* **Dorsey's Verdict:** [PASS or FAIL] — ROE is [X]% (Limit >15%). D/E is [Y]% (Limit <50%). Moat: [Briefly name moat].
-* **Trajectory Verdict:** [PASS or FAIL] — Growth: [PASS or FAIL, state metric]. Debt: [PASS or FAIL, state metric].
+* **Graham:** P/E is [X] (Limit 15). P/B is [Y] (Limit 1.5). Yield is [Z]% (Limit >0%). -> **Verdict: [PASS or FAIL]**
+* **Greenblatt:** ROE is [X]% (Limit >15%). Earnings Yield is [Y]% (Limit >5%). -> **Verdict: [PASS or FAIL]**
+* **Dorsey:** ROE is [X]% (Limit >15%). D/E is [Y]% (Limit <50%). Moat: [Briefly name moat]. -> **Verdict: [PASS or FAIL]**
+* **Trajectory:** Growth: [State Metric]. Debt: [State Metric]. -> **Verdict: [PASS or FAIL]**
 
 ### 3. Final Decision
 
