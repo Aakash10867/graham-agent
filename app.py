@@ -1,10 +1,3 @@
-import os, sys
-from unittest.mock import MagicMock
-
-# Block chromadb's opentelemetry import (protobuf conflict on Streamlit Cloud)
-os.environ["ANONYMIZED_TELEMETRY"] = "False"
-sys.modules["chromadb.telemetry.opentelemetry"] = MagicMock()
-
 """
 GRAHAM INVESTMENT AGENT — Web App
 ==================================
@@ -16,7 +9,9 @@ Deploy free:  Streamlit Cloud (see instructions below)
 import streamlit as st
 from google import genai
 from google.genai import types
-import chromadb
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
 import pymupdf
 import yfinance as yf
 import json
@@ -40,11 +35,12 @@ if st.button("🔄 New Chat"):
     st.rerun()
 
 # ──────────────────────────────────────────────
-# LOAD BOOK INTO CHROMADB (runs once, cached)
+# LOAD BOOK (runs once, cached)
+# Uses TF-IDF instead of ChromaDB — zero dependency issues
 # ──────────────────────────────────────────────
 @st.cache_resource
 def load_book():
-    doc = pymupdf.open("The Intelligent Investor.pdf")  # put the PDF in the same folder as app.py
+    doc = pymupdf.open("The Intelligent Investor.pdf")
     full_text = "\n".join(page.get_text() for page in doc)
     doc.close()
 
@@ -65,22 +61,16 @@ def load_book():
     if current and len(current) >= 100:
         chunks.append(current)
 
-    # Store in ChromaDB
-    chroma_client = chromadb.Client()
-    collection = chroma_client.create_collection("graham_book")
-    batch_size = 100
-    for i in range(0, len(chunks), batch_size):
-        batch = chunks[i:i + batch_size]
-        collection.add(
-            documents=batch,
-            ids=[f"chunk_{j}" for j in range(i, i + len(batch))]
-        )
-    return collection
+    # Build TF-IDF index over all chunks
+    vectorizer = TfidfVectorizer(stop_words="english", max_features=10000)
+    tfidf_matrix = vectorizer.fit_transform(chunks)
 
-collection = load_book()
+    return chunks, vectorizer, tfidf_matrix
+
+chunks, vectorizer, tfidf_matrix = load_book()
 
 # ──────────────────────────────────────────────
-# TOOLS (same as week8_full_agent.py)
+# TOOLS
 # ──────────────────────────────────────────────
 
 def search_book(query: str) -> dict:
@@ -91,37 +81,20 @@ def search_book(query: str) -> dict:
     Args:
         query: What to search for in the book, e.g. "margin of safety" or "defensive investor criteria"
     """
-    stop_words = {"what", "does", "the", "a", "an", "is", "are", "how", "why",
-                  "when", "where", "about", "for", "and", "or", "of", "in",
-                  "to", "on", "with", "say", "says", "said", "his", "her",
-                  "do", "did", "can", "should", "would", "it", "its", "that",
-                  "this", "by", "from", "was", "were", "be", "been", "has", "have"}
+    # TF-IDF search — handles both semantic similarity and keyword matching
+    query_vec = vectorizer.transform([query])
+    scores = cosine_similarity(query_vec, tfidf_matrix).flatten()
 
-    # Semantic search
-    sem_results = collection.query(query_texts=[query], n_results=5)
-    sem_docs = sem_results["documents"][0]
-    sem_ids = sem_results["ids"][0]
-    sem_dists = sem_results["distances"][0]
-
-    # Keyword search
-    keywords = [w for w in query.lower().split() if w not in stop_words and len(w) > 2]
-    keyword_docs = []
-    keyword_ids = []
-    for kw in keywords[:3]:
-        try:
-            kw_results = collection.get(where_document={"$contains": kw}, limit=3)
-            for doc, doc_id in zip(kw_results["documents"], kw_results["ids"]):
-                if doc_id not in keyword_ids and doc_id not in sem_ids:
-                    keyword_docs.append(doc)
-                    keyword_ids.append(doc_id)
-        except Exception:
-            pass
+    # Get top 5 matches
+    top_indices = scores.argsort()[-5:][::-1]
 
     formatted = []
-    for i, (text, dist) in enumerate(zip(sem_docs, sem_dists)):
-        formatted.append(f"[Semantic match {i+1}, relevance={1-dist:.2f}]:\n{text}")
-    for i, text in enumerate(keyword_docs[:3]):
-        formatted.append(f"[Keyword match {i+1}]:\n{text}")
+    for i, idx in enumerate(top_indices):
+        if scores[idx] > 0.01:  # skip near-zero matches
+            formatted.append(f"[Match {i+1}, relevance={scores[idx]:.3f}]:\n{chunks[idx]}")
+
+    if not formatted:
+        return {"passages": "No relevant passages found in the book."}
 
     return {"passages": "\n\n".join(formatted)}
 
@@ -205,7 +178,7 @@ tool_functions = {
 }
 
 # ──────────────────────────────────────────────
-# SYSTEM PROMPT & CONFIG (no persistent client)
+# SYSTEM PROMPT & CONFIG
 # ──────────────────────────────────────────────
 
 SYSTEM_INSTRUCTION = """You are an investment analysis assistant grounded in Benjamin Graham's principles.
@@ -228,10 +201,8 @@ TOOLS = [search_book, get_stock_data, calculator]
 def agent_turn(user_message):
     """Create a fresh client every turn — no stale connections."""
 
-    # Fresh client each time (Streamlit kills persistent ones between reruns)
     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
-    # Rebuild chat with stored history for memory across turns
     history = st.session_state.get("chat_history", [])
 
     chat = client.chats.create(
@@ -257,7 +228,6 @@ def agent_turn(user_message):
             )
         response = chat.send_message(function_responses)
 
-    # Save conversation history for next turn
     st.session_state.chat_history = chat.get_history()
 
     return response.text
@@ -266,25 +236,20 @@ def agent_turn(user_message):
 # CHAT UI
 # ──────────────────────────────────────────────
 
-# Initialize message history for display and chat history for Gemini
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# Display past messages
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# Handle new input
 if prompt := st.chat_input("Ask about a stock, Graham's principles, or anything..."):
-    # Show user message
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Get agent response
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             try:
