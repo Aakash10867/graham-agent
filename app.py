@@ -1,17 +1,12 @@
 """
-ALPHACONSENSUS TERMINAL — NEW TOOLS + PRESET PROMPTS
-=====================================================
-Integration guide:
-  1. Add the 7 new tool functions (Section A) right after your existing
-     get_stock_data / calculator / search_book functions
-  2. Update your TOOLS list and tool_functions dict (Section B)
-  3. Add the system instruction additions to your SYSTEM_INSTRUCTION (Section C)
-  4. Add the preset prompts UI (Section D) in your sidebar or above the chat
-  5. Add the pending_prompt handler (Section E) next to your st.chat_input
- 
-No new pip dependencies — everything uses yfinance which you already have.
+ALPHACONSENSUS TERMINAL
+========================
+Quantitative Multi-Agent Investment Committee.
+Operating on Graham, Greenblatt, Dorsey, and Trajectory frameworks.
+
+Streamlit web app with Gemini LLM, ChromaDB RAG, and yfinance tools.
 """
-import requests
+
 # --- SQLITE PATCH FOR STREAMLIT CLOUD ---
 __import__('pysqlite3')
 import sys
@@ -20,6 +15,7 @@ sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
 import os
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
+
 import streamlit as st
 from google import genai
 from google.genai import types
@@ -28,7 +24,13 @@ import pymupdf
 import yfinance as yf
 import json
 import re
+import requests
+import pandas as pd
+import numpy as np
 
+# ──────────────────────────────────────────────
+# FREE MODEL FALLBACK LIST
+# ──────────────────────────────────────────────
 FREE_MODELS = [
     "gemini-2.5-flash-lite",
     "gemini-2.5-flash",
@@ -39,9 +41,7 @@ FREE_MODELS = [
 ]
 
 # ──────────────────────────────────────────────
-# TICKER ALIAS MAP — Layer 1 of resolution
-# Handles common abbreviations and Indian names
-# that don't match Yahoo Finance ticker symbols.
+# TICKER ALIAS MAP
 # ──────────────────────────────────────────────
 TICKER_ALIASES = {
     # ── Nifty 50 & common Indian abbreviations ──
@@ -172,12 +172,11 @@ TICKER_ALIASES = {
 }
 
 
-def _search_yahoo(query: str) -> list[dict] | None:
-    """Search Yahoo Finance for ticker matches.
-    Layer 2: uses yf.Search() which handles Yahoo's cookie/crumb auth.
-    Falls back to raw API as a last resort.
-    """
-    # Try yfinance's built-in Search (handles auth properly)
+# ──────────────────────────────────────────────
+# TICKER RESOLUTION HELPERS
+# ──────────────────────────────────────────────
+def _search_yahoo(query):
+    """Search Yahoo Finance for ticker matches."""
     try:
         search_result = yf.Search(query)
         quotes = getattr(search_result, "quotes", None)
@@ -194,7 +193,6 @@ def _search_yahoo(query: str) -> list[dict] | None:
     except Exception:
         pass
 
-    # Last resort: raw API (may fail, but costs nothing to try)
     try:
         url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}"
         headers = {"User-Agent": "Mozilla/5.0"}
@@ -216,24 +214,18 @@ def _search_yahoo(query: str) -> list[dict] | None:
     return None
 
 
-def _resolve_ticker(query: str) -> str:
-    """Central ticker resolution: alias map → yf.Search → raw fallback.
-    Returns the best ticker string it can find.
-    """
+def _resolve_ticker(query):
+    """Central ticker resolution: alias map -> yf.Search -> raw fallback."""
     key = query.strip().upper()
 
-    # Layer 1: alias map (instant, zero API calls)
     if key in TICKER_ALIASES:
         return TICKER_ALIASES[key]
 
-    # If it already has .NS or .BO suffix, trust it
     if ".NS" in key or ".BO" in key:
         return key
 
-    # Layer 2: dynamic search via yfinance
     results = _search_yahoo(query)
     if results:
-        # Prefer Indian exchange matches
         indian = next(
             (q for q in results if q.get("exchange") in ("NSI", "BSE", "NSE")),
             None,
@@ -243,7 +235,6 @@ def _resolve_ticker(query: str) -> str:
         if results[0].get("symbol"):
             return results[0]["symbol"]
 
-    # Last resort: return the input uppercased and hope yfinance can handle it
     return key
 
 
@@ -257,7 +248,33 @@ st.set_page_config(
 )
 
 # ──────────────────────────────────────────────
-# CUSTOM CSS — the entire visual overhaul
+# PRESET PROMPTS (data only — UI rendered later)
+# ──────────────────────────────────────────────
+PRESET_PROMPTS = [
+    ("📊 Full Analysis",
+     "Give me a complete investment analysis of {company} — valuation, financials, growth, and recommendation using all three frameworks."),
+    ("📈 Revenue & Growth",
+     "Analyze {company} revenue growth, profit margins, and earnings trend over the last 3-4 years. Is the business growing?"),
+    ("💰 Graham Value",
+     "Calculate the Graham intrinsic value for {company}. Is it undervalued or overvalued? What is the margin of safety?"),
+    ("🏃 Price Performance",
+     "How has {company} stock performed over the last 1 year? Show me returns, highs/lows, and volatility."),
+    ("🎯 Analyst Consensus",
+     "What do analysts recommend for {company}? What are the price targets?"),
+    ("🏦 Debt & Balance Sheet",
+     "Analyze {company} balance sheet — total debt, debt-to-equity, cash position, and overall financial health."),
+    ("💸 Dividend History",
+     "Does {company} pay dividends? Show me the full dividend track record, growth rate, and current yield."),
+    ("📰 Recent News",
+     "What are the latest news and developments about {company}?"),
+    ("🏢 Who Owns It?",
+     "Who are the major shareholders of {company}? Show institutional holders and any recent insider transactions."),
+    ("⚖️ Compare Stocks",
+     "Compare {company} as investments — valuation, growth, profitability, and which is the better buy."),
+]
+
+# ──────────────────────────────────────────────
+# CUSTOM CSS
 # ──────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -518,7 +535,7 @@ st.markdown("""
 }
 
 /* ═══════════════════════════════════════════════
-   NEW CHAT BUTTON — PILL STYLE
+   BUTTONS — PILL STYLE
    ═══════════════════════════════════════════════ */
 .stButton > button {
     background: rgba(255, 255, 255, 0.06) !important;
@@ -534,97 +551,6 @@ st.markdown("""
     text-transform: uppercase !important;
 }
 
-
-# ── Preset prompts definition ──
-PRESET_PROMPTS = [
-    {
-        "icon": "📊",
-        "label": "Full Analysis",
-        "template": "Give me a complete investment analysis of {company} — valuation, financials, growth, and recommendation using all three frameworks.",
-    },
-    {
-        "icon": "📈",
-        "label": "Revenue & Growth",
-        "template": "Analyze {company} revenue growth, profit margins, and earnings trend over the last 3-4 years. Is the business growing?",
-    },
-    {
-        "icon": "💰",
-        "label": "Graham Intrinsic Value",
-        "template": "Calculate the Graham intrinsic value for {company}. Is it undervalued or overvalued? What is the margin of safety?",
-    },
-    {
-        "icon": "🏃",
-        "label": "Price Performance",
-        "template": "How has {company} stock performed over the last 1 year? Show me returns, highs/lows, and volatility.",
-    },
-    {
-        "icon": "🎯",
-        "label": "Analyst Consensus",
-        "template": "What do analysts recommend for {company}? What are the price targets?",
-    },
-    {
-        "icon": "🏦",
-        "label": "Debt & Balance Sheet",
-        "template": "Analyze {company} balance sheet — total debt, debt-to-equity, cash position, and overall financial health.",
-    },
-    {
-        "icon": "💸",
-        "label": "Dividend History",
-        "template": "Does {company} pay dividends? Show me the full dividend track record, growth rate, and current yield.",
-    },
-    {
-        "icon": "📰",
-        "label": "Recent News",
-        "template": "What are the latest news and developments about {company}?",
-    },
-    {
-        "icon": "🏢",
-        "label": "Who Owns It?",
-        "template": "Who are the major shareholders of {company}? Show institutional holders and any recent insider transactions.",
-    },
-    {
-        "icon": "⚖️",
-        "label": "Compare Stocks",
-        "template": "Compare {company} as investments — valuation, growth, profitability, and which is the better buy.",
-        "placeholder": "e.g., TCS vs Infosys",
-        "is_compare": True,
-    },
-]
- 
-# ── Sidebar UI code ──
-# Paste this inside your `with st.sidebar:` block
- 
-with st.sidebar:
-    st.markdown("---")
-    st.markdown("### 🚀 Quick Prompts")
- 
-    company_input = st.text_input(
-        "Company name or ticker",
-        placeholder="e.g., TCS, Reliance, Apple",
-        key="preset_company",
-    )
- 
-    if company_input:
-        # Show preset buttons in a 2-column grid
-        for i in range(0, len(PRESET_PROMPTS), 2):
-            cols = st.columns(2)
-            for j, col in enumerate(cols):
-                idx = i + j
-                if idx < len(PRESET_PROMPTS):
-                    preset = PRESET_PROMPTS[idx]
-                    with col:
-                        if st.button(
-                            f"{preset['icon']} {preset['label']}",
-                            key=f"preset_{idx}",
-                            use_container_width=True,
-                        ):
-                            prompt_text = preset["template"].format(company=company_input)
-                            st.session_state.pending_prompt = prompt_text
-                            st.rerun()
-    else:
-        st.caption("Enter a company name above to unlock quick analysis prompts.")
- 
-
 .stButton > button:hover {
     background: rgba(0, 245, 212, 0.12) !important;
     border-color: rgba(0, 245, 212, 0.4) !important;
@@ -638,7 +564,7 @@ with st.sidebar:
 }
 
 /* ═══════════════════════════════════════════════
-   SPINNER — CUSTOM COLOR
+   SPINNER
    ═══════════════════════════════════════════════ */
 .stSpinner > div {
     border-top-color: #00f5d4 !important;
@@ -649,7 +575,7 @@ with st.sidebar:
 }
 
 /* ═══════════════════════════════════════════════
-   SCROLLBAR — THIN & THEMED
+   SCROLLBAR
    ═══════════════════════════════════════════════ */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.2); }
@@ -671,7 +597,6 @@ with st.sidebar:
 footer {visibility: hidden;}
 header {visibility: hidden;}
 
-/* Content above stars */
 [data-testid="stAppViewContainer"] {
     background: transparent !important;
     position: relative !important;
@@ -686,7 +611,7 @@ header {visibility: hidden;}
     backdrop-filter: blur(20px);
     border: 1px solid rgba(0, 245, 212, 0.15);
     border-radius: 8px;
-    padding: 2.5rem 2rem;
+    padding: 2.5rem 2rem 1.5rem 2rem;
     text-align: center;
     margin: 2rem auto;
     max-width: 550px;
@@ -711,32 +636,35 @@ header {visibility: hidden;}
     margin: 0;
 }
 
-.welcome-pills {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    justify-content: center;
-    margin-top: 1.8rem;
-}
-
-.welcome-pill {
-    background: rgba(0, 245, 212, 0.05);
-    border: 1px solid rgba(0, 245, 212, 0.25);
-    border-radius: 4px;
-    padding: 8px 16px;
-    color: #00f5d4;
+/* ═══════════════════════════════════════════════
+   TEXT INPUT — TERMINAL STYLE (for company name)
+   ═══════════════════════════════════════════════ */
+.stTextInput > div > div > input {
+    background: rgba(0, 245, 212, 0.04) !important;
+    border: 1px solid rgba(0, 245, 212, 0.2) !important;
+    border-radius: 8px !important;
+    color: #00f5d4 !important;
     font-family: 'Space Grotesk', sans-serif !important;
-    font-size: 0.75rem;
-    font-weight: 600;
-    letter-spacing: 1px;
-    transition: all 0.2s ease;
+    font-size: 0.95rem !important;
+    padding: 12px 16px !important;
+    text-align: center !important;
 }
 
-.welcome-pill:hover {
-    background: rgba(0, 245, 212, 0.15);
-    border-color: rgba(0, 245, 212, 0.5);
-    box-shadow: 0 0 15px rgba(0, 245, 212, 0.2);
-    cursor: default;
+.stTextInput > div > div > input::placeholder {
+    color: rgba(200, 210, 230, 0.35) !important;
+}
+
+.stTextInput > div > div > input:focus {
+    border-color: rgba(0, 245, 212, 0.5) !important;
+    box-shadow: 0 0 20px rgba(0, 245, 212, 0.1) !important;
+    outline: none !important;
+}
+
+.stTextInput label {
+    color: rgba(200, 210, 230, 0.5) !important;
+    font-size: 0.8rem !important;
+    letter-spacing: 1px !important;
+    text-transform: uppercase !important;
 }
 
 /* ═══════════════════════════════════════════════
@@ -748,10 +676,8 @@ header {visibility: hidden;}
 }
 
 /* ═══════════════════════════════════════════════
-   KILL RED FOCUS OUTLINE (UPDATED)
+   KILL RED FOCUS OUTLINE
    ═══════════════════════════════════════════════ */
-
-/* 1. Nuke the Streamlit wrapper's default focus shadow */
 [data-testid="stChatInput"] > div:focus-within,
 [data-testid="stChatInputContainer"] > div:focus-within {
     outline: none !important;
@@ -759,7 +685,6 @@ header {visibility: hidden;}
     border: none !important;
 }
 
-/* 2. Strip internal baseweb outlines */
 [data-testid="stChatInput"] [data-baseweb="textarea"] {
     outline: none !important;
     box-shadow: none !important;
@@ -772,13 +697,11 @@ header {visibility: hidden;}
     background-color: transparent !important;
 }
 
-/* 3. Re-apply our neon glow instead of the red ring */
 [data-testid="stChatInput"] [data-baseweb="base-input"]:focus-within {
     border-color: rgba(0, 245, 212, 0.6) !important;
     box-shadow: 0 0 15px rgba(0, 245, 212, 0.1) !important;
 }
 
-/* 4. Global fallback for any residual focus states */
 *:focus, *:active, *:focus-visible {
     outline: none !important;
 }
@@ -805,11 +728,11 @@ div[data-baseweb] [aria-invalid] {
 }
 
 /* ═══════════════════════════════════════════════
-   FLOATING ACTION BUTTON (MOBILE & DESKTOP)
+   FLOATING RESET BUTTON
    ═══════════════════════════════════════════════ */
 button:has(p:contains("🔄")) {
     position: fixed !important;
-    top: 65px !important; 
+    top: 65px !important;
     right: 15px !important;
     z-index: 99999 !important;
     width: auto !important;
@@ -899,67 +822,10 @@ def load_books():
 
 collection = load_books()
 
+
 # ──────────────────────────────────────────────
-# TOOLS
+# TOOL FUNCTIONS
 # ──────────────────────────────────────────────
-import pandas as pd
-import numpy as np
-
-def get_historical_trends(company_query: str) -> dict:
-    """Get 1-year historical trends (Year-over-Year) for Revenue, Net Income, and Debt.
-    Use this when evaluating the immediate recent trajectory of a company.
-    """
-    resolved_ticker = company_query.upper()
-    # ... [Insert your existing ticker resolution block here if needed] ...
-    
-    try:
-        stock = yf.Ticker(resolved_ticker)
-        income_stmt = stock.financials
-        balance_sheet = stock.balance_sheet
-        
-        if income_stmt.empty or balance_sheet.empty:
-            return {"error": "Historical financial statements not available."}
-            
-        # yfinance returns columns newest to oldest. Grab the 2 most recent years.
-        recent_cols = sorted(income_stmt.columns, reverse=True)[:2]
-        # Sort chronologically (Oldest first, Newest second) so math flows forward
-        cols = sorted(recent_cols)
-        
-        if len(cols) < 2:
-            return {"error": "Not enough historical data to establish a 1-year trend."}
-            
-        trends = {}
-        
-        def extract_metric(df, row_name):
-            try:
-                return [df.loc[row_name, col] for col in cols if pd.notna(df.loc[row_name, col])]
-            except KeyError:
-                return []
-
-        rev_history = extract_metric(income_stmt, "Total Revenue")
-        ni_history = extract_metric(income_stmt, "Net Income")
-        debt_history = extract_metric(balance_sheet, "Total Debt")
-        
-        # 1-Year YoY Growth calculations
-        if len(rev_history) == 2:
-            rev_growth = (rev_history[1] / rev_history[0]) - 1
-            trends["1Y_Revenue_Growth"] = round(rev_growth * 100, 2)
-            
-        if len(ni_history) == 2:
-            ni_growth = (ni_history[1] / ni_history[0]) - 1
-            trends["1Y_NetIncome_Growth"] = round(ni_growth * 100, 2)
-            
-        if len(debt_history) == 2:
-            debt_variance = ((debt_history[1] - debt_history[0]) / debt_history[0]) * 100
-            trends["Debt_Growth_Trend"] = round(debt_variance, 2)
-
-        return {
-            "symbol": resolved_ticker,
-            "data_years_analyzed": len(cols),
-            "trends": trends
-        }
-    except Exception as e:
-        return {"error": f"Trend data retrieval failed for [{resolved_ticker}]: {str(e)}"}
 
 def search_book(query: str) -> dict:
     """Search the combined knowledge base of Graham, Greenblatt, and Dorsey.
@@ -988,7 +854,7 @@ def search_book(query: str) -> dict:
 
 def get_stock_data(company_query: str) -> dict:
     """Get real financial data for a stock using a ticker symbol OR company name.
-    Use this when the user asks about a specific company's financials.
+    Use this when the user asks about a specific company financials.
 
     Args:
         company_query: Stock ticker or company name, e.g. "AAPL", "RELIANCE.NS",
@@ -1042,43 +908,68 @@ def calculator(expression: str) -> dict:
         return {"error": f"Could not evaluate '{expression}': {str(e)}"}
 
 
-def lookup_ticker(company_name: str) -> dict:
-    """Find the stock ticker symbol for a company given its name.
-    Use this FIRST whenever the user mentions a company by name
-    without providing a ticker symbol.
+def get_historical_trends(company_query: str) -> dict:
+    """Get 1-year historical trends (Year-over-Year) for Revenue, Net Income, and Debt.
+    Use this when evaluating the immediate recent trajectory of a company.
 
     Args:
-        company_name: The company name, e.g. "Groww", "Apple", "Tata Motors", "RIL"
+        company_query: Stock ticker or company name. Common names like TCS, Reliance,
+                       Mahindra are resolved automatically.
     """
-    key = company_name.strip().upper()
+    resolved_ticker = _resolve_ticker(company_query)
 
-    # Check alias map first (instant, no API call)
-    if key in TICKER_ALIASES:
-        ticker = TICKER_ALIASES[key]
+    try:
+        stock = yf.Ticker(resolved_ticker)
+        income_stmt = stock.financials
+        balance_sheet = stock.balance_sheet
+
+        if income_stmt.empty or balance_sheet.empty:
+            return {"error": "Historical financial statements not available."}
+
+        recent_cols = sorted(income_stmt.columns, reverse=True)[:2]
+        cols = sorted(recent_cols)
+
+        if len(cols) < 2:
+            return {"error": "Not enough historical data to establish a 1-year trend."}
+
+        trends = {}
+
+        def extract_metric(df, row_name):
+            try:
+                return [df.loc[row_name, col] for col in cols if pd.notna(df.loc[row_name, col])]
+            except KeyError:
+                return []
+
+        rev_history = extract_metric(income_stmt, "Total Revenue")
+        ni_history = extract_metric(income_stmt, "Net Income")
+        debt_history = extract_metric(balance_sheet, "Total Debt")
+
+        if len(rev_history) == 2:
+            rev_growth = (rev_history[1] / rev_history[0]) - 1
+            trends["1Y_Revenue_Growth"] = round(rev_growth * 100, 2)
+
+        if len(ni_history) == 2:
+            ni_growth = (ni_history[1] / ni_history[0]) - 1
+            trends["1Y_NetIncome_Growth"] = round(ni_growth * 100, 2)
+
+        if len(debt_history) == 2:
+            debt_variance = ((debt_history[1] - debt_history[0]) / debt_history[0]) * 100
+            trends["Debt_Growth_Trend"] = round(debt_variance, 2)
+
         return {
-            "matches": [{
-                "symbol": ticker,
-                "name": company_name,
-                "exchange": "Alias Map",
-                "type": "EQUITY",
-            }]
+            "symbol": resolved_ticker,
+            "data_years_analyzed": len(cols),
+            "trends": trends
         }
-
-    # Fall back to dynamic search
-    results = _search_yahoo(company_name)
-    if results:
-        return {"matches": results}
-
-    return {"error": f"No ticker found for '{company_name}'. "
-            "It may not be publicly listed."}
-
+    except Exception as e:
+        return {"error": f"Trend data retrieval failed for [{resolved_ticker}]: {str(e)}"}
 
 
 def get_financial_statements(ticker: str, statement: str) -> dict:
     """Get annual financial statements for a stock.
     Use this to answer questions about revenue, profits, expenses, assets,
     liabilities, debt levels, cash flow, margins, or multi-year growth trends.
- 
+
     Args:
         ticker: Stock ticker symbol in Yahoo Finance format.
                 Indian stocks need .NS suffix (e.g. RELIANCE.NS, TCS.NS).
@@ -1092,7 +983,7 @@ def get_financial_statements(ticker: str, statement: str) -> dict:
     resolved = _resolve_ticker(ticker)
     try:
         t = yf.Ticker(resolved)
- 
+
         if statement == "income":
             df = t.financials
         elif statement == "balance":
@@ -1101,33 +992,31 @@ def get_financial_statements(ticker: str, statement: str) -> dict:
             df = t.cashflow
         else:
             return {"error": f"Invalid statement type: '{statement}'. Use 'income', 'balance', or 'cashflow'."}
- 
+
         if df is None or df.empty:
             return {"error": f"No {statement} statement data available for {resolved}"}
- 
-        # Convert DataFrame to JSON-safe nested dict
-        # Rows = line items, Columns = fiscal year dates (most recent first)
+
         data = {}
-        for col in df.columns[:4]:  # Last 4 fiscal years
+        for col in df.columns[:4]:
             year_key = str(col.date()) if hasattr(col, "date") else str(col)
             year_data = {}
             for idx in df.index:
                 val = df.at[idx, col]
-                if val is not None and val == val:  # NaN != NaN
+                if val is not None and val == val:
                     year_data[str(idx)] = round(float(val), 2)
             data[year_key] = year_data
- 
+
         return {"ticker": resolved, "statement_type": statement, "data": data}
- 
+
     except Exception as e:
         return {"error": f"Failed to get {statement} statement for {resolved}: {str(e)}"}
- 
- 
+
+
 def get_price_history(ticker: str, period: str) -> dict:
     """Get historical stock price data with performance metrics.
     Use this when the user asks how a stock has performed over time,
     what the 52-week high/low is, price returns, volatility, or moving averages.
- 
+
     Args:
         ticker: Stock ticker symbol (e.g. RELIANCE.NS, AAPL, TCS).
         period: Lookback period. Must be one of:
@@ -1137,28 +1026,26 @@ def get_price_history(ticker: str, period: str) -> dict:
     try:
         t = yf.Ticker(resolved)
         hist = t.history(period=period)
- 
+
         if hist.empty:
             return {"error": f"No price history available for {resolved} over {period}"}
- 
+
         start_price = float(hist["Close"].iloc[0])
         end_price = float(hist["Close"].iloc[-1])
         high = float(hist["High"].max())
         low = float(hist["Low"].min())
         total_return = ((end_price - start_price) / start_price) * 100
         avg_volume = float(hist["Volume"].mean())
- 
-        # Moving averages (if enough data points)
+
         sma_50 = float(hist["Close"].tail(50).mean()) if len(hist) >= 50 else None
         sma_200 = float(hist["Close"].tail(200).mean()) if len(hist) >= 200 else None
- 
-        # Annualized volatility from daily returns
+
         daily_returns = hist["Close"].pct_change().dropna()
         if len(daily_returns) > 1:
             volatility = float(daily_returns.std() * (252 ** 0.5) * 100)
         else:
             volatility = None
- 
+
         return {
             "ticker": resolved,
             "period": period,
@@ -1174,16 +1061,16 @@ def get_price_history(ticker: str, period: str) -> dict:
             "sma_200": round(sma_200, 2) if sma_200 else "Insufficient data",
             "annualized_volatility_pct": round(volatility, 2) if volatility else "N/A",
         }
- 
+
     except Exception as e:
         return {"error": f"Failed to get price history for {resolved}: {str(e)}"}
- 
- 
+
+
 def get_analyst_recommendations(ticker: str) -> dict:
     """Get analyst recommendations, consensus rating, and price targets.
     Use this when the user asks what analysts think, buy/sell ratings,
     target prices, or broker recommendations.
- 
+
     Args:
         ticker: Stock ticker symbol (e.g. RELIANCE.NS, AAPL, TCS).
     """
@@ -1192,13 +1079,11 @@ def get_analyst_recommendations(ticker: str) -> dict:
         t = yf.Ticker(resolved)
         info = t.info
         result = {"ticker": resolved}
- 
-        # Current price for context
+
         result["current_price"] = round(
             float(info.get("currentPrice") or info.get("regularMarketPrice", 0)), 2
         )
- 
-        # Analyst price targets
+
         try:
             targets = t.analyst_price_targets
             if targets is not None:
@@ -1213,8 +1098,7 @@ def get_analyst_recommendations(ticker: str) -> dict:
                 result["price_targets"] = "Not available"
         except Exception:
             result["price_targets"] = "Not available"
- 
-        # Recent individual recommendations
+
         try:
             recs = t.recommendations
             if recs is not None and not recs.empty:
@@ -1230,26 +1114,25 @@ def get_analyst_recommendations(ticker: str) -> dict:
                 result["recent_recommendations"] = "Not available"
         except Exception:
             result["recent_recommendations"] = "Not available"
- 
-        # Recommendation summary (buy/hold/sell counts)
+
         try:
             summary = t.recommendations_summary
             if summary is not None and not summary.empty:
                 result["recommendation_summary"] = summary.to_dict(orient="records")
         except Exception:
             pass
- 
+
         return result
- 
+
     except Exception as e:
         return {"error": f"Failed to get analyst data for {resolved}: {str(e)}"}
- 
- 
+
+
 def get_stock_news(ticker: str) -> dict:
     """Get recent news articles about a stock.
     Use this when the user asks about recent news, developments, events,
     announcements, or what is happening with a company.
- 
+
     Args:
         ticker: Stock ticker symbol (e.g. RELIANCE.NS, AAPL, TCS).
     """
@@ -1257,13 +1140,12 @@ def get_stock_news(ticker: str) -> dict:
     try:
         t = yf.Ticker(resolved)
         news = t.news
- 
+
         if not news:
             return {"ticker": resolved, "news": "No recent news available for this stock."}
- 
+
         articles = []
         for item in news[:8]:
-            # Handle different yfinance versions
             published = item.get("providerPublishTime", "")
             if isinstance(published, (int, float)) and published > 0:
                 from datetime import datetime
@@ -1271,25 +1153,25 @@ def get_stock_news(ticker: str) -> dict:
                     published = datetime.fromtimestamp(published).strftime("%Y-%m-%d %H:%M")
                 except Exception:
                     published = str(published)
- 
+
             articles.append({
                 "title": item.get("title", "No title"),
                 "publisher": item.get("publisher", "Unknown"),
                 "link": item.get("link", ""),
                 "published": str(published),
             })
- 
+
         return {"ticker": resolved, "news_count": len(articles), "articles": articles}
- 
+
     except Exception as e:
         return {"error": f"Failed to get news for {resolved}: {str(e)}"}
- 
- 
+
+
 def get_ownership_info(ticker: str) -> dict:
     """Get major shareholders, institutional holders, and insider transactions.
     Use this when the user asks who owns the stock, promoter holding,
     FII/DII holding, institutional investors, or insider buying/selling.
- 
+
     Args:
         ticker: Stock ticker symbol (e.g. RELIANCE.NS, AAPL, TCS).
     """
@@ -1297,8 +1179,7 @@ def get_ownership_info(ticker: str) -> dict:
     try:
         t = yf.Ticker(resolved)
         result = {"ticker": resolved}
- 
-        # Major holders breakdown (insiders vs institutions)
+
         try:
             major = t.major_holders
             if major is not None and not major.empty:
@@ -1310,8 +1191,7 @@ def get_ownership_info(ticker: str) -> dict:
                 result["holder_breakdown"] = "Not available"
         except Exception:
             result["holder_breakdown"] = "Not available"
- 
-        # Top 10 institutional holders
+
         try:
             inst = t.institutional_holders
             if inst is not None and not inst.empty:
@@ -1329,8 +1209,7 @@ def get_ownership_info(ticker: str) -> dict:
                 result["top_institutional_holders"] = "Not available"
         except Exception:
             result["top_institutional_holders"] = "Not available"
- 
-        # Recent insider transactions
+
         try:
             insider = t.insider_transactions
             if insider is not None and not insider.empty:
@@ -1349,19 +1228,19 @@ def get_ownership_info(ticker: str) -> dict:
                 result["recent_insider_transactions"] = "Not available"
         except Exception:
             result["recent_insider_transactions"] = "Not available"
- 
+
         return result
- 
+
     except Exception as e:
         return {"error": f"Failed to get ownership info for {resolved}: {str(e)}"}
- 
- 
+
+
 def get_dividend_history(ticker: str) -> dict:
     """Get the full dividend payment history and growth trend for a stock.
     Use this when the user asks about dividend consistency, payout history,
     dividend growth, whether a company has paid dividends regularly, or
     dividend yield trends.
- 
+
     Args:
         ticker: Stock ticker symbol (e.g. RELIANCE.NS, AAPL, TCS).
     """
@@ -1369,25 +1248,23 @@ def get_dividend_history(ticker: str) -> dict:
     try:
         t = yf.Ticker(resolved)
         divs = t.dividends
- 
+
         if divs is None or divs.empty:
             return {
                 "ticker": resolved,
                 "has_dividends": False,
                 "message": "No dividend history found. This company may not pay dividends.",
             }
- 
+
         total_payments = len(divs)
         years_of_data = (divs.index[-1] - divs.index[0]).days / 365.25
         latest = float(divs.iloc[-1])
- 
-        # Annual totals for last 5 years
+
         annual = divs.resample("YE").sum()
         annual_dict = {}
         for date, val in annual.tail(5).items():
             annual_dict[str(date.year)] = round(float(val), 2)
- 
-        # CAGR over available annual data (3+ years needed)
+
         cagr = None
         if len(annual) >= 3:
             first_val = float(annual.iloc[-min(5, len(annual))])
@@ -1395,15 +1272,14 @@ def get_dividend_history(ticker: str) -> dict:
             n = min(5, len(annual)) - 1
             if first_val > 0 and n > 0:
                 cagr = round(((last_val / first_val) ** (1 / n) - 1) * 100, 2)
- 
-        # Current yield from info
+
         info = t.info
         current_yield = info.get("dividendYield")
         if current_yield and current_yield == current_yield:
             current_yield = round(float(current_yield) * 100, 2)
         else:
             current_yield = "N/A"
- 
+
         return {
             "ticker": resolved,
             "has_dividends": True,
@@ -1414,22 +1290,22 @@ def get_dividend_history(ticker: str) -> dict:
             "dividend_cagr_pct": cagr if cagr else "Insufficient data for CAGR",
             "current_dividend_yield_pct": current_yield,
         }
- 
+
     except Exception as e:
         return {"error": f"Failed to get dividend history for {resolved}: {str(e)}"}
- 
- 
+
+
 def calculate_graham_value(ticker: str) -> dict:
     """Calculate Benjamin Grahams intrinsic value for a stock using his formula:
     V = EPS x (8.5 + 2g) x 4.4 / Y
- 
+
     Where EPS = trailing earnings per share, g = expected growth rate (capped at 15%),
     Y = current AAA corporate bond yield (approximated at 5%).
     Graham recommended buying only when price is at least 33% below intrinsic value.
- 
+
     Use this when the user asks for Graham valuation, intrinsic value,
     whether a stock is undervalued or overvalued, or margin of safety.
- 
+
     Args:
         ticker: Stock ticker symbol (e.g. RELIANCE.NS, AAPL, TCS).
     """
@@ -1437,38 +1313,34 @@ def calculate_graham_value(ticker: str) -> dict:
     try:
         t = yf.Ticker(resolved)
         info = t.info
- 
+
         eps = info.get("trailingEps")
         if not eps or eps <= 0:
             return {
                 "ticker": resolved,
                 "error": f"Cannot compute Graham value: trailing EPS is {eps} (negative or unavailable). "
-                         "Graham's formula only works for profitable companies.",
+                         "Grahams formula only works for profitable companies.",
             }
- 
+
         current_price = info.get("currentPrice") or info.get("regularMarketPrice")
- 
-        # Growth rate: use earningsGrowth or revenueGrowth, default 5%
+
         growth = info.get("earningsGrowth")
         if growth and growth > 0:
-            g = min(growth * 100, 15.0)  # Cap at 15% — Graham was conservative
+            g = min(growth * 100, 15.0)
         else:
             rev_growth = info.get("revenueGrowth")
             if rev_growth and rev_growth > 0:
                 g = min(rev_growth * 100, 15.0)
             else:
-                g = 5.0  # Conservative default
- 
-        # AAA corporate bond yield (approximate current rate)
+                g = 5.0
+
         Y = 5.0
- 
-        # Graham formula
         intrinsic_value = eps * (8.5 + 2 * g) * 4.4 / Y
- 
+
         if current_price and current_price > 0:
             margin = ((intrinsic_value - current_price) / current_price) * 100
             if margin > 33:
-                verdict = "UNDERVALUED — meets Graham's 33% margin of safety"
+                verdict = "UNDERVALUED — meets Grahams 33% margin of safety"
             elif margin > 0:
                 verdict = "SLIGHTLY UNDERVALUED — but does NOT meet 33% margin of safety"
             else:
@@ -1476,7 +1348,7 @@ def calculate_graham_value(ticker: str) -> dict:
         else:
             margin = None
             verdict = "Cannot determine (price data unavailable)"
- 
+
         return {
             "ticker": resolved,
             "current_price": round(current_price, 2) if current_price else "N/A",
@@ -1487,21 +1359,22 @@ def calculate_graham_value(ticker: str) -> dict:
             "margin_of_safety_pct": round(margin, 2) if margin is not None else "N/A",
             "verdict": verdict,
             "formula_breakdown": f"V = {round(eps,2)} x (8.5 + 2x{round(g,2)}) x 4.4 / {Y} = {round(intrinsic_value,2)}",
-            "note": "Growth rate capped at 15% per Graham's conservatism. AAA yield approximated at 5%. "
+            "note": "Growth rate capped at 15% per Grahams conservatism. AAA yield approximated at 5%. "
                     "Graham recommended buying ONLY with >33% margin of safety.",
         }
- 
+
     except Exception as e:
         return {"error": f"Failed to calculate Graham value for {resolved}: {str(e)}"}
 
 
-
-
-
+# ──────────────────────────────────────────────
+# TOOLS REGISTRY
+# ──────────────────────────────────────────────
 TOOLS = [
     search_book,
     get_stock_data,
     calculator,
+    get_historical_trends,
     get_financial_statements,
     get_price_history,
     get_analyst_recommendations,
@@ -1510,11 +1383,12 @@ TOOLS = [
     get_dividend_history,
     calculate_graham_value,
 ]
- 
+
 tool_functions = {
     "search_book": search_book,
     "get_stock_data": get_stock_data,
     "calculator": calculator,
+    "get_historical_trends": get_historical_trends,
     "get_financial_statements": get_financial_statements,
     "get_price_history": get_price_history,
     "get_analyst_recommendations": get_analyst_recommendations,
@@ -1525,7 +1399,10 @@ tool_functions = {
 }
 
 
-def fallback_router(prompt: str) -> str:
+# ──────────────────────────────────────────────
+# FALLBACK ROUTER
+# ──────────────────────────────────────────────
+def fallback_router(prompt):
     """Deterministic routing engine that triggers when the LLM is offline."""
     prompt_lower = prompt.lower()
     response_blocks = []
@@ -1543,7 +1420,6 @@ def fallback_router(prompt: str) -> str:
         if ticker in ["I", "A", "THE", "WHAT", "WHY", "HOW", "IS", "YES", "NO"]:
             continue
 
-        # Use the alias-aware resolver instead of raw get_stock_data
         resolved = _resolve_ticker(ticker)
         data = get_stock_data(resolved)
         if "error" not in data:
@@ -1569,10 +1445,10 @@ def fallback_router(prompt: str) -> str:
 
     return "".join(response_blocks)
 
-# ──────────────────────────────────────────────
-# SYSTEM PROMPT & AGENT
-# ──────────────────────────────────────────────
 
+# ──────────────────────────────────────────────
+# SYSTEM PROMPT
+# ──────────────────────────────────────────────
 SYSTEM_INSTRUCTION = """You are a highly structured Quantitative Investment Committee acting as a single agent.
 
 Your knowledge base consists of four frameworks:
@@ -1581,55 +1457,56 @@ Your knowledge base consists of four frameworks:
 3. Pat Dorsey (Economic Moats, Financial Health)
 4. Historical Trajectory (1-Year Momentum & Growth)
 
+You have 11 tools available. Pick the right combination for each question — you can call multiple tools in sequence.
 
-TOOLS_DESCRIPTION_FOR_SYSTEM_PROMPT =
-You have 10 tools available. Pick the right combination for each question — you can call multiple tools in sequence.
- 
 1. search_book — Search The Intelligent Investor and other loaded books for Graham/Greenblatt/Dorsey investment philosophy. Use for conceptual or philosophical investing questions.
- 
+
 2. get_stock_data — Get current snapshot: price, P/E, P/B, market cap, dividend yield, 52-week range, sector. Use for quick overviews and valuation ratios.
- 
-3. calculator — Evaluate a math expression. Use for any arithmetic the user or you need computed.
- 
-4. get_financial_statements — Get 4 years of income statement, balance sheet, OR cash flow data. Use when the user asks about revenue, profit margins, expenses, debt, assets, equity, or cash flow. Call with statement='income', 'balance', or 'cashflow'. You can call this multiple times with different statement types.
- 
-5. get_price_history — Get historical price performance over 1mo/3mo/6mo/1y/2y/5y. Returns total return, high/low, moving averages, and volatility. Use for price trend and performance questions.
- 
-6. get_analyst_recommendations — Get analyst buy/hold/sell ratings and consensus price targets. Use when the user asks what analysts or brokers think, or what the target price is.
- 
-7. get_stock_news — Get recent news headlines about a company. Use when the user asks about recent news, events, or developments.
- 
-8. get_ownership_info — Get major shareholders, institutional holders, and insider transactions. Use when the user asks who owns the stock, promoter/FII holding, or insider activity.
- 
-9. get_dividend_history — Get complete dividend payment history, annual totals, growth rate, and yield. Use for questions about dividend consistency, payout track record, or income investing suitability.
- 
-10. calculate_graham_value — Compute Grahams intrinsic value formula (V = EPS x (8.5 + 2g) x 4.4/Y) and margin of safety. Use when the user asks if a stock is undervalued, what its intrinsic value is, or for a Graham-specific valuation.
- 
+
+3. calculator — Evaluate a math expression. Use for any arithmetic.
+
+4. get_historical_trends — Get 1-year YoY trends for Revenue, Net Income, and Debt. Use for the Trajectory framework evaluation.
+
+5. get_financial_statements — Get 4 years of income statement, balance sheet, OR cash flow data. Call with statement='income', 'balance', or 'cashflow'. You can call this multiple times with different statement types.
+
+6. get_price_history — Get historical price performance over 1mo/3mo/6mo/1y/2y/5y. Returns total return, high/low, moving averages, and volatility.
+
+7. get_analyst_recommendations — Get analyst buy/hold/sell ratings and consensus price targets.
+
+8. get_stock_news — Get recent news headlines about a company.
+
+9. get_ownership_info — Get major shareholders, institutional holders, and insider transactions.
+
+10. get_dividend_history — Get complete dividend payment history, annual totals, growth rate, and yield.
+
+11. calculate_graham_value — Compute Grahams intrinsic value formula (V = EPS x (8.5 + 2g) x 4.4/Y) and margin of safety.
+
 TOOL SELECTION RULES:
-- For a comprehensive stock analysis, call get_stock_data + get_financial_statements (income) + get_financial_statements (balance) + calculate_graham_value + search_book. Add more tools if the user wants a deep dive.
-- For "is this stock a good investment" type questions, use at minimum: get_stock_data + get_financial_statements (income) + calculate_graham_value + search_book.
-- For "how has X performed" questions, use get_price_history.
-- For "any news about X" questions, use get_stock_news.
-- For "what do analysts think" questions, use get_analyst_recommendations.
-- For "does X pay dividends" or "dividend history" questions, use get_dividend_history.
-- For "who owns X" or "insider activity" questions, use get_ownership_info.
-- When comparing two stocks, call the relevant tools for BOTH tickers and synthesize.
+- For a comprehensive stock analysis: call get_stock_data + get_historical_trends + get_financial_statements (income) + calculate_graham_value + search_book.
+- For "is this stock a good investment" type questions: use at minimum get_stock_data + get_historical_trends + calculate_graham_value + search_book.
+- For "how has X performed" questions: use get_price_history.
+- For "any news about X" questions: use get_stock_news.
+- For "what do analysts think" questions: use get_analyst_recommendations.
+- For "does X pay dividends" or dividend history questions: use get_dividend_history.
+- For "who owns X" or insider activity questions: use get_ownership_info.
+- When comparing two stocks: call the relevant tools for BOTH tickers and synthesize.
 - Always prefer calling a tool over guessing. If in doubt, call it.
 
 CRITICAL RULES:
-- You MUST call `get_stock_data` AND `get_historical_trends`.
-- You MUST evaluate the thresholds silently before generating the output. 
+- For full analyses, you MUST call get_stock_data AND get_historical_trends.
+- You MUST evaluate the thresholds silently before generating the output.
 - Do NOT "think out loud" or correct yourself in the output.
 - Do NOT copy the instruction text into your response.
+- Each framework MUST be evaluated using ONLY its own criteria. Cross-contamination between frameworks is an error.
 
 PASS/FAIL THRESHOLDS (Apply mechanically):
-1. Graham: PASS IF (P/E ≤ 15) AND (P/B ≤ 1.5). 
+1. Graham: PASS IF (P/E <= 15) AND (P/B <= 1.5).
 2. Greenblatt: PASS ONLY IF (ROE > 15%) AND (Earnings Yield > 5%).
-3. Dorsey: PASS ONLY IF (ROE > 15%) AND (Debt/Equity < 50%) AND (You explicitly identify a business moat).
+3. Dorsey: PASS ONLY IF (ROE > 15%) AND (Debt/Equity < 50%) AND (You explicitly identify a business moat). The moat criterion is binary: does or does not have an identifiable moat. This is independent of Graham or Greenblatt results.
 4. Trajectory: PASS ONLY IF (1Y Rev Growth > 0% OR 1Y Net Income Growth > 0%) AND (Debt Growth < 0% OR Current D/E < 50%).
 
 DECISION RULE:
-- PASS CONDITION (YES): If ANY 2 out of the 4 frameworks PASS, the final decision is YES. 
+- PASS CONDITION (YES): If ANY 2 out of the 4 frameworks PASS, the final decision is YES.
 - VALUE EXCEPTION (YES): If Graham PASSES but the score is only 1/4, the decision is YES (Deep Value).
 
 EXECUTION PROTOCOL:
@@ -1662,6 +1539,10 @@ You MUST output your response EXACTLY following the template below. Use proper M
 * **Context:** [Strictly one sentence highlighting the main risk or overriding factor.]
 </output_template>"""
 
+
+# ──────────────────────────────────────────────
+# AGENT
+# ──────────────────────────────────────────────
 def agent_turn(user_message):
     """Try each free model until one responds."""
     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
@@ -1707,6 +1588,7 @@ def agent_turn(user_message):
 
     raise Exception(f"All models rate-limited. Last error: {last_error}")
 
+
 # ──────────────────────────────────────────────
 # CHAT UI
 # ──────────────────────────────────────────────
@@ -1716,25 +1598,37 @@ if "messages" not in st.session_state:
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# Welcome card when empty
+USER_AVATAR = "👤"
+AGENT_AVATAR = "📈"
+
+# ── Welcome card with interactive presets (shown when chat is empty) ──
 if not st.session_state.messages:
     st.markdown("""
     <div class="welcome-card">
         <h2>SYSTEM INITIALIZED</h2>
-        <p>AlphaConsensus engine online. Awaiting ticker input or framework query.</p>
-        <div class="welcome-pills">
-            <span class="welcome-pill">> ANALYZE AAPL</span>
-            <span class="welcome-pill">> QUERY MOAT RULES</span>
-            <span class="welcome-pill">> MAGIC FORMULA YIELD</span>
-            <span class="welcome-pill">> GRAHAM CRITERIA</span>
-        </div>
+        <p>AlphaConsensus engine online. Enter a company name below to begin multi-factor analysis.</p>
     </div>
     """, unsafe_allow_html=True)
 
-USER_AVATAR = "👤"
-AGENT_AVATAR = "📈"
+    welcome_company = st.text_input(
+        "TARGET COMPANY",
+        placeholder="Enter company name or ticker — e.g., TCS, Reliance, Apple, AAPL",
+        key="welcome_company",
+    )
 
-# Display past messages
+    if welcome_company:
+        for i in range(0, len(PRESET_PROMPTS), 2):
+            cols = st.columns(2)
+            for j in range(2):
+                idx = i + j
+                if idx < len(PRESET_PROMPTS):
+                    label, template = PRESET_PROMPTS[idx]
+                    with cols[j]:
+                        if st.button(label, key=f"preset_{idx}", use_container_width=True):
+                            st.session_state.pending_prompt = template.format(company=welcome_company)
+                            st.rerun()
+
+# ── Display past messages ──
 for msg in st.session_state.messages:
     avatar = USER_AVATAR if msg["role"] == "user" else AGENT_AVATAR
     with st.chat_message(msg["role"], avatar=avatar):
@@ -1742,38 +1636,28 @@ for msg in st.session_state.messages:
         if msg.get("model"):
             st.caption(f"⚡ Powered by `{msg['model']}`")
 
-# ──────────────────────────────────────────────
-# NEW: BOTTOM RESET BUTTON
-# ──────────────────────────────────────────────
+# ── Bottom reset button (shown when there are messages) ──
 if st.session_state.messages:
-    st.write("") # Small spacer
+    st.write("")
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         if st.button("🔄 Clear & Reset Terminal", key="bottom_reset", use_container_width=True):
             st.session_state.messages = []
             st.session_state.chat_history = []
             st.rerun()
-# ──────────────────────────────────────────────
 
-
-
-
-# --- Handle new input ---
+# ── Handle new input ──
 prompt = st.chat_input("Ask about a stock, investing principles, or anything...")
- 
-# Check if a preset prompt was clicked
+
 if not prompt and "pending_prompt" in st.session_state:
     prompt = st.session_state.pop("pending_prompt")
- 
+
 if prompt:
-    # 1. Save user message to state
     st.session_state.messages.append({"role": "user", "content": prompt})
- 
-    # 2. Display user message in UI
+
     with st.chat_message("user", avatar=USER_AVATAR):
         st.markdown(prompt)
- 
-    # 3. Handle agent response
+
     with st.chat_message("assistant", avatar=AGENT_AVATAR):
         with st.spinner("Executing multi-factor analysis..."):
             try:
@@ -1785,7 +1669,7 @@ if prompt:
                     "content": answer,
                     "model": model_used,
                 })
- 
+
             except Exception as e:
                 error_msg = str(e)
                 if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg or "All models rate-limited" in error_msg:
