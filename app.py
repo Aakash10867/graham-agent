@@ -1,3 +1,4 @@
+import requests
 """
 GRAHAM INVESTMENT AGENT — Web App (Visual Overhaul)
 ====================================================
@@ -584,37 +585,44 @@ def search_book(query: str) -> dict:
     return {"passages": "\n\n".join(formatted)}
 
 
-def get_stock_data(ticker: str) -> dict:
-    """Get real financial data for a stock using its ticker symbol.
-    Use this when the user asks about a specific company's financials,
-    P/E ratio, earnings, dividend yield, book value, or any fundamental data.
-
-    For Indian stocks on NSE, append .NS (e.g., TCS.NS, INFY.NS, RELIANCE.NS).
-    For US stocks, use plain ticker (e.g., AAPL for Apple, MSFT for Microsoft).
-    For Mahindra, use MAHINDRA (the function resolves it automatically).
-
+def get_stock_data(company_query: str) -> dict:
+    """Get real financial data for a stock using a ticker symbol OR company name.
+    Use this when the user asks about a specific company's financials.
+    
     Args:
-        ticker: Stock ticker symbol, e.g. AAPL, MSFT, TCS.NS, MAHINDRA, RELIANCE.NS
+        company_query: Stock ticker or company name, e.g. AAPL, TCS, "Mahindra", "Groww"
     """
-    TICKER_ALIASES = {
-        "MAHINDRA": "M&M.NS",
-        "MAHINDRA.NS": "M&M.NS",
-        "M_M.NS": "M&M.NS",
-        "MM.NS": "M&M.NS",
-        "MNM.NS": "M&M.NS",
-        "M&M": "M&M.NS",
-        "L&T": "LT.NS",
-        "L&T.NS": "LT.NS",
-        "L_T.NS": "LT.NS",
-    }
-    resolved = TICKER_ALIASES.get(ticker.upper(), ticker)
+    # 1. THE AUTO-RESOLUTION LAYER
+    # If the input doesn't already look like an explicit NSE ticker, search for it
+    resolved_ticker = company_query.upper()
+    
+    if ".NS" not in resolved_ticker and ".BO" not in resolved_ticker:
+        try:
+            url = f"https://query2.finance.yahoo.com/v1/finance/search?q={company_query}"
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            response = requests.get(url, headers=headers, timeout=5)
+            data = response.json()
+            
+            if "quotes" in data and len(data["quotes"]) > 0:
+                quotes = data["quotes"]
+                
+                # Try to prioritize Indian markets (NSE/BSE) first
+                indian_match = next((q for q in quotes if q.get("exchange") in ["NSI", "BSE"]), None)
+                if indian_match:
+                    resolved_ticker = indian_match["symbol"]
+                else:
+                    # Otherwise, grab the top global result
+                    resolved_ticker = quotes[0]["symbol"]
+        except Exception:
+            pass # If the search fails, just try running the original query
 
+    # 2. THE DATA EXTRACTION LAYER
     try:
-        stock = yf.Ticker(resolved)
+        stock = yf.Ticker(resolved_ticker)
         info = stock.info
 
         if not info or info.get("regularMarketPrice") is None:
-            return {"error": f"No data found for '{ticker}' (tried '{resolved}'). Check the ticker. Indian stocks need .NS suffix (e.g., TCS.NS, INFY.NS)."}
+            return {"error": f"No quantitative data found for '{company_query}'. Resolved to ticker [{resolved_ticker}] but it may be a private entity, mutual fund, or invalid."}
 
         return {
             "symbol": info.get("symbol"),
@@ -631,14 +639,10 @@ def get_stock_data(ticker: str) -> dict:
             "dividend_yield": info.get("dividendYield"),
             "profit_margin": info.get("profitMargins"),
             "return_on_equity": info.get("returnOnEquity"),
-            "revenue": info.get("totalRevenue"),
             "debt_to_equity": info.get("debtToEquity"),
-            "current_ratio": info.get("currentRatio"),
-            "52_week_high": info.get("fiftyTwoWeekHigh"),
-            "52_week_low": info.get("fiftyTwoWeekLow"),
         }
     except Exception as e:
-        return {"error": f"Failed to fetch data for '{ticker}': {str(e)}"}
+        return {"error": f"Data retrieval failed for [{resolved_ticker}]: {str(e)}"}
 
 
 def calculator(expression: str) -> dict:
