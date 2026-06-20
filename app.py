@@ -855,7 +855,7 @@ if prompt := st.chat_input("Ask about a stock, Graham's principles, or anything.
         st.markdown(prompt)
 
     # 3. Handle agent response
-        with st.chat_message("assistant", avatar=AGENT_AVATAR):
+    with st.chat_message("assistant", avatar=AGENT_AVATAR):  # ← same level as user block
             with st.spinner("Executing multi-factor analysis..."):
                 try:
                     # Attempt primary LLM orchestration
