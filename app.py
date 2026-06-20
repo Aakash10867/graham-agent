@@ -878,6 +878,15 @@ if prompt := st.chat_input("Ask about a stock, Graham's principles, or anything.
     with st.chat_message("user", avatar=USER_AVATAR):
         st.markdown(prompt)
 
+    # Handle new input
+if prompt := st.chat_input("Ask about a stock, Graham's principles, or anything..."):
+    # 1. Save user message to state
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    
+    # 2. Display user message in UI
+    with st.chat_message("user", avatar=USER_AVATAR):
+        st.markdown(prompt)
+
     # 3. Handle agent response
     with st.chat_message("assistant", avatar=AGENT_AVATAR):
         with st.spinner("Executing multi-factor analysis..."):
@@ -890,24 +899,17 @@ if prompt := st.chat_input("Ask about a stock, Graham's principles, or anything.
                     "content": answer,
                     "model": model_used
                 })
-                    
-                except Exception as e:
-                    error_msg = str(e)
-                    
-                    # --- AUTOMATED FALLBACK INTERCEPTION ---
-                    if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
-                        # 1. Inform the user of the system state
-                        st.warning("⚠️ **AlphaConsensus Engine Offline (API Limit).** Engaging deterministic fallback routing...")
-                        
-                        # 2. Run the fallback router directly in the UI
-                        fallback_answer = fallback_router(prompt)
-                        st.markdown(fallback_answer)
-                        
-                        # 3. Save the fallback data to the chat history so it persists
-                        st.session_state.messages.append({
-                            "role": "assistant", 
-                            "content": f"*(Deterministic Fallback Engaged)*\n\n{fallback_answer}"
-                        })
-                    else:
-                        # Generic system crash
-                        st.error(f"🛑 **System Error:** Unable to process request. \n\n`{error_msg[:100]}...`")
+
+            except Exception as e:
+                error_msg = str(e)
+
+                if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg or "All models rate-limited" in error_msg:
+                    st.warning("⚠️ **AlphaConsensus Engine Offline (API Limit).** Engaging deterministic fallback routing...")
+                    fallback_answer = fallback_router(prompt)
+                    st.markdown(fallback_answer)
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": f"*(Deterministic Fallback Engaged)*\n\n{fallback_answer}"
+                    })
+                else:
+                    st.error(f"🛑 **System Error:** Unable to process request. \n\n`{error_msg[:100]}...`")
