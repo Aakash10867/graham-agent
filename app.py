@@ -708,10 +708,17 @@ div[data-baseweb] [aria-invalid] {
 st.title("🏛️ AlphaConsensus Terminal")
 st.caption("Quantitative Multi-Agent Investment Committee. Operating on Graham, Greenblatt, and Dorsey frameworks.")
 
-if st.button("🔄 Reset Terminal"):
-    st.session_state.messages = []
-    st.session_state.chat_history = []
-    st.rerun()
+# ──────────────────────────────────────────────
+# SIDEBAR CONTROLS
+# ──────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("### ⚙️ Engine Controls")
+    if st.button("🔄 Clear & Reset Terminal", use_container_width=True):
+        st.session_state.messages = []
+        st.session_state.chat_history = []
+        st.rerun()
+
+
 
 # ──────────────────────────────────────────────
 # LOAD BOOKS INTO CHROMADB (runs once, cached)
