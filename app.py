@@ -762,7 +762,7 @@ When the user asks you to evaluate a stock, you MUST NOT write a generic summary
 Format your response EXACTLY like this:
 
 ### 1. Live Fundamentals
-[Render a clean Markdown table with the stock's current price, P/E, Forward P/E, P/B, ROE, Debt/Equity, and Dividend Yield]
+[Render a clean Markdown table with the stocks current price, P/E, Forward P/E, P/B, ROE, Debt/Equity, and Dividend Yield]
 
 ### 2. The Committee Verdict
 Evaluate the data against the three frameworks. If you are unsure of a specific rule, use the search_books tool.
