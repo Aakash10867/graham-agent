@@ -1135,9 +1135,9 @@ def get_financial_statements(ticker: str, statement: str) -> dict:
                 US stocks use plain symbol (e.g. AAPL, MSFT).
                 Common names like Reliance, TCS, Infosys are also accepted.
         statement: Which financial statement to retrieve. Must be one of:
-                   income  — Revenue, EBITDA, net income, operating expenses
-                   balance — Total assets, total debt, shareholder equity, cash
-                   cashflow — Operating cash flow, capital expenditure, free cash flow
+                   income   - Revenue, EBITDA, net income, operating expenses
+                   balance  - Total assets, total debt, shareholder equity, cash
+                   cashflow - Operating cash flow, capital expenditure, free cash flow
     """
     resolved = _resolve_ticker(ticker)
     try:
