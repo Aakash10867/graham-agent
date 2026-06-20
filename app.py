@@ -511,7 +511,6 @@ div[data-baseweb] [aria-invalid] {
    ═══════════════════════════════════════════════ */
 [data-testid="stBottom"] {
     z-index: 10 !important;
-    position: relative !important;
     background: rgba(15, 12, 41, 0.4) !important;
     backdrop-filter: blur(24px) !important;
     -webkit-backdrop-filter: blur(24px) !important;
