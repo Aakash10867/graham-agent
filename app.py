@@ -993,49 +993,50 @@ collection = load_books()
 def show_stock_chart(ticker: str) -> dict:
     """Render a 13-month closing price chart for a stock directly in the terminal UI."""
     try:
-        import datetime
         import pandas as pd
         import yfinance as yf
         import streamlit as st
+        import altair as alt
         
         resolved = _resolve_ticker(ticker)
         resolved_upper = str(resolved).strip().upper()
         
-        # 1. Fetch data using period to bypass timezone/date-range bugs
+        # 1. Fetch data
         data_feed = yf.Ticker(resolved_upper).history(period="2y")
-        
-        # Indian market suffix fallback
         if data_feed.empty and not resolved_upper.endswith((".NS", ".BSE")):
             data_feed = yf.Ticker(f"{resolved_upper}.NS").history(period="2y")
             if not data_feed.empty:
                 resolved_upper = f"{resolved_upper}.NS"
         
         if not data_feed.empty:
-            # 2. Slice to last 275 trading days (~13 months)
-            data_feed = data_feed.tail(275)
+            # 2. Slice and reset index to move Date to a column
+            df = data_feed.tail(275).reset_index()
+            
+            # Ensure price is numeric
+            df["Close"] = pd.to_numeric(df["Close"])
+            
+            # Define min/max for the Y-axis to zoom in and prevent "flat-line" visual
+            y_min = float(df["Close"].min()) * 0.98
+            y_max = float(df["Close"].max()) * 1.02
             
             st.write(f"### 📈 13-Month Trend: {resolved_upper}")
             
-            # Create the DataFrame
-            close_series = pd.DataFrame(data_feed["Close"])
-            close_series.columns = [f"{resolved_upper} Close"]
+            # 3. Force Altair to zoom into the actual price range
+            chart = alt.Chart(df).mark_line(color="#00f5d4").encode(
+                x=alt.X('Date:T', title='Date'),
+                y=alt.Y('Close:Q', title='Price', scale=alt.Scale(domain=[y_min, y_max])),
+                tooltip=['Date', 'Close']
+            ).properties(height=400)
             
-            # 3. FIX: Convert index to a format that Streamlit/Altair absolutely cannot fail to plot
-            # Convert the index to simple strings (YYYY-MM-DD) which forces a categorical X-axis
-            close_series.index = close_series.index.strftime('%Y-%m-%d')
+            st.altair_chart(chart, use_container_width=True)
             
-            # 4. Final Render: 
-            # Passing the data directly. By converting to string-dates, 
-            # we eliminate the timezone/metadata collision.
-            st.line_chart(close_series)
-            
-            return {"success": f"Chart successfully rendered to the UI for {resolved_upper}."}
+            return {"success": f"Chart successfully rendered for {resolved_upper}."}
         else:
-            return {"error": f"Failed to fetch chart data for {resolved_upper}."}
+            return {"error": "Failed to fetch chart data."}
             
     except Exception as e:
         st.error(f"🚨 Chart Error: {str(e)}")
-        return {"error": f"Chart rendering failed: {str(e)}"}
+        return {"error": str(e)}
 
 
 def search_book(query: str) -> dict:
