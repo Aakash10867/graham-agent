@@ -62,42 +62,74 @@ st.markdown("""
 }
 
 /* ═══════════════════════════════════════════════
-   DEEP SPACE STARFIELD (Moving & Twinkling)
+   DEEP SPACE PARALLAX (Independent / Chaotic Movement)
    ═══════════════════════════════════════════════ */
-@keyframes starDrift {
-    0% { 
-        background-position: 0 0; 
-        opacity: 0.4; 
-    }
-    50% { 
-        opacity: 0.9; /* Stars twinkle brighter mid-cycle */
-    }
-    100% { 
-        background-position: 0 -200px; /* Stars drift slowly upwards */
-        opacity: 0.4; 
-    }
-}
 
-.stApp::before {
+/* Base setup for all 3 star layers */
+.stApp::before,
+.stApp::after,
+[data-testid="stAppViewContainer"]::before {
     content: '';
     position: fixed;
-    top: -200px; left: 0; right: 0; bottom: 0; /* Overshoot top to allow seamless scrolling */
-    /* Generate hundreds of stars using radial gradients */
-    background-image:
-        radial-gradient(1px 1px at 15% 25%, rgba(255, 255, 255, 1) 50%, transparent),
-        radial-gradient(2px 2px at 35% 65%, rgba(0, 245, 212, 0.8) 50%, transparent), /* Cyan stars */
-        radial-gradient(1.5px 1.5px at 55% 15%, rgba(255, 255, 255, 0.9) 50%, transparent),
-        radial-gradient(1px 1px at 75% 85%, rgba(200, 210, 230, 0.8) 50%, transparent),
-        radial-gradient(2px 2px at 85% 35%, rgba(255, 255, 255, 1) 50%, transparent),
-        radial-gradient(1px 1px at 25% 75%, rgba(0, 245, 212, 0.6) 50%, transparent),
-        radial-gradient(1.5px 1.5px at 95% 55%, rgba(255, 255, 255, 0.9) 50%, transparent),
-        radial-gradient(2px 2px at 5% 45%, rgba(200, 210, 230, 0.8) 50%, transparent),
-        radial-gradient(1px 1px at 45% 95%, rgba(255, 255, 255, 1) 50%, transparent);
-    background-size: 150px 150px; /* Creates a repeating grid of the stars above */
+    /* Oversize the layers massively so we don't see edges when moving diagonally */
+    top: -100vh; left: -100vw; right: -100vw; bottom: -100vh;
     pointer-events: none;
     z-index: 0;
-    /* 12s animation makes it drift slowly, alternate makes it smoothly reverse */
-    animation: starDrift 12s ease-in-out infinite alternate;
+}
+
+/* LAYER 1: Distant Stars (Slow, moving straight up) */
+.stApp::before {
+    background-image:
+        radial-gradient(1px 1px at 10% 20%, rgba(255, 255, 255, 0.7) 50%, transparent),
+        radial-gradient(1.5px 1.5px at 80% 40%, rgba(255, 255, 255, 0.4) 50%, transparent),
+        radial-gradient(1px 1px at 30% 70%, rgba(0, 245, 212, 0.6) 50%, transparent),
+        radial-gradient(1px 1px at 60% 90%, rgba(255, 255, 255, 0.8) 50%, transparent);
+    background-size: 150px 150px;
+    animation: starLayer1 25s linear infinite;
+}
+
+/* LAYER 2: Midground Stars (Medium speed, moving up-left, erratic twinkle) */
+.stApp::after {
+    background-image:
+        radial-gradient(1.5px 1.5px at 15% 15%, rgba(0, 245, 212, 0.8) 50%, transparent),
+        radial-gradient(2px 2px at 75% 25%, rgba(255, 255, 255, 0.9) 50%, transparent),
+        radial-gradient(1.5px 1.5px at 25% 85%, rgba(0, 245, 212, 0.5) 50%, transparent),
+        radial-gradient(2px 2px at 85% 65%, rgba(255, 255, 255, 0.7) 50%, transparent);
+    background-size: 200px 200px;
+    animation: starLayer2 18s linear infinite;
+}
+
+/* LAYER 3: Foreground Stars (Fast, moving up-right, bright) */
+[data-testid="stAppViewContainer"]::before {
+    background-image:
+        radial-gradient(2px 2px at 5% 5%, rgba(255, 255, 255, 1) 50%, transparent),
+        radial-gradient(2.5px 2.5px at 95% 95%, rgba(200, 210, 230, 0.9) 50%, transparent),
+        radial-gradient(2px 2px at 45% 45%, rgba(0, 245, 212, 0.7) 50%, transparent);
+    background-size: 300px 300px;
+    animation: starLayer3 12s linear infinite;
+}
+
+/* --- INDEPENDENT ANIMATIONS --- */
+/* Note: The translate values MUST exactly match the background-size above to loop seamlessly without jumping */
+
+@keyframes starLayer1 {
+    0%   { transform: translateY(0); opacity: 0.3; }
+    50%  { opacity: 0.9; }
+    100% { transform: translateY(-150px); opacity: 0.3; } 
+}
+
+@keyframes starLayer2 {
+    0%   { transform: translate(0, 0); opacity: 0.2; }
+    25%  { opacity: 1; }
+    75%  { opacity: 0.3; }
+    100% { transform: translate(-200px, -200px); opacity: 0.2; } 
+}
+
+@keyframes starLayer3 {
+    0%   { transform: translate(0, 0); opacity: 0.5; }
+    33%  { opacity: 0.9; }
+    66%  { opacity: 0.4; }
+    100% { transform: translate(300px, -300px); opacity: 0.5; } 
 }
 
 /* ═══════════════════════════════════════════════
