@@ -1,5 +1,6 @@
 streamlit
 google-genai
-chromadb
+scikit-learn
+numpy
 pymupdf
 yfinance
