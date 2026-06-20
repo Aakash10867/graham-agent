@@ -382,84 +382,88 @@ if st.button("🔄 New Chat"):
     st.rerun()
 
 # ──────────────────────────────────────────────
-# LOAD BOOK INTO CHROMADB (runs once, cached)
+# LOAD BOOKS INTO CHROMADB (runs once, cached)
 # ──────────────────────────────────────────────
 @st.cache_resource
-def load_book():
-    doc = pymupdf.open("The Intelligent Investor.pdf")
-    full_text = "\n".join(page.get_text() for page in doc)
-    doc.close()
-
-    raw_paragraphs = full_text.split("\n\n")
-    chunks = []
-    current = ""
-    for para in raw_paragraphs:
-        para = para.strip()
-        if not para:
-            continue
-        if len(current) + len(para) < 1500:
-            current = current + "\n\n" + para if current else para
-        else:
-            if len(current) >= 100:
-                chunks.append(current)
-            current = para
-    if current and len(current) >= 100:
-        chunks.append(current)
-
+def load_books():
+    books = {
+        "Graham": "The Intelligent Investor.pdf",
+        "Greenblatt": "The Little Book That Still Beats the Market.pdf",
+        "Dorsey": "The Five Rules for Successful Stock Investing.pdf"
+    }
+    
     chroma_client = chromadb.Client()
-    collection = chroma_client.create_collection("graham_book")
-    batch_size = 100
-    for i in range(0, len(chunks), batch_size):
-        batch = chunks[i:i + batch_size]
-        collection.add(
-            documents=batch,
-            ids=[f"chunk_{j}" for j in range(i, i + len(batch))]
-        )
+    # Use get_or_create to avoid duplication errors on hot reloads
+    collection = chroma_client.get_or_create_collection("investment_committee")
+    
+    # Check if we already loaded them
+    if collection.count() > 0:
+        return collection
+
+    for author, filename in books.items():
+        if not os.path.exists(filename):
+            print(f"Warning: {filename} not found.")
+            continue
+            
+        doc = pymupdf.open(filename)
+        full_text = "\n".join(page.get_text() for page in doc)
+        doc.close()
+
+        raw_paragraphs = full_text.split("\n\n")
+        chunks = []
+        current = ""
+        for para in raw_paragraphs:
+            para = para.strip()
+            if not para:
+                continue
+            if len(current) + len(para) < 1500:
+                current = current + "\n\n" + para if current else para
+            else:
+                if len(current) >= 100:
+                    chunks.append(current)
+                current = para
+        if current and len(current) >= 100:
+            chunks.append(current)
+
+        batch_size = 100
+        for i in range(0, len(chunks), batch_size):
+            batch = chunks[i:i + batch_size]
+            collection.add(
+                documents=batch,
+                metadatas=[{"author": author} for _ in batch],
+                ids=[f"{author}_chunk_{j}" for j in range(i, i + len(batch))]
+            )
+            
     return collection
 
-collection = load_book()
+collection = load_books()
 
 # ──────────────────────────────────────────────
 # TOOLS (unchanged)
 # ──────────────────────────────────────────────
 
 def search_book(query: str) -> dict:
-    """Search The Intelligent Investor for passages relevant to a query.
-    Use this when the user asks about investing concepts, Graham's advice,
-    value investing principles, margin of safety, or anything the book covers.
-
+    """Search the combined knowledge base of Graham, Greenblatt, and Dorsey.
+    Use this when you need specific philosophical frameworks, formulas, or rules 
+    from any of the three investment authors.
+    
     Args:
-        query: What to search for in the book, e.g. "margin of safety" or "defensive investor criteria"
+        query: What to search for, e.g. "magic formula return on capital" or "economic moat"
     """
-    stop_words = {"what", "does", "the", "a", "an", "is", "are", "how", "why",
-                  "when", "where", "about", "for", "and", "or", "of", "in",
-                  "to", "on", "with", "say", "says", "said", "his", "her",
-                  "do", "did", "can", "should", "would", "it", "its", "that",
-                  "this", "by", "from", "was", "were", "be", "been", "has", "have"}
-
     sem_results = collection.query(query_texts=[query], n_results=5)
+    
+    if not sem_results["documents"][0]:
+        return {"error": "No relevant passages found."}
+        
     sem_docs = sem_results["documents"][0]
-    sem_ids = sem_results["ids"][0]
+    sem_meta = sem_results["metadatas"][0]
     sem_dists = sem_results["distances"][0]
 
-    keywords = [w for w in query.lower().split() if w not in stop_words and len(w) > 2]
-    keyword_docs = []
-    keyword_ids = []
-    for kw in keywords[:3]:
-        try:
-            kw_results = collection.get(where_document={"$contains": kw}, limit=3)
-            for doc, doc_id in zip(kw_results["documents"], kw_results["ids"]):
-                if doc_id not in keyword_ids and doc_id not in sem_ids:
-                    keyword_docs.append(doc)
-                    keyword_ids.append(doc_id)
-        except Exception:
-            pass
-
     formatted = []
-    for i, (text, dist) in enumerate(zip(sem_docs, sem_dists)):
-        formatted.append(f"[Semantic match {i+1}, relevance={1-dist:.2f}]:\n{text}")
-    for i, text in enumerate(keyword_docs[:3]):
-        formatted.append(f"[Keyword match {i+1}]:\n{text}")
+    for text, meta, dist in zip(sem_docs, sem_meta, sem_dists):
+        author = meta.get("author", "Unknown")
+        # Prepend the author so the LLM explicitly knows the source
+        formatted.append(f"[Source: {author} | Relevance: {1-dist:.2f}]:\n{text}")
 
     return {"passages": "\n\n".join(formatted)}
 
@@ -545,19 +549,36 @@ tool_functions = {
 # SYSTEM PROMPT & AGENT
 # ──────────────────────────────────────────────
 
-SYSTEM_INSTRUCTION = """You are an investment analysis assistant grounded in Benjamin Graham's principles.
+SYSTEM_INSTRUCTION = """You are a highly structured Quantitative Investment Committee acting as a single agent. 
+
+Your knowledge base consists of three frameworks:
+1. Benjamin Graham (Defensive Value, Margin of Safety, P/B, P/E)
+2. Joel Greenblatt (The Magic Formula, Return on Capital, Earnings Yield)
+3. Pat Dorsey (Economic Moats, Consistent FCF, ROE > 15%, Low Debt)
 
 You have three tools:
-1. search_book — searches The Intelligent Investor for relevant passages. USE THIS when the user asks about investing concepts, Graham's philosophy, or wants book-based advice.
-2. get_stock_data — pulls real financial data for a stock ticker. USE THIS when the user asks about specific companies or wants fundamental data.
-3. calculator — evaluates math expressions. USE THIS for any computation.
+1. search_books — queries the texts of Graham, Greenblatt, and Dorsey.
+2. get_stock_data — pulls live fundamental data.
+3. calculator — evaluates mathematical expressions.
 
-RULES:
-- When you use search_book, base your answer on the retrieved passages. If the passages don't contain the answer, say so honestly.
-- When analyzing a stock, connect the data back to Graham's principles when relevant.
-- Be concise and direct. No filler.
-- If the user asks something outside investing/finance, just answer normally without using tools.
-- Remember the full conversation — the user may refer to earlier questions."""
+CRITICAL INSTRUCTIONS FOR STOCK ANALYSIS:
+When the user asks you to evaluate a stock, you MUST NOT write a generic summary. You must execute a "Three-Factor Committee Analysis" using Markdown tables and provide a definitive YES/NO verdict.
+
+Format your response EXACTLY like this:
+
+### 1. Live Fundamentals
+[Render a clean Markdown table with the stock's current price, P/E, Forward P/E, P/B, ROE, Debt/Equity, and Dividend Yield]
+
+### 2. The Committee Verdict
+Evaluate the data against the three frameworks. If you are unsure of a specific rule, use the search_books tool.
+
+* **Graham's Verdict:** [Pass/Fail] - [One sentence justification based on Margin of Safety/Valuation]
+* **Greenblatt's Verdict:** [Pass/Fail] - [One sentence justification based on Earnings Yield/Capital Efficiency]
+* **Dorsey's Verdict:** [Pass/Fail] - [One sentence justification based on inferred Moat/Financial Health]
+
+### 3. Final Decision
+**[YES or NO]** [If 2 out of 3 Pass, it is a YES. If not, it is a NO. Provide a brief, blunt, one-paragraph explanation of the final ruling.]
+"""
 
 TOOLS = [search_book, get_stock_data, calculator]
 
