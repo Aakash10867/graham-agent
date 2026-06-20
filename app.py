@@ -553,6 +553,30 @@ collection = load_books()
 # ──────────────────────────────────────────────
 # TOOLS (unchanged)
 # ──────────────────────────────────────────────
+def lookup_ticker(company_name: str) -> dict:
+    """Find the stock ticker symbol for a company given its name.
+    Use this FIRST whenever the user mentions a company by name
+    without providing a ticker symbol.
+
+    Args:
+        company_name: The company name, e.g. "Groww", "Apple", "Tata Motors"
+    """
+    try:
+        results = yf.search(company_name, max_results=5)
+        if results and "quotes" in results:
+            matches = []
+            for q in results["quotes"]:
+                matches.append({
+                    "symbol": q.get("symbol"),
+                    "name": q.get("longname") or q.get("shortname"),
+                    "exchange": q.get("exchange"),
+                    "type": q.get("quoteType"),
+                })
+            if matches:
+                return {"matches": matches}
+        return {"error": f"No ticker found for '{company_name}'. It may not be publicly listed."}
+    except Exception as e:
+        return {"error": f"Ticker lookup failed: {str(e)}"}
 
 def search_book(query: str) -> dict:
     """Search the combined knowledge base of Graham, Greenblatt, and Dorsey.
@@ -658,7 +682,10 @@ tool_functions = {
     "search_book": search_book,
     "get_stock_data": get_stock_data,
     "calculator": calculator,
+    "lookup_ticker": lookup_ticker,
 }
+
+TOOLS = [search_book, get_stock_data, calculator, lookup_ticker]
 
 import re
 
@@ -713,17 +740,21 @@ def fallback_router(prompt: str) -> str:
 # SYSTEM PROMPT & AGENT
 # ──────────────────────────────────────────────
 
-SYSTEM_INSTRUCTION = """You are a highly structured Quantitative Investment Committee acting as a single agent. 
+SYSTEM_INSTRUCTION = """You are an investment analysis assistant grounded in Benjamin Graham's principles.
 
-Your knowledge base consists of three frameworks:
-1. Benjamin Graham (Defensive Value, Margin of Safety, P/B, P/E)
-2. Joel Greenblatt (The Magic Formula, Return on Capital, Earnings Yield)
-3. Pat Dorsey (Economic Moats, Consistent FCF, ROE > 15%, Low Debt)
+You have four tools:
+1. search_book — searches The Intelligent Investor for relevant passages. USE THIS when the user asks about investing concepts, Graham's philosophy, or wants book-based advice.
+2. get_stock_data — pulls real financial data for a stock ticker. USE THIS when the user asks about specific companies or wants fundamental data.
+3. calculator — evaluates math expressions. USE THIS for any computation.
+4. lookup_ticker — finds the stock ticker symbol for a company name. USE THIS when the user mentions a company by name without a ticker.
 
-You have three tools:
-1. search_book — queries the texts of Graham, Greenblatt, and Dorsey.
-2. get_stock_data — pulls live fundamental data.
-3. calculator — evaluates mathematical expressions.
+RULES:
+- When the user mentions a company by NAME (not a ticker symbol), call lookup_ticker FIRST to find the correct ticker, then call get_stock_data with that ticker.
+- When you use search_book, base your answer on the retrieved passages. If the passages don't contain the answer, say so honestly.
+- When analyzing a stock, connect the data back to Graham's principles when relevant.
+- Be concise and direct. No filler.
+- If the user asks something outside investing/finance, just answer normally without using tools.
+- Remember the full conversation — the user may refer to earlier questions."""
 
 CRITICAL INSTRUCTIONS FOR STOCK ANALYSIS:
 When the user asks you to evaluate a stock, you MUST NOT write a generic summary. You must execute a "Three-Factor Committee Analysis" using Markdown tables and provide a definitive YES/NO verdict.
