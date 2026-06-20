@@ -882,24 +882,60 @@ button[kind="primary"]:hover {
 # HEADER
 # ──────────────────────────────────────────────
 st.markdown("""
-<div style="display: flex; align-items: center; gap: 16px; margin-bottom: -15px;">
-    <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0 0 10px rgba(0, 245, 212, 0.4));">
+<style>
+/* ═══════════════════════════════════════════════
+   LOGO ANIMATIONS
+   ═══════════════════════════════════════════════ */
+@keyframes pulseGlow {
+    0% { filter: drop-shadow(0 0 10px rgba(0, 245, 212, 0.4)); transform: scale(1); }
+    50% { filter: drop-shadow(0 0 25px rgba(0, 245, 212, 0.8)) drop-shadow(0 0 15px rgba(155, 93, 229, 0.6)); transform: scale(1.02); }
+    100% { filter: drop-shadow(0 0 10px rgba(0, 245, 212, 0.4)); transform: scale(1); }
+}
+@keyframes floatNode {
+    0% { transform: translateY(0px); }
+    50% { transform: translateY(-3px); }
+    100% { transform: translateY(0px); }
+}
+.quant-logo {
+    animation: pulseGlow 4s ease-in-out infinite;
+}
+.trend-node {
+    animation: floatNode 3s ease-in-out infinite;
+}
+</style>
+
+<div style="display: flex; align-items: center; gap: 24px; margin-bottom: -10px;">
+    <svg class="quant-logo" width="68" height="68" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
         <defs>
-            <linearGradient id="icon-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#00f5d4" />
-                <stop offset="100%" stop-color="#9b5de5" />
+            <linearGradient id="hexGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#00f5d4" stop-opacity="0.9"/>
+                <stop offset="50%" stop-color="#7bf1a8" stop-opacity="0.4"/>
+                <stop offset="100%" stop-color="#9b5de5" stop-opacity="0.9"/>
+            </linearGradient>
+            <linearGradient id="lineGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="#f15bb5" />
+                <stop offset="50%" stop-color="#fee440" />
+                <stop offset="100%" stop-color="#00f5d4" />
             </linearGradient>
         </defs>
-        <path stroke="url(#icon-gradient)" d="M3 21h18" />
-        <path stroke="url(#icon-gradient)" d="M3 18h18" />
-        <path stroke="url(#icon-gradient)" d="M5 18v-9" />
-        <path stroke="url(#icon-gradient)" d="M9 18v-9" />
-        <path stroke="url(#icon-gradient)" d="M15 18v-9" />
-        <path stroke="url(#icon-gradient)" d="M19 18v-9" />
-        <path stroke="url(#icon-gradient)" d="M2 9l10-5 10 5" />
-        <polyline stroke="#f15bb5" points="7 14 10 11 13 13 17 8" />
-        <polyline stroke="#f15bb5" points="17 11 17 8 14 8" />
+        
+        <polygon points="50,5 88,27 88,73 50,95 12,73 12,27" stroke="url(#hexGrad)" stroke-width="3" fill="rgba(20, 25, 45, 0.6)" />
+        <polygon points="50,12 82,31 82,69 50,88 18,69 18,31" stroke="rgba(0, 245, 212, 0.15)" stroke-width="1" fill="none" />
+        
+        <circle cx="50" cy="50" r="28" stroke="rgba(255,255,255,0.08)" stroke-width="1" stroke-dasharray="4 4" />
+        <line x1="50" y1="15" x2="50" y2="85" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+        <line x1="15" y1="50" x2="85" y2="50" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+        
+        <path d="M 22 68 L 42 45 L 58 55 L 82 25" stroke="url(#lineGrad)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" />
+        
+        <circle cx="22" cy="68" r="4" fill="#f15bb5" class="trend-node" style="animation-delay: 0s;" />
+        <circle cx="42" cy="45" r="4" fill="#fee440" class="trend-node" style="animation-delay: 0.5s;" />
+        <circle cx="58" cy="55" r="4" fill="#7bf1a8" class="trend-node" style="animation-delay: 1s;" />
+        
+        <circle cx="82" cy="25" r="6" fill="#00f5d4" style="filter: drop-shadow(0 0 8px #00f5d4);" />
+        <polygon points="82,15 90,25 74,25" fill="#00f5d4" transform="rotate(45 82 25)" />
     </svg>
+    
     <h1>AlphaConsensus Terminal</h1>
 </div>
 """, unsafe_allow_html=True)
