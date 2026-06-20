@@ -291,14 +291,10 @@ footer {visibility: hidden;}
 header {visibility: hidden;}
 
 /* ═══════════════════════════════════════════════
-   BOTTOM GRADIENT FADE ON INPUT DOCK
+   TRANSPARENT INPUT DOCK
    ═══════════════════════════════════════════════ */
 [data-testid="stBottom"] {
-    background: linear-gradient(
-        to top,
-        rgba(15, 12, 41, 0.95) 60%,
-        transparent 100%
-    ) !important;
+    background: transparent !important;
     padding-top: 2rem !important;
 }
 
