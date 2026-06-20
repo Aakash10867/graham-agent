@@ -851,17 +851,14 @@ div[data-baseweb] [aria-invalid] {
 }
 
 /* ═══════════════════════════════════════════════
-   FLOATING RESET BUTTON (BULLETPROOF METHOD)
+   FLOATING RESET BUTTON (PRIMARY TAG METHOD)
    ═══════════════════════════════════════════════ */
-div.stButton:first-of-type {
+button[kind="primary"] {
     position: fixed !important;
     bottom: 28px !important;
     left: 20px !important;
     z-index: 99999 !important;
     width: auto !important;
-}
-
-div.stButton:first-of-type button {
     padding: 4px 16px !important;
     background: rgba(15, 12, 41, 0.85) !important;
     backdrop-filter: blur(12px) !important;
@@ -869,11 +866,13 @@ div.stButton:first-of-type button {
     border: 1px solid rgba(0, 245, 212, 0.4) !important;
     border-radius: 50px !important;
     box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 10px rgba(0, 245, 212, 0.1) !important;
+    color: rgba(200, 210, 230, 0.8) !important;
 }
 
-div.stButton:first-of-type button:hover {
+button[kind="primary"]:hover {
     background: rgba(0, 245, 212, 0.15) !important;
     border-color: #00f5d4 !important;
+    color: #00f5d4 !important;
 }
 
 </style>
@@ -888,7 +887,7 @@ st.caption("Quantitative Multi-Agent Investment Committee. Operating on Graham, 
 # ──────────────────────────────────────────────
 # FLOATING RESET BUTTON
 # ──────────────────────────────────────────────
-if st.button("🔄 Reset"):
+if st.button("🔄 Reset", type="primary"):
     st.session_state.messages = []
     st.session_state.chat_history = []
     st.rerun()
