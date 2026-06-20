@@ -1021,20 +1021,24 @@ def show_stock_chart(ticker: str) -> dict:
                 
         if not data_feed.empty:
             st.write(f"### 📈 13-Month Trend: {resolved_upper}")
+            
+            # Isolate data
             close_series = pd.DataFrame(data_feed["Close"])
             close_series.columns = [f"{resolved_upper} Close"]
             
-            # ── THE BUG FIX: Strip timezone from the dates ──
-            if str(close_series.index.tz) != "None":
-                close_series.index = close_series.index.tz_localize(None)
-            # ────────────────────────────────────────────────
+            # BULLETPROOF THE DATES: Strip timezones and convert to pure Python date objects
+            close_series.index = pd.to_datetime(close_series.index).tz_localize(None).date
             
-            st.line_chart(close_series, color="#00f5d4")
+            # Render chart WITHOUT the color argument (widest compatibility)
+            st.line_chart(close_series)
+            
             return {"success": f"Chart successfully rendered to the UI for {resolved_upper}."}
         else:
             return {"error": f"Failed to fetch chart data for {resolved_upper}. The ticker might be invalid."}
             
     except Exception as e:
+        # If it STILL fails, force Streamlit to print the exact error on the screen
+        st.error(f"🚨 Streamlit Chart Error: {str(e)}")
         return {"error": f"Chart rendering failed: {str(e)}"}
 
 
