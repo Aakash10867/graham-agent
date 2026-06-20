@@ -896,6 +896,19 @@ button[kind="primary"]:hover {
     border-color: #00f5d4 !important;
     color: #00f5d4 !important;
 }
+/* ═══════════════════════════════════════════════
+   FIX: MOBILE TABLE OVERFLOW
+   ═══════════════════════════════════════════════ */
+[data-testid="stDataFrame"] {
+    overflow-x: auto;
+    width: 100%;
+}
+
+/* Allow horizontal scrolling on mobile for tables */
+div[data-testid="stTable"] {
+    overflow-x: auto;
+    display: block;
+}
 
 </style>
 """, unsafe_allow_html=True)
