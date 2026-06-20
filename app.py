@@ -3,7 +3,8 @@ GRAHAM INVESTMENT AGENT — Web App (Visual Overhaul)
 ====================================================
 Same logic as original. Radically different skin.
 """
-
+import os
+os.environ["ANONYMIZED_TELEMETRY"] = "False"
 import streamlit as st
 from google import genai
 from google.genai import types
