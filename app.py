@@ -881,7 +881,28 @@ button[kind="primary"]:hover {
 # ──────────────────────────────────────────────
 # HEADER
 # ──────────────────────────────────────────────
-st.title("🏛️ AlphaConsensus Terminal")
+st.markdown("""
+<div style="display: flex; align-items: center; gap: 16px; margin-bottom: -15px;">
+    <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0 0 10px rgba(0, 245, 212, 0.4));">
+        <defs>
+            <linearGradient id="icon-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#00f5d4" />
+                <stop offset="100%" stop-color="#9b5de5" />
+            </linearGradient>
+        </defs>
+        <path stroke="url(#icon-gradient)" d="M3 21h18" />
+        <path stroke="url(#icon-gradient)" d="M3 18h18" />
+        <path stroke="url(#icon-gradient)" d="M5 18v-9" />
+        <path stroke="url(#icon-gradient)" d="M9 18v-9" />
+        <path stroke="url(#icon-gradient)" d="M15 18v-9" />
+        <path stroke="url(#icon-gradient)" d="M19 18v-9" />
+        <path stroke="url(#icon-gradient)" d="M2 9l10-5 10 5" />
+        <polyline stroke="#f15bb5" points="7 14 10 11 13 13 17 8" />
+        <polyline stroke="#f15bb5" points="17 11 17 8 14 8" />
+    </svg>
+    <h1>AlphaConsensus Terminal</h1>
+</div>
+""", unsafe_allow_html=True)
 st.caption("Quantitative Multi-Agent Investment Committee. Operating on Graham, Greenblatt, and Dorsey frameworks.")
 
 # ──────────────────────────────────────────────
