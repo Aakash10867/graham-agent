@@ -206,7 +206,7 @@ def agent_turn(user_message):
     history = st.session_state.get("chat_history", [])
 
     chat = client.chats.create(
-        model="gemini-2.0-flash-lite",
+        model="gemini-3.5-flash",
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_INSTRUCTION,
             tools=TOOLS,
