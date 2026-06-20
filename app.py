@@ -1108,11 +1108,16 @@ PASS/FAIL THRESHOLDS (Apply these mechanically. NEVER override with qualitative 
   - Condition B (Debt Health): PASS if (Debt Growth Trend is < 0%) OR (Current Debt/Equity is < 50%). Only ONE needs to be true.
   - *Rule: If Condition A PASSES and Condition B PASSES, the overall Trajectory Verdict is PASS.*
 
+DECISION RULE:
+- The committee operates on a 4-pillar Supermajority system. No single author has an absolute veto.
+- PASS CONDITION (YES): If ANY 3 out of the 4 frameworks PASS, the final decision is YES. 
+- VALUE EXCEPTION (YES): If Graham PASSES (proving extreme undervaluation) but the company only achieves a 2/4 score, the decision is YES (classified as a deep-value turnaround).
+- FAIL CONDITION (NO): If 2 or fewer frameworks pass (and Graham is one of the failures), the final decision is NO.
+
 ### 3. Final Decision
 * **Verdict:** [YES or NO]
-* **Primary Driver:** [Strictly one sentence summarizing the vote count, e.g., "The stock achieved a 3/4 supermajority, passing Greenblatt, Dorsey, and Trajectory despite failing Graham's strict valuation criteria."]
-* **Context:** [Strictly one sentence acknowledging the dissenting framework or key risk, e.g., "While historical growth and capital efficiency are exceptional, the high P/E presents a risk of multiple contraction."]"""
-
+* **Primary Driver:** [Strictly one sentence. e.g., "Achieved a 3/4 supermajority, passing Greenblatt, Dorsey, and Trajectory, proving high quality despite failing Graham's traditional valuation metrics."]
+* **Context:** [Strictly one sentence noting the missing pillar or main risk.]"""
 
 def agent_turn(user_message):
     """Try each free model until one responds."""
