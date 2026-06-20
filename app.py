@@ -758,6 +758,67 @@ collection = load_books()
 # ──────────────────────────────────────────────
 # TOOLS
 # ──────────────────────────────────────────────
+import pandas as pd
+import numpy as np
+
+def get_historical_trends(company_query: str) -> dict:
+    """Get 3-year historical trends for Revenue, Net Income, and Debt to assess consistency.
+    Use this when evaluating the stability and historical moat of a company.
+    """
+    # (Use your existing ticker resolution logic here first to get resolved_ticker)
+    resolved_ticker = company_query.upper()
+    # ... [Insert your existing ticker resolution from get_stock_data here] ...
+    
+    try:
+        stock = yf.Ticker(resolved_ticker)
+        
+        # Fetch annual financials (returns a DataFrame with dates as columns)
+        income_stmt = stock.financials
+        balance_sheet = stock.balance_sheet
+        
+        if income_stmt.empty or balance_sheet.empty:
+            return {"error": "Historical financial statements not available."}
+            
+        # Get the available columns (years) and sort chronologically
+        cols = sorted(income_stmt.columns)[:3] # Grab up to the last 3 available years
+        
+        if len(cols) < 2:
+            return {"error": "Not enough historical data to establish a trend."}
+            
+        trends = {}
+        
+        # Helper to safely extract metrics
+        def extract_metric(df, row_name):
+            try:
+                # Get values chronologically (oldest to newest)
+                return [df.loc[row_name, col] for col in cols if pd.notna(df.loc[row_name, col])]
+            except KeyError:
+                return []
+
+        rev_history = extract_metric(income_stmt, "Total Revenue")
+        ni_history = extract_metric(income_stmt, "Net Income")
+        debt_history = extract_metric(balance_sheet, "Total Debt")
+        
+        if len(rev_history) >= 2:
+            rev_cagr = ((rev_history[-1] / rev_history[0]) ** (1 / (len(rev_history) - 1))) - 1
+            trends["3Y_Revenue_CAGR"] = round(rev_cagr * 100, 2)
+            
+        if len(ni_history) >= 2:
+            ni_cagr = ((ni_history[-1] / ni_history[0]) ** (1 / (len(ni_history) - 1))) - 1
+            trends["3Y_NetIncome_CAGR"] = round(ni_cagr * 100, 2)
+            
+        # Debt variance: Is debt increasing or decreasing?
+        if len(debt_history) >= 2:
+            debt_variance = ((debt_history[-1] - debt_history[0]) / debt_history[0]) * 100
+            trends["Debt_Growth_Trend"] = round(debt_variance, 2)
+
+        return {
+            "symbol": resolved_ticker,
+            "data_years_analyzed": len(cols),
+            "trends": trends
+        }
+    except Exception as e:
+        return {"error": f"Trend data retrieval failed for [{resolved_ticker}]: {str(e)}"}
 
 def search_book(query: str) -> dict:
     """Search the combined knowledge base of Graham, Greenblatt, and Dorsey.
@@ -875,11 +936,12 @@ def lookup_ticker(company_name: str) -> dict:
 tool_functions = {
     "search_book": search_book,
     "get_stock_data": get_stock_data,
+    "get_historical_trends": get_historical_trends,
     "calculator": calculator,
     "lookup_ticker": lookup_ticker,
 }
 
-TOOLS = [search_book, get_stock_data, calculator, lookup_ticker]
+TOOLS = [search_book, get_stock_data, get_historical_trends, calculator, lookup_ticker]
 
 
 def fallback_router(prompt: str) -> str:
@@ -932,19 +994,21 @@ def fallback_router(prompt: str) -> str:
 
 SYSTEM_INSTRUCTION = """You are a highly structured Quantitative Investment Committee acting as a single agent.
 
-Your knowledge base consists of three frameworks:
+Your knowledge base consists of four frameworks:
 1. Benjamin Graham (Defensive Value, Margin of Safety)
 2. Joel Greenblatt (The Magic Formula, Capital Efficiency)
 3. Pat Dorsey (Economic Moats, Financial Health)
+4. Historical Trajectory (3-Year Consistency & Growth)
 
-You have four tools:
+You have FIVE tools:
 1. search_book — queries the texts of Graham, Greenblatt, and Dorsey.
 2. get_stock_data — pulls live fundamental data for a ticker symbol or company name.
-3. calculator — evaluates mathematical expressions.
-4. lookup_ticker — finds the stock ticker symbol for a company name. Use this FIRST when a user mentions a company by name without a ticker.
+3. get_historical_trends — pulls 3-year CAGR for Revenue, Net Income, and Debt growth.
+4. calculator — evaluates mathematical expressions.
+5. lookup_ticker — finds the stock ticker symbol for a company name. Use this FIRST when a user mentions a company by name without a ticker.
 
 CRITICAL RULES FOR STOCK ANALYSIS:
-Do not write generic summaries. You must execute a quantitative Three-Factor Committee Analysis. To prevent analytical contamination, you MUST evaluate each framework in strict isolation. Do not let the failure of one framework influence the evaluation of another. 
+Do not write generic summaries. You must execute a quantitative Four-Factor Committee Analysis. To prevent analytical contamination, you MUST evaluate each framework in strict isolation. Do not let the failure of one framework influence the evaluation of another. You MUST call both `get_stock_data` AND `get_historical_trends`.
 
 PASS/FAIL THRESHOLDS (Apply these mechanically. NEVER override with qualitative judgment):
 
@@ -962,32 +1026,39 @@ PASS/FAIL THRESHOLDS (Apply these mechanically. NEVER override with qualitative 
   - Debt/Equity < 50%
   - Identifiable economic moat (brand, switching costs, network effects, or cost advantage)
 
+4. Historical Trajectory Criteria (Requires ALL to pass):
+  - 3-Year Revenue CAGR OR 3-Year Net Income CAGR must be Positive (> 0%)
+  - Debt Growth Trend must be Negative (decreasing debt) OR manageable (Debt/Equity remains below 50% despite debt growth).
+
 DECISION RULE:
-- Graham has VETO POWER. If Graham fails, the final decision is automatically NO, regardless of the other frameworks. Margin of safety is non-negotiable.
-- If Graham passes: If 2 out of 3 total frameworks pass, the decision is YES. Otherwise, NO.
+- The committee requires a Supermajority. If ANY 3 out of the 4 frameworks PASS, the final decision is YES. 
+- If 2 or fewer frameworks pass, the final decision is NO.
 
 EXECUTION PROTOCOL & OUTPUT FORMAT:
-You must output your response EXACTLY in the following format. Ensure the Markdown table is properly formatted with line breaks.
+You must output your response EXACTLY in the following format.
 
-### 1. Live Fundamentals
-| Metric | Value |
-| :--- | :--- |
-| **Price** | [Value] |
-| **P/E** | [Value] |
-| **Forward P/E** | [Value] |
-| **P/B** | [Value] |
-| **ROE** | [Value]% |
-| **Debt/Equity** | [Value]% |
-| **Dividend Yield** | [Value]% |
+### 1. Live Fundamentals & Trajectory
+| Metric | Value | 3-Year Trend |
+| :--- | :--- | :--- |
+| **Price** | [Value] | N/A |
+| **P/E** | [Value] | N/A |
+| **Forward P/E** | [Value] | N/A |
+| **P/B** | [Value] | N/A |
+| **ROE** | [Value]% | [State Net Income CAGR] |
+| **Debt/Equity** | [Value]% | [State Debt Growth Trend] |
+| **Dividend Yield** | [Value]% | N/A |
 
 ### 2. The Committee Verdict
 
 * **Graham's Verdict:** [Pass/Fail] — [State actual P/E vs threshold]. [State actual P/B vs threshold]. [State actual Div Yield vs threshold].
 * **Greenblatt's Verdict:** [Pass/Fail] — [State actual ROE vs threshold]. [State actual Earnings Yield vs threshold].
 * **Dorsey's Verdict:** [Pass/Fail] — [State actual ROE vs threshold]. [State actual D/E vs threshold]. [Name the specific moat type or state lack thereof].
+* **Trajectory Verdict:** [Pass/Fail] — [State Revenue/Net Income CAGR vs threshold]. [State Debt Trend vs threshold].
 
 ### 3. Final Decision
-**[YES or NO]** — [One concise paragraph. Synthesize the results. If Graham vetoed, explicitly state that the lack of a margin of safety overrides any quality or moat metrics.]"""
+* **Verdict:** [YES or NO]
+* **Primary Driver:** [Strictly one sentence summarizing the vote count, e.g., "The stock achieved a 3/4 supermajority, passing Greenblatt, Dorsey, and Trajectory despite failing Graham's strict valuation criteria."]
+* **Context:** [Strictly one sentence acknowledging the dissenting framework or key risk, e.g., "While historical growth and capital efficiency are exceptional, the high P/E presents a risk of multiple contraction."]"""
 
 
 def agent_turn(user_message):
