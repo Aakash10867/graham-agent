@@ -1023,6 +1023,12 @@ def show_stock_chart(ticker: str) -> dict:
             st.write(f"### 📈 13-Month Trend: {resolved_upper}")
             close_series = pd.DataFrame(data_feed["Close"])
             close_series.columns = [f"{resolved_upper} Close"]
+            
+            # ── THE BUG FIX: Strip timezone from the dates ──
+            if str(close_series.index.tz) != "None":
+                close_series.index = close_series.index.tz_localize(None)
+            # ────────────────────────────────────────────────
+            
             st.line_chart(close_series, color="#00f5d4")
             return {"success": f"Chart successfully rendered to the UI for {resolved_upper}."}
         else:
