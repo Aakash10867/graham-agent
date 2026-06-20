@@ -1890,68 +1890,48 @@ def agent_turn(user_message):
                 function_responses = []
                 for fc in response.function_calls:
                     if fc.name in tool_functions:
-                        # 1. Execute the tool to get raw data for the agent
+                        # Your original tool execution
                         result = tool_functions[fc.name](**fc.args)
                         
-                        # ── BULLETPROOF VISUAL INTERCEPTOR ──
-                        # Broad catch to capture price, history, or stock tracking tool variants
-                        if "price" in fc.name.lower() or "history" in fc.name.lower() or "stock" in fc.name.lower():
+                        # ── INDEPENDENT VISUAL ADD-ON (Does not alter the loop) ──
+                        if fc.name == "get_price_history" and isinstance(result, dict) and "error" not in result:
                             try:
                                 import datetime
                                 import pandas as pd
                                 import yfinance as yf
                                 
-                                # Safely extract ticker string from any common argument key
-                                raw_ticker = fc.args.get("ticker", fc.args.get("symbol", fc.args.get("stock", "")))
+                                # Isolate the ticker symbol cleanly
+                                ticker_input = fc.args.get("ticker", "")
+                                resolved = _resolve_ticker(ticker_input) if '_resolve_ticker' in globals() else ticker_input
+                                resolved_upper = str(resolved).strip().upper()
                                 
-                                # Clean the string: strip whitespace, make uppercase
-                                ticker_clean = str(raw_ticker).strip().upper()
+                                # Set up a strict 13-month lookback
+                                end_dt = datetime.date.today()
+                                start_dt = end_dt - datetime.timedelta(days=395)
                                 
-                                # Fallback resolution logic if internal _resolve_ticker fails
-                                try:
-                                    resolved = _resolve_ticker(raw_ticker)
-                                except Exception:
-                                    resolved = ticker_clean
+                                # Attempt fetch
+                                data_feed = yf.Ticker(resolved_upper).history(start=start_dt, end=end_dt)
                                 
-                                if not resolved:
-                                    resolved = "AAPL" # Absolute fallback asset to guarantee layout renders
+                                # Try automatic suffix correction for Indian markets if empty
+                                if data_feed.empty and not resolved_upper.endswith((".NS", ".BSE")):
+                                    data_feed = yf.Ticker(f"{resolved_upper}.NS").history(start=start_dt, end=end_dt)
+                                    if not data_feed.empty:
+                                        resolved_upper = f"{resolved_upper}.NS"
                                 
-                                # Calculate explicit 13-month window (~395 days)
-                                end_date = datetime.date.today()
-                                start_date = end_date - datetime.timedelta(days=395)
-                                
-                                # Fetch historical data
-                                hist = yf.Ticker(resolved).history(start=start_date, end=end_date)
-                                
-                                # If direct lookup failed, try adding common exchange suffix for Indian markets
-                                if hist.empty and not resolved.endswith(".NS") and not resolved.endswith(".BSE"):
-                                    hist = yf.Ticker(f"{resolved}.NS").history(start=start_date, end=end_date)
-                                    if not hist.empty:
-                                        resolved = f"{resolved}.NS"
-                                
-                                st.write(f"### 📈 13-Month Closing Trend: {resolved}")
-                                
-                                if not hist.empty:
-                                    # Isolate Closing price for technical trajectory
-                                    chart_data = pd.DataFrame(hist["Close"])
-                                    chart_data.columns = [f"{resolved} Close Price"]
-                                    st.line_chart(chart_data, color="#00f5d4")
-                                else:
-                                    # GUARANTEE A GRAPH APPEARS: Create a baseline mock trend if network/ticker fails
-                                    st.caption(f"⚠️ Live market feed unavailable for '{resolved}'. Rendering structural fallback track:")
-                                    fallback_dates = [end_date - datetime.timedelta(days=x) for x in range(30, -1, -1)]
-                                    fallback_prices = [100 + (x * 0.5) for x in range(31)]
-                                    mock_df = pd.DataFrame(fallback_prices, index=fallback_dates, columns=[f"{resolved} (Connection Fallback)"])
-                                    st.line_chart(mock_df, color="#ff4b4b")
-                                    
-                            except Exception as chart_err:
-                                # Render inline error so your app structure never drops the element quietly
-                                st.error(f"❌ Visual Interceptor Error: {str(chart_err)}")
-                        # ────────────────────────────────────
+                                # Render the single chart only if data is verified
+                                if not data_feed.empty:
+                                    st.write(f"### 📈 13-Month Closing Trend: {resolved_upper}")
+                                    close_series = pd.DataFrame(data_feed["Close"])
+                                    close_series.columns = [f"{resolved_upper} Close"]
+                                    st.line_chart(close_series, color="#00f5d4")
+                            except Exception:
+                                pass # Completely independent failure barrier
+                        # ──────────────────────────────────────────────────────────
                         
                     else:
                         result = {"error": f"Unknown tool: {fc.name}"}
-                        
+                    
+                    # Your original response serialization
                     function_responses.append(
                         types.Part.from_function_response(name=fc.name, response=result)
                     )
