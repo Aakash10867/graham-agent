@@ -1517,6 +1517,7 @@ def find_investments(market: str) -> dict:
 
     tier_4 = []  # Perfect consensus: 4/4
     tier_3 = []  # Strong consensus: 3/4
+    tier_2 = []  # Moderate consensus: 2/4
 
     screened_count = 0
 
@@ -1556,7 +1557,7 @@ def find_investments(market: str) -> dict:
         }
         score = sum(results_map.values())
 
-        if score >= 3:
+        if score >= 2:
             entry = {
                 "ticker": ticker,
                 "name": m.get("name", ticker),
@@ -1578,8 +1579,10 @@ def find_investments(market: str) -> dict:
 
             if score == 4:
                 tier_4.append(entry)
-            else:
+            elif score == 3:
                 tier_3.append(entry)
+            else:
+                tier_2.append(entry)
 
     # Sort each tier: by P/E ascending (cheapest first) as a tiebreaker
     def sort_key(x):
@@ -1587,6 +1590,7 @@ def find_investments(market: str) -> dict:
 
     tier_4.sort(key=sort_key)
     tier_3.sort(key=sort_key)
+    tier_2.sort(key=sort_key)
 
     return {
         "market": market,
@@ -1600,6 +1604,11 @@ def find_investments(market: str) -> dict:
             "count": len(tier_3),
             "top_3": tier_3[:3],
             "investment_style": "Strong candidates that pass 3 frameworks. The single failing framework identifies the specific risk to monitor. Still well above average conviction.",
+        },
+        "moderate_consensus_2_of_4": {
+            "count": len(tier_2),
+            "top_3": tier_2[:3],
+            "investment_style": "Partial alignment — these stocks show strength in 2 areas but have 2 gaps. May suit investors with specific theses (e.g. a cheap turnaround, or a quality grower at a premium). Requires more due diligence on the failing frameworks before committing.",
         },
         "note": "Screened Nifty 50 + US Large Cap 30. Dorsey moat is qualitative and checked only on quantitative criteria (ROE, D/E) here. Data cached for 6 hours. After presenting results, use search_book to explain WHY each investment style delivers returns, citing Graham, Greenblatt, and Dorsey.",
     }
@@ -1738,6 +1747,13 @@ Show the top 3 stocks in a table with key metrics AND which framework they faile
 - Why 3/4 is still a strong signal and what kind of investor this suits
 - Ground the explanation in book concepts
 
+### Moderate Consensus (2/4 Frameworks Pass)
+Show the top 3 stocks in a table with key metrics AND which 2 frameworks they passed and which 2 they failed. Then explain:
+- What combination of passes and fails this represents (e.g., passes Graham + Trajectory = cheap and growing but low quality; passes Greenblatt + Dorsey = high quality but expensive)
+- Why this tier requires more caution and due diligence, but can still be attractive for investors with a specific thesis
+- What additional research or conditions would strengthen conviction
+- Ground the explanation in book concepts
+
 If no stocks pass 4/4, say so clearly. If fewer than 3 pass in a tier, show however many exist.
 
 CRITICAL RULES:
@@ -1753,9 +1769,9 @@ PASS/FAIL THRESHOLDS (Apply mechanically):
 3. Dorsey: PASS ONLY IF (ROE > 15%) AND (Debt/Equity < 50%) AND (You explicitly identify a business moat). The moat criterion is binary: does or does not have an identifiable moat. This is independent of Graham or Greenblatt results.
 4. Trajectory: PASS ONLY IF (1Y Rev Growth > 0% OR 1Y Net Income Growth > 0%) AND (Debt Growth < 0% OR Current D/E < 50%).
 
-Verdict RULE:
-- PASS CONDITION (YES): If ANY 2 out of the 4 frameworks PASS, the Verdict decision is YES.
-- VALUE EXCEPTION (YES): If Graham PASSES but the score is only 1/4, the Verdict decision is YES (Deep Value).
+VERDICT RULE:
+- PASS CONDITION (YES): If ANY 2 out of the 4 frameworks PASS, the VERDICT decision is YES.
+- VALUE EXCEPTION (YES): If Graham PASSES but the score is only 1/4, the VERDICT decision is YES (Deep Value).
 
 EXECUTION PROTOCOL:
 You MUST output your response EXACTLY following the template below. Use proper Markdown tables with pipes (|) and a blank line before the table. Do not add any text outside of this template.
