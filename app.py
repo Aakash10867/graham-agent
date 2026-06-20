@@ -133,55 +133,50 @@ st.markdown("""
 }
 
 /* ═══════════════════════════════════════════════
-   3D GLASSMORPHISM (Aggressive Streamlit Override)
+   3D GLASSMORPHISM CHAT INPUT BAR (The bottom typing area)
    ═══════════════════════════════════════════════ */
 
-/* 1. Strip the solid background from Streamlit's inner wrappers */
-[data-testid="stChatMessage"] > div,
-[data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] {
+/* 1. Target the main outer container of the chat input */
+[data-testid="stChatInput"] {
+    background: rgba(20, 25, 45, 0.3) !important; /* Highly transparent frosted base */
+    backdrop-filter: blur(24px) saturate(200%) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(200%) !important;
+    
+    /* 3D Edges */
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    border-top: 1px solid rgba(0, 245, 212, 0.4) !important; /* Bright neon light catch on top */
+    border-radius: 24px !important; /* Sleek pill shape */
+    
+    /* Deep floating shadow */
+    box-shadow: 
+        0 20px 40px rgba(0, 0, 0, 0.6), 
+        inset 0 1px 3px rgba(255, 255, 255, 0.15) !important;
+        
+    transition: all 0.3s ease !important;
+}
+
+/* 2. Strip the solid background from Streamlit's inner wrapper */
+[data-testid="stChatInput"] > div {
     background: transparent !important;
     background-color: transparent !important;
 }
 
-/* 2. Apply the heavy 3D glass directly to the main parent */
-[data-testid="stChatMessage"] {
-    background: rgba(20, 25, 45, 0.4) !important; /* Frosted dark slate */
-    background-color: rgba(20, 25, 45, 0.4) !important;
-    
-    /* The Blur Engine */
-    backdrop-filter: blur(16px) saturate(180%) !important;
-    -webkit-backdrop-filter: blur(16px) saturate(180%) !important;
-    
-    /* 3D Lighting Borders */
-    border: 1px solid rgba(255, 255, 255, 0.08) !important;
-    border-top: 1px solid rgba(0, 245, 212, 0.25) !important; /* Top edge neon light catch */
-    border-left: 1px solid rgba(255, 255, 255, 0.12) !important;
-    
-    /* Structure & Depth */
-    border-radius: 18px !important;
-    box-shadow: 
-        0 10px 40px rgba(0, 0, 0, 0.5), /* Deep drop shadow */
-        inset 0 1px 3px rgba(255, 255, 255, 0.1) !important; /* Inner glass reflection */
-        
-    margin-bottom: 20px !important;
-    padding: 1.5rem !important;
-    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
+/* 3. Target the actual text area where you type */
+[data-testid="stChatInput"] textarea {
+    background: transparent !important;
+    background-color: transparent !important;
+    color: #00f5d4 !important; /* Makes the text you type neon cyan */
+    font-family: 'Space Grotesk', sans-serif !important;
+    font-size: 1rem !important;
 }
 
-/* 3. Hover Physics */
-[data-testid="stChatMessage"]:hover {
-    transform: translateY(-3px) scale(1.01) !important;
+/* 4. Hover effect to make it feel responsive */
+[data-testid="stChatInput"]:hover, [data-testid="stChatInput"]:focus-within {
+    border-top: 1px solid rgba(0, 245, 212, 0.8) !important;
     box-shadow: 
-        0 15px 45px rgba(0, 245, 212, 0.15), 
+        0 20px 50px rgba(0, 245, 212, 0.15), 
         inset 0 1px 3px rgba(255, 255, 255, 0.2) !important;
-    border-top: 1px solid rgba(0, 245, 212, 0.5) !important;
-}
-
-/* 4. Text contrast fix */
-[data-testid="stChatMessage"] p, 
-[data-testid="stChatMessage"] li {
-    color: rgba(240, 245, 255, 0.95) !important;
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8) !important; /* Forces text to pop off the glass */
+    transform: translateY(-2px);
 }
 
 /* ═══════════════════════════════════════════════
