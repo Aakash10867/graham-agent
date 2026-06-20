@@ -1021,15 +1021,14 @@ def show_stock_chart(ticker: str) -> dict:
             
             # 3. CRITICAL: Remove Timezone and force date-only index
             # This is what fixes the "data exists but graph is empty" issue
+            # Ensure index is timezone-naive
             if close_series.index.tz is not None:
                 close_series.index = close_series.index.tz_localize(None)
-            
-            # Ensure it is purely date objects, not complex timestamps
+            # Ensure it is a date object
             close_series.index = pd.to_datetime(close_series.index).date
             
-            # 4. Render chart without complex parameters
+            # Now render
             st.line_chart(close_series)
-            
             return {"success": f"Chart successfully rendered to the UI for {resolved_upper}."}
         else:
             return {"error": f"Failed to fetch chart data for {resolved_upper}."}
@@ -1936,26 +1935,19 @@ def sanitize_history(history):
                 clean.append(msg)
     return clean
 
-# Then, in your agent_turn function, use it:
-history = sanitize_history(st.session_state.get("chat_history", []))
-chat = client.chats.create(
-    model=model_name,
-    config=types.GenerateContentConfig(
-        system_instruction=SYSTEM_INSTRUCTION,
-        tools=TOOLS,
-    ),
-    history=history, # Pass the sanitized history here
-)
 
 def agent_turn(user_message):
-    """Try each free model until one responds."""
+    # 1. Initialize client inside the function to avoid scope errors
     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-    history = st.session_state.get("chat_history", [])
+    
+    # 2. Clean the history from session state
+    raw_history = st.session_state.get("chat_history", [])
+    history = sanitize_history(raw_history)
 
     last_error = None
-
     for model_name in FREE_MODELS:
         try:
+            # 3. Create chat here
             chat = client.chats.create(
                 model=model_name,
                 config=types.GenerateContentConfig(
@@ -1967,6 +1959,7 @@ def agent_turn(user_message):
 
             response = chat.send_message(user_message)
 
+            # Tool execution loop
             while response.function_calls:
                 function_responses = []
                 for fc in response.function_calls:
@@ -1979,16 +1972,15 @@ def agent_turn(user_message):
                     )
                 response = chat.send_message(function_responses)
 
+            # 4. Sync updated history back to session state
             st.session_state.chat_history = chat.get_history()
             return response.text, model_name
 
         except Exception as e:
-            error_msg = str(e)
-            last_error = error_msg
-            if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+            last_error = str(e)
+            if "429" in last_error or "RESOURCE_EXHAUSTED" in last_error:
                 continue
-            else:
-                raise
+            raise e
 
     raise Exception(f"All models rate-limited. Last error: {last_error}")
 
