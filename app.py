@@ -133,6 +133,54 @@ st.markdown("""
 }
 
 /* ═══════════════════════════════════════════════
+   3D GLASSMORPHISM CHAT SPACE
+   ═══════════════════════════════════════════════ */
+
+/* Target the core chat container wrapper */
+[data-testid="stChatMessage"] {
+    background: rgba(15, 23, 42, 0.45) !important; /* Semi-transparent deep space slate tint */
+    backdrop-filter: blur(12px) saturate(180%) !important; /* Refracts the moving stars underneath */
+    -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
+    
+    /* 3D Glass Borders & Highlights */
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.15) !important; /* Simulates top light reflection */
+    border-left: 1px solid rgba(255, 255, 255, 0.12) !important;
+    
+    /* Rounded corners & Deep Shadow Depth */
+    border-radius: 16px !important;
+    box-shadow: 
+        0 4px 30px rgba(0, 0, 0, 0.4), 
+        inset 0 1px 2px rgba(255, 255, 255, 0.1) !important; /* Subtle inner glowing edge */
+        
+    margin-bottom: 16px !important;
+    padding: 1.2rem !important;
+    transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+}
+
+/* Subtle 3D lift effect when hovering over messages */
+[data-testid="stChatMessage"]:hover {
+    transform: translateY(-2px);
+    box-shadow: 
+        0 8px 35px rgba(0, 245, 212, 0.15), /* Adds a faint cyan glow on hover */
+        inset 0 1px 2px rgba(255, 255, 255, 0.2) !important;
+    border: 1px solid rgba(0, 245, 212, 0.3) !important;
+}
+
+/* Clean up avatar spacing for the glass cards */
+[data-testid="stChatMessageAvatar"] {
+    background-color: rgba(255, 255, 255, 0.05) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: 50% !important;
+}
+
+/* Make sure the text color pops clearly against the frosted glass */
+[data-testid="stChatMessage"] p {
+    color: #e2e8f0 !important;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+/* ═══════════════════════════════════════════════
    TYPOGRAPHY & TITLE — NEON GLOW
    ═══════════════════════════════════════════════ */
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@300;400;500&display=swap');
