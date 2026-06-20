@@ -704,14 +704,7 @@ def calculator(expression: str) -> dict:
         return {"error": f"Could not evaluate '{expression}': {str(e)}"}
 
 
-tool_functions = {
-    "search_book": search_book,
-    "get_stock_data": get_stock_data,
-    "calculator": calculator,
-    "lookup_ticker": lookup_ticker,
-}
-
-TOOLS = [search_book, get_stock_data, calculator, lookup_ticker]
+TOOLS = [search_book, get_stock_data, calculator]
 
 import re
 
@@ -768,14 +761,13 @@ def fallback_router(prompt: str) -> str:
 
 SYSTEM_INSTRUCTION = """You are an investment analysis assistant grounded in Benjamin Graham's principles.
 
-You have four tools:
+You have three tools:
 1. search_book — searches The Intelligent Investor for relevant passages. USE THIS when the user asks about investing concepts, Graham's philosophy, or wants book-based advice.
 2. get_stock_data — pulls real financial data for a stock ticker. USE THIS when the user asks about specific companies or wants fundamental data.
 3. calculator — evaluates math expressions. USE THIS for any computation.
 4. lookup_ticker — finds the stock ticker symbol for a company name. USE THIS when the user mentions a company by name without a ticker.
 
 RULES:
-- When the user mentions a company by NAME (not a ticker symbol), call lookup_ticker FIRST to find the correct ticker, then call get_stock_data with that ticker.
 - When you use search_book, base your answer on the retrieved passages. If the passages don't contain the answer, say so honestly.
 - When analyzing a stock, connect the data back to Graham's principles when relevant.
 - Be concise and direct. No filler.
