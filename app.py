@@ -79,7 +79,7 @@ st.markdown("""
     /* Oversize the layers massively so we don't see edges when moving diagonally */
     top: -100vh; left: -100vw; right: -100vw; bottom: -100vh;
     pointer-events: none;
-    z-index: -1;
+    z-index: 0;
 }
 
 /* LAYER 1: Distant Stars (Slow, moving straight up) */
@@ -397,20 +397,11 @@ st.markdown("""
 footer {visibility: hidden;}
 header {visibility: hidden;}
 
-/* ═══════════════════════════════════════════════
-   AGGRESSIVE TRANSPARENT INPUT DOCK
-   ═══════════════════════════════════════════════ */
-[data-testid="stBottom"], 
-[data-testid="stBottom"] > div,
-[data-testid="stBottom"] [data-testid="stVerticalBlock"] {
-    background: transparent !important;
-    background-color: transparent !important;
-    background-image: none !important;
-}
-
 /* Ensure the main view wrapper isn't creating a solid block behind it */
 [data-testid="stAppViewContainer"] {
     background: transparent !important;
+    position: relative !important;
+    z-index: 1 !important;
 }
 
 /* ═══════════════════════════════════════════════
@@ -488,18 +479,30 @@ header {visibility: hidden;}
 }
 
 /* ═══════════════════════════════════════════════
-   KILL RED FOCUS OUTLINE (Streamlit uses box-shadow)
+   KILL RED FOCUS OUTLINE
    ═══════════════════════════════════════════════ */
-[data-testid="stChatInput"] *:focus,
-[data-testid="stChatInput"] *:focus-visible,
-[data-testid="stChatInput"] *:focus-within {
+[data-testid="stChatInput"] [data-baseweb="textarea"] {
     outline: none !important;
     box-shadow: none !important;
-    border-color: rgba(0, 245, 212, 0.5) !important;
 }
 
-div[data-baseweb] *:focus-visible {
+[data-testid="stChatInput"] [data-baseweb="base-input"] {
     outline: none !important;
+    box-shadow: none !important;
+    border-color: rgba(0, 245, 212, 0.3) !important;
+}
+
+[data-testid="stChatInput"] [data-baseweb="base-input"]:focus-within {
+    border-color: rgba(0, 245, 212, 0.6) !important;
+    box-shadow: 0 0 15px rgba(0, 245, 212, 0.1) !important;
+}
+
+/* Nuclear option — kill ALL red outlines app-wide */
+*:focus-visible {
+    outline: none !important;
+}
+
+div[data-baseweb] [aria-invalid] {
     box-shadow: none !important;
 }
 
