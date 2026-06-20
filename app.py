@@ -486,6 +486,38 @@ header {visibility: hidden;}
         padding: 1.5rem 1.2rem;
     }
 }
+
+/* ═══════════════════════════════════════════════
+   KILL RED FOCUS OUTLINE ON CHAT INPUT
+   ═══════════════════════════════════════════════ */
+[data-testid="stChatInput"]:focus-within {
+    outline: none !important;
+    border-color: rgba(0, 245, 212, 0.4) !important;
+    box-shadow: 0 0 20px rgba(0, 245, 212, 0.1) !important;
+}
+
+[data-testid="stChatInput"] textarea:focus {
+    outline: none !important;
+    box-shadow: none !important;
+    border-color: rgba(0, 245, 212, 0.5) !important;
+}
+
+/* Remove any red/pink outlines on all input elements */
+*:focus {
+    outline: none !important;
+}
+
+/* Make the entire bottom dock fully translucent */
+[data-testid="stBottom"] {
+    background: rgba(0, 0, 0, 0.05) !important;
+    backdrop-filter: blur(20px) !important;
+    -webkit-backdrop-filter: blur(20px) !important;
+    border: none !important;
+}
+
+[data-testid="stBottom"] > div {
+    background: transparent !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
