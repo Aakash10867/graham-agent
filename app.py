@@ -1016,19 +1016,19 @@ def show_stock_chart(ticker: str) -> dict:
             
             st.write(f"### 📈 13-Month Trend: {resolved_upper}")
             
+            # Create the DataFrame
             close_series = pd.DataFrame(data_feed["Close"])
             close_series.columns = [f"{resolved_upper} Close"]
             
-            # 3. CRITICAL: Remove Timezone and force date-only index
-            # This is what fixes the "data exists but graph is empty" issue
-            # Ensure index is timezone-naive
-            if close_series.index.tz is not None:
-                close_series.index = close_series.index.tz_localize(None)
-            # Ensure it is a date object
-            close_series.index = pd.to_datetime(close_series.index).date
+            # 3. FIX: Convert index to a format that Streamlit/Altair absolutely cannot fail to plot
+            # Convert the index to simple strings (YYYY-MM-DD) which forces a categorical X-axis
+            close_series.index = close_series.index.strftime('%Y-%m-%d')
             
-            # Now render
+            # 4. Final Render: 
+            # Passing the data directly. By converting to string-dates, 
+            # we eliminate the timezone/metadata collision.
             st.line_chart(close_series)
+            
             return {"success": f"Chart successfully rendered to the UI for {resolved_upper}."}
         else:
             return {"error": f"Failed to fetch chart data for {resolved_upper}."}
