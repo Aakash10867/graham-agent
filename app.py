@@ -460,7 +460,8 @@ def load_books():
         "Dorsey": "The Five Rules for Successful Stock Investing.pdf"
     }
     
-    chroma_client = chromadb.EphemeralClient()
+    # Write to a local folder in the container instead of RAM
+    chroma_client = chromadb.PersistentClient(path="./chroma_db")
     # Use get_or_create to avoid duplication errors on hot reloads
     collection = chroma_client.get_or_create_collection("investment_committee")
     
