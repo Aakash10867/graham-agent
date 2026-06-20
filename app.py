@@ -993,6 +993,7 @@ collection = load_books()
 def show_stock_chart(ticker: str) -> dict:
     """Render a 13-month closing price chart for a stock directly in the terminal UI."""
     try:
+        import datetime
         import pandas as pd
         import yfinance as yf
         import streamlit as st
@@ -1000,17 +1001,17 @@ def show_stock_chart(ticker: str) -> dict:
         resolved = _resolve_ticker(ticker)
         resolved_upper = str(resolved).strip().upper()
         
-        # ── BUG FIX 1: Bypass yfinance timezone bug by using 'period' ──
+        # 1. Fetch data using period to bypass timezone/date-range bugs
         data_feed = yf.Ticker(resolved_upper).history(period="2y")
         
-        # Indian market fallback
+        # Indian market suffix fallback
         if data_feed.empty and not resolved_upper.endswith((".NS", ".BSE")):
             data_feed = yf.Ticker(f"{resolved_upper}.NS").history(period="2y")
             if not data_feed.empty:
                 resolved_upper = f"{resolved_upper}.NS"
-                
+        
         if not data_feed.empty:
-            # Slice to exactly the last 275 trading days (~13 months)
+            # 2. Slice to last 275 trading days (~13 months)
             data_feed = data_feed.tail(275)
             
             st.write(f"### 📈 13-Month Trend: {resolved_upper}")
@@ -1018,24 +1019,23 @@ def show_stock_chart(ticker: str) -> dict:
             close_series = pd.DataFrame(data_feed["Close"])
             close_series.columns = [f"{resolved_upper} Close"]
             
-            # ── BUG FIX 2: Universal timezone stripping for Streamlit ──
-            try:
-                if close_series.index.tz is not None:
-                    close_series.index = close_series.index.tz_localize(None)
-            except Exception:
-                pass # If it's already naive, ignore and continue
-                
-            close_series.index = pd.to_datetime(close_series.index).date
-            # ───────────────────────────────────────────────────────────
+            # 3. CRITICAL: Remove Timezone and force date-only index
+            # This is what fixes the "data exists but graph is empty" issue
+            if close_series.index.tz is not None:
+                close_series.index = close_series.index.tz_localize(None)
             
+            # Ensure it is purely date objects, not complex timestamps
+            close_series.index = pd.to_datetime(close_series.index).date
+            
+            # 4. Render chart without complex parameters
             st.line_chart(close_series)
             
             return {"success": f"Chart successfully rendered to the UI for {resolved_upper}."}
         else:
-            return {"error": f"Failed to fetch chart data for {resolved_upper}. The ticker might be invalid."}
+            return {"error": f"Failed to fetch chart data for {resolved_upper}."}
             
     except Exception as e:
-        st.error(f"🚨 Streamlit Chart Error: {str(e)}")
+        st.error(f"🚨 Chart Error: {str(e)}")
         return {"error": f"Chart rendering failed: {str(e)}"}
 
 
