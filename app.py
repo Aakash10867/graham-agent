@@ -1922,6 +1922,31 @@ You MUST output your response EXACTLY following the template below. Use proper M
 # ──────────────────────────────────────────────
 # AGENT
 # ──────────────────────────────────────────────
+def sanitize_history(history):
+    """Filters out malformed messages missing a role."""
+    clean = []
+    for msg in history:
+        # Check if msg is a dict (standard) or a types.Content object (SDK format)
+        if isinstance(msg, dict):
+            if msg.get("role") in ["user", "model"]:
+                clean.append(msg)
+        else:
+            # If it's an SDK object, ensure it has a role
+            if hasattr(msg, 'role') and msg.role in ["user", "model"]:
+                clean.append(msg)
+    return clean
+
+# Then, in your agent_turn function, use it:
+history = sanitize_history(st.session_state.get("chat_history", []))
+chat = client.chats.create(
+    model=model_name,
+    config=types.GenerateContentConfig(
+        system_instruction=SYSTEM_INSTRUCTION,
+        tools=TOOLS,
+    ),
+    history=history, # Pass the sanitized history here
+)
+
 def agent_turn(user_message):
     """Try each free model until one responds."""
     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
