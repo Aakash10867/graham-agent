@@ -389,9 +389,9 @@ PRESET_PROMPTS = [
     ("⚖️ Compare Stocks",
      "Compare {company} as investments — valuation, growth, profitability, and which is the better buy."),
     ("🔍 Find Indian Investments",
-     "Find the best Indian stocks to invest in right now. Show me which Nifty 50 stocks pass all 4 frameworks and which pass 3 out of 4, with top 3 from each tier. Explain why each tier is a good investment using the book philosophies."),
+     "Find the best Indian stocks to invest in right now. Show me which Nifty 50 stocks pass all 4 frameworks and which pass 3 out of 4 and which pass 2 out of 4, with top 3 from each tier. Explain why each tier is a good investment using the book philosophies."),
     ("🔍 Find US Investments",
-     "Find the best US stocks to invest in right now. Show me which large cap stocks pass all 4 frameworks and which pass 3 out of 4, with top 3 from each tier. Explain why each tier is a good investment using the book philosophies."),
+     "Find the best US stocks to invest in right now. Show me which large cap stocks pass all 4 frameworks and which pass 3 out of 4 and which pass 2 out of 4, with top 3 from each tier. Explain why each tier is a good investment using the book philosophies."),
     ("🌍 Find Best Global Picks",
      "Screen all stocks across India and US markets. Show me the best investment candidates that pass all 4 frameworks or 3 out of 4. Explain why each category is good for long-term returns based on Graham, Greenblatt, and Dorsey."),
 ]
