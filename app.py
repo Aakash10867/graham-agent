@@ -650,7 +650,7 @@ def fallback_router(prompt: str) -> str:
     # If no valid stock was found, or if specific keywords are present, search the books
     book_keywords = ["graham", "greenblatt", "dorsey", "moat", "margin", "safety", "value", "formula", "rule"]
     if not valid_stock_found or any(kw in prompt_lower for kw in book_keywords):
-        book_data = search_books(prompt)
+        book_data = search_book(prompt)
         if "error" not in book_data:
             response_blocks.append("### 📚 Auto-Fetched Knowledge Base Passages\n")
             # Format passages as blockquotes
@@ -674,7 +674,7 @@ Your knowledge base consists of three frameworks:
 3. Pat Dorsey (Economic Moats, Consistent FCF, ROE > 15%, Low Debt)
 
 You have three tools:
-1. search_books — queries the texts of Graham, Greenblatt, and Dorsey.
+1. search_book — queries the texts of Graham, Greenblatt, and Dorsey.
 2. get_stock_data — pulls live fundamental data.
 3. calculator — evaluates mathematical expressions.
 
