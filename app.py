@@ -16,6 +16,7 @@ sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 import os
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
+import datetime
 import streamlit as st
 from google import genai
 from google.genai import types
@@ -1890,8 +1891,50 @@ def agent_turn(user_message):
                 for fc in response.function_calls:
                     if fc.name in tool_functions:
                         result = tool_functions[fc.name](**fc.args)
+                        
+                        # ── VISUAL INTERCEPTOR: Plot Time Series Data ──
+                        if fc.name == "get_price_history" and "error" not in result:
+                            try:
+                                import datetime
+                                import pandas as pd
+                                import yfinance as yf
+                                
+                                # Resolve the ticker symbol from arguments
+                                resolved = _resolve_ticker(fc.args.get("ticker", ""))
+                                
+                                # Calculate an explicit 13-month lookback window (~395 days)
+                                end_date = datetime.date.today()
+                                start_date = end_date - datetime.timedelta(days=395) 
+                                
+                                # Fetch historical data across the 13-month horizon
+                                hist = yf.Ticker(resolved).history(start=start_date, end=end_date)
+                                
+                                if not hist.empty:
+                                    st.write(f"### 📈 13-Month Trajectory for {resolved}")
+                                    
+                                    # Interactive controls for Y-axis variables
+                                    available_metrics = ["Close", "Open", "High", "Low", "Volume"]
+                                    unique_id = f"select_{resolved}_{len(st.session_state.messages)}"
+                                    
+                                    selected_metric = st.selectbox(
+                                        "Select Y-Axis Metric:", 
+                                        options=available_metrics,
+                                        key=unique_id
+                                    )
+                                    
+                                    # Filter dataframe and render interactive time-series chart
+                                    chart_data = pd.DataFrame(hist[selected_metric])
+                                    chart_data.columns = [f"{resolved} {selected_metric}"]
+                                    st.line_chart(chart_data, color="#00f5d4")
+                                    
+                            except Exception as e:
+                                # Fail silently to allow the agent narrative loop to complete uninterrupted
+                                pass
+                        # ───────────────────────────────────────────────
+                        
                     else:
                         result = {"error": f"Unknown tool: {fc.name}"}
+                        
                     function_responses.append(
                         types.Part.from_function_response(name=fc.name, response=result)
                     )
