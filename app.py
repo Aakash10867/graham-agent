@@ -613,6 +613,55 @@ tool_functions = {
     "calculator": calculator,
 }
 
+import re
+
+def fallback_router(prompt: str) -> str:
+    """Deterministic routing engine that triggers when the LLM is offline."""
+    prompt_lower = prompt.lower()
+    response_blocks = []
+
+    # 1. HEURISTIC FOR STOCK DATA
+    # Look for uppercase words (e.g., AAPL) or words ending in .NS (e.g., TCS.NS)
+    potential_tickers = re.findall(r'\b[A-Z]{1,6}(?:\.NS)?\b', prompt)
+    
+    # Add manual aliases for common names
+    if "mahindra" in prompt_lower: potential_tickers.append("M&M.NS")
+    if "apple" in prompt_lower: potential_tickers.append("AAPL")
+    
+    tickers_to_check = list(set(potential_tickers))
+    valid_stock_found = False
+
+    for ticker in tickers_to_check:
+        # Ignore common English uppercase words
+        if ticker in ["I", "A", "THE", "WHAT", "WHY", "HOW", "IS", "YES", "NO"]: continue
+        
+        data = get_stock_data(ticker)
+        if "error" not in data:
+            valid_stock_found = True
+            table = f"### 📊 Auto-Fetched Data for {data.get('symbol', ticker)}\n"
+            table += "| Metric | Value |\n| :--- | :--- |\n"
+            table += f"| **Price** | {data.get('currency', '')} {data.get('current_price', 'N/A')} |\n"
+            table += f"| **P/E Ratio** | {data.get('pe_ratio', 'N/A')} |\n"
+            table += f"| **P/B Ratio** | {data.get('price_to_book', 'N/A')} |\n"
+            table += f"| **ROE** | {round(data.get('return_on_equity', 0) * 100, 2) if data.get('return_on_equity') else 'N/A'}% |\n\n"
+            response_blocks.append(table)
+
+    # 2. HEURISTIC FOR BOOK SEARCH
+    # If no valid stock was found, or if specific keywords are present, search the books
+    book_keywords = ["graham", "greenblatt", "dorsey", "moat", "margin", "safety", "value", "formula", "rule"]
+    if not valid_stock_found or any(kw in prompt_lower for kw in book_keywords):
+        book_data = search_books(prompt)
+        if "error" not in book_data:
+            response_blocks.append("### 📚 Auto-Fetched Knowledge Base Passages\n")
+            # Format passages as blockquotes
+            for p in book_data["passages"].split("\n\n"):
+                response_blocks.append(f"> {p}\n\n")
+                
+    if not response_blocks:
+        return "❌ *Fallback System:* Could not identify a valid ticker or knowledge base match from the prompt syntax."
+        
+    return "".join(response_blocks)
+
 # ──────────────────────────────────────────────
 # SYSTEM PROMPT & AGENT
 # ──────────────────────────────────────────────
@@ -728,19 +777,31 @@ if prompt := st.chat_input("Ask about a stock, Graham's principles, or anything.
         st.markdown(prompt)
 
     # 3. Handle agent response
-    with st.chat_message("assistant", avatar=AGENT_AVATAR):
-        with st.spinner("Analyzing..."):
-            try:
-                # Generate and display the answer
-                answer = agent_turn(prompt)
-                st.markdown(answer)
-                # Save agent message to state ONLY if successful
-                st.session_state.messages.append({"role": "assistant", "content": answer})
-                
-            except Exception as e:
-                # Graceful error handling
-                error_msg = str(e)
-                if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
-                    st.error("⚠️ **API Rate Limit Exceeded.** The Gemini API has reached its limit. Please wait a moment and try again.")
-                else:
-                    st.error(f"🛑 **System Error:** Unable to process request. \n\n`{error_msg[:100]}...`")
+        with st.chat_message("assistant", avatar=AGENT_AVATAR):
+            with st.spinner("Executing multi-factor analysis..."):
+                try:
+                    # Attempt primary LLM orchestration
+                    answer = agent_turn(prompt)
+                    st.markdown(answer)
+                    st.session_state.messages.append({"role": "assistant", "content": answer})
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    
+                    # --- AUTOMATED FALLBACK INTERCEPTION ---
+                    if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+                        # 1. Inform the user of the system state
+                        st.warning("⚠️ **AlphaConsensus Engine Offline (API Limit).** Engaging deterministic fallback routing...")
+                        
+                        # 2. Run the fallback router directly in the UI
+                        fallback_answer = fallback_router(prompt)
+                        st.markdown(fallback_answer)
+                        
+                        # 3. Save the fallback data to the chat history so it persists
+                        st.session_state.messages.append({
+                            "role": "assistant", 
+                            "content": f"*(Deterministic Fallback Engaged)*\n\n{fallback_answer}"
+                        })
+                    else:
+                        # Generic system crash
+                        st.error(f"🛑 **System Error:** Unable to process request. \n\n`{error_msg[:100]}...`")
