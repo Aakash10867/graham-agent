@@ -633,13 +633,13 @@ if "chat_history" not in st.session_state:
 if not st.session_state.messages:
     st.markdown("""
     <div class="welcome-card">
-        <h2>What would you like to explore?</h2>
-        <p>I can pull live stock data, search Graham's <em>Intelligent Investor</em>, and crunch the numbers — all in one conversation.</p>
+        <h2>SYSTEM INITIALIZED</h2>
+        <p>AlphaConsensus engine online. Awaiting ticker input or framework query.</p>
         <div class="welcome-pills">
-            <span class="welcome-pill">Margin of Safety</span>
-            <span class="welcome-pill">Analyze AAPL</span>
-            <span class="welcome-pill">P/E Ratios</span>
-            <span class="welcome-pill">Defensive Investing</span>
+            <span class="welcome-pill">> ANALYZE AAPL</span>
+            <span class="welcome-pill">> QUERY MOAT RULES</span>
+            <span class="welcome-pill">> MAGIC FORMULA YIELD</span>
+            <span class="welcome-pill">> GRAHAM CRITERIA</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
