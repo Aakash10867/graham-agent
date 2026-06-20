@@ -762,35 +762,32 @@ import pandas as pd
 import numpy as np
 
 def get_historical_trends(company_query: str) -> dict:
-    """Get 3-year historical trends for Revenue, Net Income, and Debt to assess consistency.
-    Use this when evaluating the stability and historical moat of a company.
+    """Get 1-year historical trends (Year-over-Year) for Revenue, Net Income, and Debt.
+    Use this when evaluating the immediate recent trajectory of a company.
     """
-    # (Use your existing ticker resolution logic here first to get resolved_ticker)
     resolved_ticker = company_query.upper()
-    # ... [Insert your existing ticker resolution from get_stock_data here] ...
+    # ... [Insert your existing ticker resolution block here if needed] ...
     
     try:
         stock = yf.Ticker(resolved_ticker)
-        
-        # Fetch annual financials (returns a DataFrame with dates as columns)
         income_stmt = stock.financials
         balance_sheet = stock.balance_sheet
         
         if income_stmt.empty or balance_sheet.empty:
             return {"error": "Historical financial statements not available."}
             
-        # Get the available columns (years) and sort chronologically
-        cols = sorted(income_stmt.columns)[:3] # Grab up to the last 3 available years
+        # yfinance returns columns newest to oldest. Grab the 2 most recent years.
+        recent_cols = sorted(income_stmt.columns, reverse=True)[:2]
+        # Sort chronologically (Oldest first, Newest second) so math flows forward
+        cols = sorted(recent_cols)
         
         if len(cols) < 2:
-            return {"error": "Not enough historical data to establish a trend."}
+            return {"error": "Not enough historical data to establish a 1-year trend."}
             
         trends = {}
         
-        # Helper to safely extract metrics
         def extract_metric(df, row_name):
             try:
-                # Get values chronologically (oldest to newest)
                 return [df.loc[row_name, col] for col in cols if pd.notna(df.loc[row_name, col])]
             except KeyError:
                 return []
@@ -799,17 +796,17 @@ def get_historical_trends(company_query: str) -> dict:
         ni_history = extract_metric(income_stmt, "Net Income")
         debt_history = extract_metric(balance_sheet, "Total Debt")
         
-        if len(rev_history) >= 2:
-            rev_cagr = ((rev_history[-1] / rev_history[0]) ** (1 / (len(rev_history) - 1))) - 1
-            trends["3Y_Revenue_CAGR"] = round(rev_cagr * 100, 2)
+        # 1-Year YoY Growth calculations
+        if len(rev_history) == 2:
+            rev_growth = (rev_history[1] / rev_history[0]) - 1
+            trends["1Y_Revenue_Growth"] = round(rev_growth * 100, 2)
             
-        if len(ni_history) >= 2:
-            ni_cagr = ((ni_history[-1] / ni_history[0]) ** (1 / (len(ni_history) - 1))) - 1
-            trends["3Y_NetIncome_CAGR"] = round(ni_cagr * 100, 2)
+        if len(ni_history) == 2:
+            ni_growth = (ni_history[1] / ni_history[0]) - 1
+            trends["1Y_NetIncome_Growth"] = round(ni_growth * 100, 2)
             
-        # Debt variance: Is debt increasing or decreasing?
-        if len(debt_history) >= 2:
-            debt_variance = ((debt_history[-1] - debt_history[0]) / debt_history[0]) * 100
+        if len(debt_history) == 2:
+            debt_variance = ((debt_history[1] - debt_history[0]) / debt_history[0]) * 100
             trends["Debt_Growth_Trend"] = round(debt_variance, 2)
 
         return {
@@ -1003,7 +1000,7 @@ Your knowledge base consists of four frameworks:
 You have FIVE tools:
 1. search_book — queries the texts of Graham, Greenblatt, and Dorsey.
 2. get_stock_data — pulls live fundamental data for a ticker symbol or company name.
-3. get_historical_trends — pulls 3-year CAGR for Revenue, Net Income, and Debt growth.
+3. get_historical_trends — pulls 1-year CAGR for Revenue, Net Income, and Debt growth.
 4. calculator — evaluates mathematical expressions.
 5. lookup_ticker — finds the stock ticker symbol for a company name. Use this FIRST when a user mentions a company by name without a ticker.
 
@@ -1027,7 +1024,7 @@ PASS/FAIL THRESHOLDS (Apply these mechanically. NEVER override with qualitative 
   - Identifiable economic moat (brand, switching costs, network effects, or cost advantage)
 
 4. Historical Trajectory Criteria (Requires ALL to pass):
-  - 3-Year Revenue CAGR OR 3-Year Net Income CAGR must be Positive (> 0%)
+  - 1-Year Revenue CAGR OR 1-Year Net Income CAGR must be Positive (> 0%)
   - Debt Growth Trend must be Negative (decreasing debt) OR manageable (Debt/Equity remains below 50% despite debt growth).
 
 DECISION RULE:
@@ -1038,22 +1035,38 @@ EXECUTION PROTOCOL & OUTPUT FORMAT:
 You must output your response EXACTLY in the following format.
 
 ### 1. Live Fundamentals & Trajectory
-| Metric | Value | 3-Year Trend |
+| Metric | Value | 1-Year YoY Trend |
 | :--- | :--- | :--- |
 | **Price** | [Value] | N/A |
 | **P/E** | [Value] | N/A |
 | **Forward P/E** | [Value] | N/A |
 | **P/B** | [Value] | N/A |
-| **ROE** | [Value]% | [State Net Income CAGR] |
+| **ROE** | [Value]% | [State 1Y Net Income Growth] |
 | **Debt/Equity** | [Value]% | [State Debt Growth Trend] |
 | **Dividend Yield** | [Value]% | N/A |
 
 ### 2. The Committee Verdict
 
-* **Graham's Verdict:** [Pass/Fail] — [State actual P/E vs threshold]. [State actual P/B vs threshold]. [State actual Div Yield vs threshold].
-* **Greenblatt's Verdict:** [Pass/Fail] — [State actual ROE vs threshold]. [State actual Earnings Yield vs threshold].
-* **Dorsey's Verdict:** [Pass/Fail] — [State actual ROE vs threshold]. [State actual D/E vs threshold]. [Name the specific moat type or state lack thereof].
-* **Trajectory Verdict:** [Pass/Fail] — [State Revenue/Net Income CAGR vs threshold]. [State Debt Trend vs threshold].
+PASS/FAIL THRESHOLDS (Apply these mechanically. NEVER override with qualitative judgment):
+
+1. Graham Criteria (Requires ALL 3 to pass):
+  - Valuation A: P/E ratio ≤ 15
+  - Valuation B: P/B ratio ≤ 1.5 (If one fails, PASS if Combined P/E × P/B ≤ 22.5)
+  - Yield: Dividend Yield > 0%
+
+2. Greenblatt Criteria (Requires BOTH to pass):
+  - Capital Efficiency: Return on Equity (ROE) > 15%
+  - Yield: Earnings Yield (1 ÷ P/E × 100) > 5%
+
+3. Dorsey Criteria (Requires ALL 3 to pass):
+  - Efficiency: ROE > 15%
+  - Leverage: Debt/Equity < 50%
+  - Moat Check: You MUST explicitly identify a moat (brand, network, switching costs, cost advantage, or monopoly) based SOLELY on the business model. NEVER fail a moat because the valuation is high or recent earnings are down. (e.g., Exchanges, utilities, and dominant platforms inherently have moats).
+
+4. Historical Trajectory Criteria (Requires BOTH Condition A and Condition B to pass):
+  - Condition A (Growth): PASS if (1-Year Revenue Growth is > 0%) OR (1-Year Net Income Growth is > 0%). Only ONE needs to be positive.
+  - Condition B (Debt Health): PASS if (Debt Growth Trend is < 0%) OR (Current Debt/Equity is < 50%). Only ONE needs to be true.
+  - *Rule: If Condition A PASSES and Condition B PASSES, the overall Trajectory Verdict is PASS.*
 
 ### 3. Final Decision
 * **Verdict:** [YES or NO]
