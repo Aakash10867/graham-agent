@@ -4,3 +4,5 @@ scikit-learn
 numpy
 pymupdf
 yfinance
+chromadb==0.6.3
+protobuf>=5.27,<6
