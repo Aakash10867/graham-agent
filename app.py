@@ -851,14 +851,17 @@ div[data-baseweb] [aria-invalid] {
 }
 
 /* ═══════════════════════════════════════════════
-   FLOATING RESET BUTTON
+   FLOATING RESET BUTTON (BULLETPROOF METHOD)
    ═══════════════════════════════════════════════ */
-button:has(p:contains("🔄")) {
+div.stButton:first-of-type {
     position: fixed !important;
-    bottom: 28px !important; /* Anchors the button to the bottom row */
-    left: 20px !important;   /* Anchors it to the left side */
+    bottom: 28px !important;
+    left: 20px !important;
     z-index: 99999 !important;
     width: auto !important;
+}
+
+div.stButton:first-of-type button {
     padding: 4px 16px !important;
     background: rgba(15, 12, 41, 0.85) !important;
     backdrop-filter: blur(12px) !important;
@@ -868,11 +871,11 @@ button:has(p:contains("🔄")) {
     box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 10px rgba(0, 245, 212, 0.1) !important;
 }
 
-
-button:has(p:contains("🔄")):hover {
+div.stButton:first-of-type button:hover {
     background: rgba(0, 245, 212, 0.15) !important;
     border-color: #00f5d4 !important;
 }
+
 </style>
 """, unsafe_allow_html=True)
 
