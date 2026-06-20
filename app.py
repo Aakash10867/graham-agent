@@ -1892,45 +1892,38 @@ def agent_turn(user_message):
                     if fc.name in tool_functions:
                         result = tool_functions[fc.name](**fc.args)
                         
-                        # ── VISUAL INTERCEPTOR: Plot Time Series Data ──
+                        # ── VISUAL INTERCEPTOR: Single Static Time Series Chart ──
                         if fc.name == "get_price_history" and "error" not in result:
                             try:
                                 import datetime
                                 import pandas as pd
                                 import yfinance as yf
                                 
-                                # Resolve the ticker symbol from arguments
+                                # Extract and resolve the ticker symbol
                                 resolved = _resolve_ticker(fc.args.get("ticker", ""))
                                 
-                                # Calculate an explicit 13-month lookback window (~395 days)
+                                # Define a strict 13-month historical window (~395 days)
                                 end_date = datetime.date.today()
                                 start_date = end_date - datetime.timedelta(days=395) 
                                 
-                                # Fetch historical data across the 13-month horizon
+                                # Fetch data from yfinance
                                 hist = yf.Ticker(resolved).history(start=start_date, end=end_date)
                                 
                                 if not hist.empty:
-                                    st.write(f"### 📈 13-Month Trajectory for {resolved}")
+                                    st.write(f"### 📈 13-Month Closing Trend: {resolved}")
                                     
-                                    # Interactive controls for Y-axis variables
-                                    available_metrics = ["Close", "Open", "High", "Low", "Volume"]
-                                    unique_id = f"select_{resolved}_{len(st.session_state.messages)}"
+                                    # Isolate just the Close price for a clean buy/sell analysis
+                                    chart_data = pd.DataFrame(hist["Close"])
+                                    chart_data.columns = [f"{resolved} Close Price"]
                                     
-                                    selected_metric = st.selectbox(
-                                        "Select Y-Axis Metric:", 
-                                        options=available_metrics,
-                                        key=unique_id
-                                    )
-                                    
-                                    # Filter dataframe and render interactive time-series chart
-                                    chart_data = pd.DataFrame(hist[selected_metric])
-                                    chart_data.columns = [f"{resolved} {selected_metric}"]
+                                    # Render the single static chart
                                     st.line_chart(chart_data, color="#00f5d4")
+                                else:
+                                    st.warning(f"⚠️ Visual Interceptor: No historical data found for symbol: {resolved}")
                                     
-                            except Exception as e:
-                                # Fail silently to allow the agent narrative loop to complete uninterrupted
-                                pass
-                        # ───────────────────────────────────────────────
+                            except Exception as chart_err:
+                                st.error(f"⚠️ Visual Interceptor Error: {str(chart_err)}")
+                        # ────────────────────────────────────────────────────────
                         
                     else:
                         result = {"error": f"Unknown tool: {fc.name}"}
