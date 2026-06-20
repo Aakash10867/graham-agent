@@ -1057,9 +1057,8 @@ PASS/FAIL THRESHOLDS (Apply mechanically):
 4. Trajectory: PASS ONLY IF (1Y Rev Growth > 0% OR 1Y Net Income Growth > 0%) AND (Debt Growth < 0% OR Current D/E < 50%).
 
 DECISION RULE:
-- PASS CONDITION (YES): If ANY 3 out of the 4 frameworks PASS, the final decision is YES. 
-- VALUE EXCEPTION (YES): If Graham PASSES but the score is only 2/4, the decision is YES (Deep Value).
-- FAIL CONDITION (NO): If 2 or fewer frameworks pass (and Graham fails), the final decision is NO.
+- PASS CONDITION (YES): If ANY 2 out of the 4 frameworks PASS, the final decision is YES. 
+- VALUE EXCEPTION (YES): If Graham PASSES but the score is only 1/4, the decision is YES (Deep Value).
 
 EXECUTION PROTOCOL:
 You MUST output your response EXACTLY following the template below. Use proper Markdown tables with pipes (|) and a blank line before the table. Do not add any text outside of this template.
