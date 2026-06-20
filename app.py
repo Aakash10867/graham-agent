@@ -507,19 +507,20 @@ div[data-baseweb] [aria-invalid] {
 }
 
 /* ═══════════════════════════════════════════════
-   BOTTOM DOCK — ABOVE STARS + TRANSLUCENT
+   BOTTOM DOCK — TRANSLUCENT FROSTED BAR
    ═══════════════════════════════════════════════ */
 [data-testid="stBottom"] {
     z-index: 10 !important;
-    background: rgba(15, 12, 41, 0.4) !important;
+    background: rgba(15, 12, 41, 0.6) !important;
+    background-color: rgba(15, 12, 41, 0.6) !important;
     backdrop-filter: blur(24px) !important;
     -webkit-backdrop-filter: blur(24px) !important;
     border-top: 1px solid rgba(0, 245, 212, 0.15) !important;
 }
 
-[data-testid="stBottom"] > div,
-[data-testid="stBottom"] [data-testid="stVerticalBlock"] {
+[data-testid="stBottom"] > div {
     background: transparent !important;
+    background-color: transparent !important;
 }
 
 
