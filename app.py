@@ -14,14 +14,15 @@ import chromadb
 import pymupdf
 import yfinance as yf
 import json
+import re
 
 FREE_MODELS = [
-    "gemini-2.5-flash-lite",       # your current default — highest free quota
-    "gemini-2.5-flash",            # solid upgrade
-    "gemini-3.5-flash",            # newest, fastest Flash
-    "gemini-3.1-flash-lite",       # lightweight 3.x option
-    "gemini-2.5-pro",              # heavy hitter, lower free limits
-    "gemini-3.1-pro-preview",      # strongest reasoning, lowest free limits
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-2.5-pro",
+    "gemini-3.1-pro-preview",
 ]
 
 # ──────────────────────────────────────────────
@@ -49,7 +50,6 @@ st.markdown("""
     100% { background-position: 0% 50%; }
 }
 
-/* Root app background */
 .stApp {
     background: linear-gradient(
         -45deg,
@@ -67,22 +67,18 @@ st.markdown("""
 }
 
 /* ═══════════════════════════════════════════════
-   DEEP SPACE PARALLAX (Independent / Chaotic Movement)
+   DEEP SPACE PARALLAX
    ═══════════════════════════════════════════════ */
-
-/* Base setup for all 3 star layers */
 .stApp::before,
 .stApp::after,
 [data-testid="stAppViewContainer"]::before {
     content: '';
     position: fixed;
-    /* Oversize the layers massively so we don't see edges when moving diagonally */
     top: -100vh; left: -100vw; right: -100vw; bottom: -100vh;
     pointer-events: none;
     z-index: 0;
 }
 
-/* LAYER 1: Distant Stars (Slow, moving straight up) */
 .stApp::before {
     background-image:
         radial-gradient(1px 1px at 10% 20%, rgba(255, 255, 255, 0.7) 50%, transparent),
@@ -93,7 +89,6 @@ st.markdown("""
     animation: starLayer1 25s linear infinite;
 }
 
-/* LAYER 2: Midground Stars (Medium speed, moving up-left, erratic twinkle) */
 .stApp::after {
     background-image:
         radial-gradient(1.5px 1.5px at 15% 15%, rgba(0, 245, 212, 0.8) 50%, transparent),
@@ -104,7 +99,6 @@ st.markdown("""
     animation: starLayer2 18s linear infinite;
 }
 
-/* LAYER 3: Foreground Stars (Fast, moving up-right, bright) */
 [data-testid="stAppViewContainer"]::before {
     background-image:
         radial-gradient(2px 2px at 5% 5%, rgba(255, 255, 255, 1) 50%, transparent),
@@ -114,72 +108,59 @@ st.markdown("""
     animation: starLayer3 12s linear infinite;
 }
 
-/* --- INDEPENDENT ANIMATIONS --- */
-/* Note: The translate values MUST exactly match the background-size above to loop seamlessly without jumping */
-
 @keyframes starLayer1 {
     0%   { transform: translateY(0); opacity: 0.3; }
     50%  { opacity: 0.9; }
-    100% { transform: translateY(-150px); opacity: 0.3; } 
+    100% { transform: translateY(-150px); opacity: 0.3; }
 }
 
 @keyframes starLayer2 {
     0%   { transform: translate(0, 0); opacity: 0.2; }
     25%  { opacity: 1; }
     75%  { opacity: 0.3; }
-    100% { transform: translate(-200px, -200px); opacity: 0.2; } 
+    100% { transform: translate(-200px, -200px); opacity: 0.2; }
 }
 
 @keyframes starLayer3 {
     0%   { transform: translate(0, 0); opacity: 0.5; }
     33%  { opacity: 0.9; }
     66%  { opacity: 0.4; }
-    100% { transform: translate(300px, -300px); opacity: 0.5; } 
+    100% { transform: translate(300px, -300px); opacity: 0.5; }
 }
 
 /* ═══════════════════════════════════════════════
-   3D GLASSMORPHISM CHAT INPUT BAR (The bottom typing area)
+   3D GLASSMORPHISM CHAT INPUT BAR
    ═══════════════════════════════════════════════ */
-
-/* 1. Target the main outer container of the chat input */
 [data-testid="stChatInput"] {
-    background: rgba(20, 25, 45, 0.3) !important; /* Highly transparent frosted base */
+    background: rgba(20, 25, 45, 0.3) !important;
     backdrop-filter: blur(24px) saturate(200%) !important;
     -webkit-backdrop-filter: blur(24px) saturate(200%) !important;
-    
-    /* 3D Edges */
     border: 1px solid rgba(255, 255, 255, 0.08) !important;
-    border-top: 1px solid rgba(0, 245, 212, 0.4) !important; /* Bright neon light catch on top */
-    border-radius: 24px !important; /* Sleek pill shape */
-    
-    /* Deep floating shadow */
-    box-shadow: 
-        0 20px 40px rgba(0, 0, 0, 0.6), 
+    border-top: 1px solid rgba(0, 245, 212, 0.4) !important;
+    border-radius: 24px !important;
+    box-shadow:
+        0 20px 40px rgba(0, 0, 0, 0.6),
         inset 0 1px 3px rgba(255, 255, 255, 0.15) !important;
-        
     transition: all 0.3s ease !important;
 }
 
-/* 2. Strip the solid background from Streamlit's inner wrapper */
 [data-testid="stChatInput"] > div {
     background: transparent !important;
     background-color: transparent !important;
 }
 
-/* 3. Target the actual text area where you type */
 [data-testid="stChatInput"] textarea {
     background: transparent !important;
     background-color: transparent !important;
-    color: #00f5d4 !important; /* Makes the text you type neon cyan */
+    color: #00f5d4 !important;
     font-family: 'Space Grotesk', sans-serif !important;
     font-size: 1rem !important;
 }
 
-/* 4. Hover effect to make it feel responsive */
 [data-testid="stChatInput"]:hover, [data-testid="stChatInput"]:focus-within {
     border-top: 1px solid rgba(0, 245, 212, 0.8) !important;
-    box-shadow: 
-        0 20px 50px rgba(0, 245, 212, 0.15), 
+    box-shadow:
+        0 20px 50px rgba(0, 245, 212, 0.15),
         inset 0 1px 3px rgba(255, 255, 255, 0.2) !important;
     transform: translateY(-2px);
 }
@@ -193,7 +174,6 @@ st.markdown("""
     font-family: 'Inter', sans-serif !important;
 }
 
-/* Main title glow */
 .stApp h1 {
     font-family: 'Space Grotesk', sans-serif !important;
     font-weight: 700 !important;
@@ -209,7 +189,6 @@ st.markdown("""
     padding-bottom: 4px;
 }
 
-/* Caption */
 .stApp .stCaption, .stApp [data-testid="stCaptionContainer"] p {
     color: rgba(200, 210, 230, 0.6) !important;
     font-size: 0.95rem !important;
@@ -219,8 +198,6 @@ st.markdown("""
 /* ═══════════════════════════════════════════════
    GLASSMORPHISM CHAT BUBBLES
    ═══════════════════════════════════════════════ */
-
-/* Chat message containers */
 [data-testid="stChatMessage"] {
     background: rgba(255, 255, 255, 0.04) !important;
     backdrop-filter: blur(20px) !important;
@@ -245,7 +222,6 @@ st.markdown("""
     transform: translateY(-1px);
 }
 
-/* Chat text color */
 [data-testid="stChatMessage"] p,
 [data-testid="stChatMessage"] li,
 [data-testid="stChatMessage"] span {
@@ -265,7 +241,6 @@ st.markdown("""
     padding: 2px 6px !important;
 }
 
-/* User avatar ring */
 [data-testid="stChatMessage"] [data-testid="stAvatar"] {
     border: 2px solid rgba(0, 245, 212, 0.4) !important;
     border-radius: 50% !important;
@@ -306,7 +281,6 @@ st.markdown("""
     color: rgba(200, 210, 230, 0.35) !important;
 }
 
-/* Send button */
 [data-testid="stChatInput"] button,
 [data-testid="stChatInputContainer"] button {
     background: linear-gradient(135deg, #00f5d4, #9b5de5) !important;
@@ -364,26 +338,13 @@ st.markdown("""
 /* ═══════════════════════════════════════════════
    SCROLLBAR — THIN & THEMED
    ═══════════════════════════════════════════════ */
-::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-}
-
-::-webkit-scrollbar-track {
-    background: rgba(0, 0, 0, 0.2);
-}
-
-::-webkit-scrollbar-thumb {
-    background: rgba(0, 245, 212, 0.2);
-    border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-    background: rgba(0, 245, 212, 0.4);
-}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.2); }
+::-webkit-scrollbar-thumb { background: rgba(0, 245, 212, 0.2); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0, 245, 212, 0.4); }
 
 /* ═══════════════════════════════════════════════
-   SIDEBAR (if ever used)
+   SIDEBAR
    ═══════════════════════════════════════════════ */
 [data-testid="stSidebar"] {
     background: rgba(15, 12, 41, 0.95) !important;
@@ -397,7 +358,7 @@ st.markdown("""
 footer {visibility: hidden;}
 header {visibility: hidden;}
 
-/* Ensure the main view wrapper isn't creating a solid block behind it */
+/* Content above stars */
 [data-testid="stAppViewContainer"] {
     background: transparent !important;
     position: relative !important;
@@ -405,13 +366,13 @@ header {visibility: hidden;}
 }
 
 /* ═══════════════════════════════════════════════
-   WELCOME CARD (Terminal Dashboard)
+   WELCOME CARD
    ═══════════════════════════════════════════════ */
 .welcome-card {
     background: rgba(15, 12, 41, 0.4);
     backdrop-filter: blur(20px);
     border: 1px solid rgba(0, 245, 212, 0.15);
-    border-radius: 8px; /* Sharper corners */
+    border-radius: 8px;
     padding: 2.5rem 2rem;
     text-align: center;
     margin: 2rem auto;
@@ -422,7 +383,7 @@ header {visibility: hidden;}
 .welcome-card h2 {
     font-family: 'Space Grotesk', sans-serif !important;
     font-size: 1.2rem;
-    color: #00f5d4; /* Neon terminal green/cyan */
+    color: #00f5d4;
     margin-bottom: 0.8rem;
     font-weight: 700;
     text-transform: uppercase;
@@ -448,7 +409,7 @@ header {visibility: hidden;}
 .welcome-pill {
     background: rgba(0, 245, 212, 0.05);
     border: 1px solid rgba(0, 245, 212, 0.25);
-    border-radius: 4px; /* Tech/Command box look instead of round pill */
+    border-radius: 4px;
     padding: 8px 16px;
     color: #00f5d4;
     font-family: 'Space Grotesk', sans-serif !important;
@@ -469,13 +430,8 @@ header {visibility: hidden;}
    RESPONSIVE
    ═══════════════════════════════════════════════ */
 @media (max-width: 768px) {
-    .stApp h1 {
-        font-size: 1.8rem !important;
-    }
-    .welcome-card {
-        margin: 1rem;
-        padding: 1.5rem 1.2rem;
-    }
+    .stApp h1 { font-size: 1.8rem !important; }
+    .welcome-card { margin: 1rem; padding: 1.5rem 1.2rem; }
 }
 
 /* ═══════════════════════════════════════════════
@@ -497,7 +453,6 @@ header {visibility: hidden;}
     box-shadow: 0 0 15px rgba(0, 245, 212, 0.1) !important;
 }
 
-/* Nuclear option — kill ALL red outlines app-wide */
 *:focus-visible {
     outline: none !important;
 }
@@ -522,8 +477,6 @@ div[data-baseweb] [aria-invalid] {
     background: transparent !important;
     background-color: transparent !important;
 }
-
-
 </style>
 """, unsafe_allow_html=True)
 
@@ -533,7 +486,6 @@ div[data-baseweb] [aria-invalid] {
 st.title("🏛️ AlphaConsensus Terminal")
 st.caption("Quantitative Multi-Agent Investment Committee. Operating on Graham, Greenblatt, and Dorsey frameworks.")
 
-# New Chat button
 if st.button("🔄 Reset Terminal"):
     st.session_state.messages = []
     st.session_state.chat_history = []
@@ -549,13 +501,10 @@ def load_books():
         "Greenblatt": "The Little Book That Still Beats the Market.pdf",
         "Dorsey": "The Five Rules for Successful Stock Investing.pdf"
     }
-    
-    # Write to a local folder in the container instead of RAM
+
     chroma_client = chromadb.PersistentClient(path="./chroma_db")
-    # Use get_or_create to avoid duplication errors on hot reloads
     collection = chroma_client.get_or_create_collection("investment_committee")
-    
-    # Check if we already loaded them
+
     if collection.count() > 0:
         return collection
 
@@ -563,7 +512,7 @@ def load_books():
         if not os.path.exists(filename):
             print(f"Warning: {filename} not found.")
             continue
-            
+
         doc = pymupdf.open(filename)
         full_text = "\n".join(page.get_text() for page in doc)
         doc.close()
@@ -592,76 +541,66 @@ def load_books():
                 metadatas=[{"author": author} for _ in batch],
                 ids=[f"{author}_chunk_{j}" for j in range(i, i + len(batch))]
             )
-            
+
     return collection
 
 collection = load_books()
 
 # ──────────────────────────────────────────────
-# TOOLS (unchanged)
+# TOOLS
 # ──────────────────────────────────────────────
-def lookup_ticker(company_name: str) -> dict:
-    """Find the stock ticker symbol for a company given its name.
-    Use this FIRST whenever the user mentions a company by name
-    without providing a ticker symbol.
+
+def search_book(query: str) -> dict:
+    """Search the combined knowledge base of Graham, Greenblatt, and Dorsey.
+    Use this when you need specific philosophical frameworks, formulas, or rules
+    from any of the three investment authors.
 
     Args:
-        company_name: The company name, e.g. "Groww", "Apple", "Tata Motors"
+        query: What to search for, e.g. "magic formula return on capital" or "economic moat"
     """
-    try:
-        url = f"https://query2.finance.yahoo.com/v1/finance/search?q={company_name}"
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers, timeout=5)
-        data = response.json()
+    sem_results = collection.query(query_texts=[query], n_results=5)
 
-        if "quotes" in data and len(data["quotes"]) > 0:
-            matches = []
-            for q in data["quotes"][:5]:
-                matches.append({
-                    "symbol": q.get("symbol"),
-                    "name": q.get("longname") or q.get("shortname"),
-                    "exchange": q.get("exchange"),
-                    "type": q.get("quoteType"),
-                })
-            if matches:
-                return {"matches": matches}
-        return {"error": f"No ticker found for '{company_name}'. It may not be publicly listed."}
-    except Exception as e:
-        return {"error": f"Ticker lookup failed: {str(e)}"}
+    if not sem_results["documents"][0]:
+        return {"error": "No relevant passages found."}
+
+    sem_docs = sem_results["documents"][0]
+    sem_meta = sem_results["metadatas"][0]
+    sem_dists = sem_results["distances"][0]
+
+    formatted = []
+    for text, meta, dist in zip(sem_docs, sem_meta, sem_dists):
+        author = meta.get("author", "Unknown")
+        formatted.append(f"[Source: {author} | Relevance: {1-dist:.2f}]:\n{text}")
+
+    return {"passages": "\n\n".join(formatted)}
 
 
 def get_stock_data(company_query: str) -> dict:
     """Get real financial data for a stock using a ticker symbol OR company name.
     Use this when the user asks about a specific company's financials.
-    
+
     Args:
         company_query: Stock ticker or company name, e.g. AAPL, TCS, "Mahindra", "Groww"
     """
-    # 1. THE AUTO-RESOLUTION LAYER
-    # If the input doesn't already look like an explicit NSE ticker, search for it
     resolved_ticker = company_query.upper()
-    
+
     if ".NS" not in resolved_ticker and ".BO" not in resolved_ticker:
         try:
             url = f"https://query2.finance.yahoo.com/v1/finance/search?q={company_query}"
             headers = {'User-Agent': 'Mozilla/5.0'}
             response = requests.get(url, headers=headers, timeout=5)
             data = response.json()
-            
+
             if "quotes" in data and len(data["quotes"]) > 0:
                 quotes = data["quotes"]
-                
-                # Try to prioritize Indian markets (NSE/BSE) first
                 indian_match = next((q for q in quotes if q.get("exchange") in ["NSI", "BSE"]), None)
                 if indian_match:
                     resolved_ticker = indian_match["symbol"]
                 else:
-                    # Otherwise, grab the top global result
                     resolved_ticker = quotes[0]["symbol"]
         except Exception:
-            pass # If the search fails, just try running the original query
+            pass
 
-    # 2. THE DATA EXTRACTION LAYER
     try:
         stock = yf.Ticker(resolved_ticker)
         info = stock.info
@@ -704,30 +643,64 @@ def calculator(expression: str) -> dict:
         return {"error": f"Could not evaluate '{expression}': {str(e)}"}
 
 
-TOOLS = [search_book, get_stock_data, calculator]
+def lookup_ticker(company_name: str) -> dict:
+    """Find the stock ticker symbol for a company given its name.
+    Use this FIRST whenever the user mentions a company by name
+    without providing a ticker symbol.
 
-import re
+    Args:
+        company_name: The company name, e.g. "Groww", "Apple", "Tata Motors"
+    """
+    try:
+        url = f"https://query2.finance.yahoo.com/v1/finance/search?q={company_name}"
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(url, headers=headers, timeout=5)
+        data = response.json()
+
+        if "quotes" in data and len(data["quotes"]) > 0:
+            matches = []
+            for q in data["quotes"][:5]:
+                matches.append({
+                    "symbol": q.get("symbol"),
+                    "name": q.get("longname") or q.get("shortname"),
+                    "exchange": q.get("exchange"),
+                    "type": q.get("quoteType"),
+                })
+            if matches:
+                return {"matches": matches}
+        return {"error": f"No ticker found for '{company_name}'. It may not be publicly listed."}
+    except Exception as e:
+        return {"error": f"Ticker lookup failed: {str(e)}"}
+
+
+# Register all tools
+tool_functions = {
+    "search_book": search_book,
+    "get_stock_data": get_stock_data,
+    "calculator": calculator,
+    "lookup_ticker": lookup_ticker,
+}
+
+TOOLS = [search_book, get_stock_data, calculator, lookup_ticker]
+
 
 def fallback_router(prompt: str) -> str:
     """Deterministic routing engine that triggers when the LLM is offline."""
     prompt_lower = prompt.lower()
     response_blocks = []
 
-    # 1. HEURISTIC FOR STOCK DATA
-    # Look for uppercase words (e.g., AAPL) or words ending in .NS (e.g., TCS.NS)
     potential_tickers = re.findall(r'\b[A-Z]{1,6}(?:\.NS)?\b', prompt)
-    
-    # Add manual aliases for common names
+
     if "mahindra" in prompt_lower: potential_tickers.append("M&M.NS")
     if "apple" in prompt_lower: potential_tickers.append("AAPL")
-    
+
     tickers_to_check = list(set(potential_tickers))
     valid_stock_found = False
 
     for ticker in tickers_to_check:
-        # Ignore common English uppercase words
-        if ticker in ["I", "A", "THE", "WHAT", "WHY", "HOW", "IS", "YES", "NO"]: continue
-        
+        if ticker in ["I", "A", "THE", "WHAT", "WHY", "HOW", "IS", "YES", "NO"]:
+            continue
+
         data = get_stock_data(ticker)
         if "error" not in data:
             valid_stock_found = True
@@ -739,43 +712,46 @@ def fallback_router(prompt: str) -> str:
             table += f"| **ROE** | {round(data.get('return_on_equity', 0) * 100, 2) if data.get('return_on_equity') else 'N/A'}% |\n\n"
             response_blocks.append(table)
 
-    # 2. HEURISTIC FOR BOOK SEARCH
-    # If no valid stock was found, or if specific keywords are present, search the books
     book_keywords = ["graham", "greenblatt", "dorsey", "moat", "margin", "safety", "value", "formula", "rule"]
     if not valid_stock_found or any(kw in prompt_lower for kw in book_keywords):
         book_data = search_book(prompt)
         if "error" not in book_data:
             response_blocks.append("### 📚 Auto-Fetched Knowledge Base Passages\n")
-            # Format passages as blockquotes
             for p in book_data["passages"].split("\n\n"):
                 response_blocks.append(f"> {p}\n\n")
-                
+
     if not response_blocks:
         return "❌ *Fallback System:* Could not identify a valid ticker or knowledge base match from the prompt syntax."
-        
+
     return "".join(response_blocks)
 
 # ──────────────────────────────────────────────
 # SYSTEM PROMPT & AGENT
 # ──────────────────────────────────────────────
 
-SYSTEM_INSTRUCTION = """You are an investment analysis assistant grounded in Benjamin Graham's principles.
+SYSTEM_INSTRUCTION = """You are a highly structured Quantitative Investment Committee acting as a single agent.
 
-You have three tools:
-1. search_book — searches The Intelligent Investor for relevant passages. USE THIS when the user asks about investing concepts, Graham's philosophy, or wants book-based advice.
-2. get_stock_data — pulls real financial data for a stock ticker. USE THIS when the user asks about specific companies or wants fundamental data.
-3. calculator — evaluates math expressions. USE THIS for any computation.
-4. lookup_ticker — finds the stock ticker symbol for a company name. USE THIS when the user mentions a company by name without a ticker.
+Your knowledge base consists of three frameworks:
+1. Benjamin Graham (Defensive Value, Margin of Safety, P/B, P/E)
+2. Joel Greenblatt (The Magic Formula, Return on Capital, Earnings Yield)
+3. Pat Dorsey (Economic Moats, Consistent FCF, ROE > 15%, Low Debt)
+
+You have four tools:
+1. search_book — queries the texts of Graham, Greenblatt, and Dorsey.
+2. get_stock_data — pulls live fundamental data for a ticker symbol or company name.
+3. calculator — evaluates mathematical expressions.
+4. lookup_ticker — finds the stock ticker symbol for a company name. Use this when the user mentions a company by name without a ticker.
 
 RULES:
+- When the user mentions a company by NAME (not a ticker symbol), call lookup_ticker FIRST to find the correct ticker, then call get_stock_data with that ticker.
 - When you use search_book, base your answer on the retrieved passages. If the passages don't contain the answer, say so honestly.
-- When analyzing a stock, connect the data back to Graham's principles when relevant.
+- When analyzing a stock, connect the data back to the three frameworks when relevant.
 - Be concise and direct. No filler.
 - If the user asks something outside investing/finance, just answer normally without using tools.
 - Remember the full conversation — the user may refer to earlier questions.
 
 CRITICAL INSTRUCTIONS FOR STOCK ANALYSIS:
-When the user asks you to evaluate a stock, you MUST NOT write a generic summary. You must execute a "Three-Factor Committee Analysis" using Markdown tables and provide a definitive YES/NO verdict.
+When the user asks you to evaluate a stock, you MUST NOT write a generic summary. You must execute a Three-Factor Committee Analysis using Markdown tables and provide a definitive YES/NO verdict.
 
 Format your response EXACTLY like this:
 
@@ -783,11 +759,11 @@ Format your response EXACTLY like this:
 [Render a clean Markdown table with the stocks current price, P/E, Forward P/E, P/B, ROE, Debt/Equity, and Dividend Yield]
 
 ### 2. The Committee Verdict
-Evaluate the data against the three frameworks. If you are unsure of a specific rule, use the search_books tool.
+Evaluate the data against the three frameworks. If you are unsure of a specific rule, use the search_book tool.
 
-* **Graham's Verdict:** [Pass/Fail] - [One sentence justification based on Margin of Safety/Valuation]
-* **Greenblatt's Verdict:** [Pass/Fail] - [One sentence justification based on Earnings Yield/Capital Efficiency]
-* **Dorsey's Verdict:** [Pass/Fail] - [One sentence justification based on inferred Moat/Financial Health]
+* **Grahams Verdict:** [Pass/Fail] - [One sentence justification based on Margin of Safety/Valuation]
+* **Greenblatts Verdict:** [Pass/Fail] - [One sentence justification based on Earnings Yield/Capital Efficiency]
+* **Dorseys Verdict:** [Pass/Fail] - [One sentence justification based on inferred Moat/Financial Health]
 
 ### 3. Final Decision
 **[YES or NO]** [If 2 out of 3 Pass, it is a YES. If not, it is a NO. Provide a brief, blunt, one-paragraph explanation of the final ruling.]
@@ -863,8 +839,6 @@ if not st.session_state.messages:
     </div>
     """, unsafe_allow_html=True)
 
-
-# Define your avatars
 USER_AVATAR = "👤"
 AGENT_AVATAR = "📈"
 
@@ -878,14 +852,11 @@ for msg in st.session_state.messages:
 
 # Handle new input
 if prompt := st.chat_input("Ask about a stock, Graham's principles, or anything..."):
-    # 1. Save user message to state
     st.session_state.messages.append({"role": "user", "content": prompt})
-    
-    # 2. Display user message in UI
+
     with st.chat_message("user", avatar=USER_AVATAR):
         st.markdown(prompt)
 
-    # 3. Handle agent response
     with st.chat_message("assistant", avatar=AGENT_AVATAR):
         with st.spinner("Executing multi-factor analysis..."):
             try:
