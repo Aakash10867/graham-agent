@@ -897,17 +897,20 @@ button[kind="primary"]:hover {
     color: #00f5d4 !important;
 }
 /* ═══════════════════════════════════════════════
-   FIX: MOBILE TABLE OVERFLOW
+   FORCE MOBILE TABLE SCROLLING
    ═══════════════════════════════════════════════ */
-[data-testid="stDataFrame"] {
-    overflow-x: auto;
-    width: 100%;
+/* Target the main container holding Markdown tables */
+.stMarkdown div {
+    overflow-x: auto !important;
 }
 
-/* Allow horizontal scrolling on mobile for tables */
-div[data-testid="stTable"] {
-    overflow-x: auto;
-    display: block;
+/* Force table cells to not wrap, forcing the scrollbar */
+table {
+    width: 100% !important;
+    max-width: 100% !important;
+    display: block !important;
+    overflow-x: auto !important;
+    white-space: nowrap !important;
 }
 
 </style>
