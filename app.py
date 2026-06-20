@@ -291,11 +291,19 @@ footer {visibility: hidden;}
 header {visibility: hidden;}
 
 /* ═══════════════════════════════════════════════
-   TRANSPARENT INPUT DOCK
+   AGGRESSIVE TRANSPARENT INPUT DOCK
    ═══════════════════════════════════════════════ */
-[data-testid="stBottom"] {
+[data-testid="stBottom"], 
+[data-testid="stBottom"] > div,
+[data-testid="stBottom"] [data-testid="stVerticalBlock"] {
     background: transparent !important;
-    padding-top: 2rem !important;
+    background-color: transparent !important;
+    background-image: none !important;
+}
+
+/* Ensure the main view wrapper isn't creating a solid block behind it */
+[data-testid="stAppViewContainer"] {
+    background: transparent !important;
 }
 
 /* ═══════════════════════════════════════════════
