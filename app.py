@@ -15,6 +15,15 @@ import pymupdf
 import yfinance as yf
 import json
 
+FREE_MODELS = [
+    "gemini-2.5-flash-lite",       # your current default — highest free quota
+    "gemini-2.5-flash",            # solid upgrade
+    "gemini-3.5-flash",            # newest, fastest Flash
+    "gemini-3.1-flash-lite",       # lightweight 3.x option
+    "gemini-2.5-pro",              # heavy hitter, lower free limits
+    "gemini-3.1-pro-preview",      # strongest reasoning, lowest free limits
+]
+
 # ──────────────────────────────────────────────
 # PAGE CONFIG
 # ──────────────────────────────────────────────
@@ -779,35 +788,49 @@ TOOLS = [search_book, get_stock_data, calculator]
 
 
 def agent_turn(user_message):
-    """Create a fresh client every turn."""
+    """Try each free model until one responds."""
     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
     history = st.session_state.get("chat_history", [])
 
-    chat = client.chats.create(
-        model="gemini-2.5-flash-lite",
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_INSTRUCTION,
-            tools=TOOLS,
-        ),
-        history=history,
-    )
+    last_error = None
 
-    response = chat.send_message(user_message)
-
-    while response.function_calls:
-        function_responses = []
-        for fc in response.function_calls:
-            if fc.name in tool_functions:
-                result = tool_functions[fc.name](**fc.args)
-            else:
-                result = {"error": f"Unknown tool: {fc.name}"}
-            function_responses.append(
-                types.Part.from_function_response(name=fc.name, response=result)
+    for model_name in FREE_MODELS:
+        try:
+            chat = client.chats.create(
+                model=model_name,
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_INSTRUCTION,
+                    tools=TOOLS,
+                ),
+                history=history,
             )
-        response = chat.send_message(function_responses)
 
-    st.session_state.chat_history = chat.get_history()
-    return response.text
+            response = chat.send_message(user_message)
+
+            while response.function_calls:
+                function_responses = []
+                for fc in response.function_calls:
+                    if fc.name in tool_functions:
+                        result = tool_functions[fc.name](**fc.args)
+                    else:
+                        result = {"error": f"Unknown tool: {fc.name}"}
+                    function_responses.append(
+                        types.Part.from_function_response(name=fc.name, response=result)
+                    )
+                response = chat.send_message(function_responses)
+
+            st.session_state.chat_history = chat.get_history()
+            return response.text, model_name
+
+        except Exception as e:
+            error_msg = str(e)
+            last_error = error_msg
+            if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+                continue
+            else:
+                raise
+
+    raise Exception(f"All models rate-limited. Last error: {last_error}")
 
 # ──────────────────────────────────────────────
 # CHAT UI
@@ -840,10 +863,11 @@ AGENT_AVATAR = "📈"
 
 # Display past messages
 for msg in st.session_state.messages:
-    # Assign the correct avatar based on the role
     avatar = USER_AVATAR if msg["role"] == "user" else AGENT_AVATAR
     with st.chat_message(msg["role"], avatar=avatar):
         st.markdown(msg["content"])
+        if msg.get("model"):
+            st.caption(f"⚡ Powered by `{msg['model']}`")
 
 # Handle new input
 if prompt := st.chat_input("Ask about a stock, Graham's principles, or anything..."):
@@ -855,13 +879,17 @@ if prompt := st.chat_input("Ask about a stock, Graham's principles, or anything.
         st.markdown(prompt)
 
     # 3. Handle agent response
-    with st.chat_message("assistant", avatar=AGENT_AVATAR):  # ← same level as user block
-            with st.spinner("Executing multi-factor analysis..."):
-                try:
-                    # Attempt primary LLM orchestration
-                    answer = agent_turn(prompt)
-                    st.markdown(answer)
-                    st.session_state.messages.append({"role": "assistant", "content": answer})
+    with st.chat_message("assistant", avatar=AGENT_AVATAR):
+        with st.spinner("Executing multi-factor analysis..."):
+            try:
+                answer, model_used = agent_turn(prompt)
+                st.markdown(answer)
+                st.caption(f"⚡ Powered by `{model_used}`")
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": answer,
+                    "model": model_used
+                })
                     
                 except Exception as e:
                     error_msg = str(e)
