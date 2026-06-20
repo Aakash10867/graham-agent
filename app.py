@@ -392,7 +392,7 @@ def load_books():
         "Dorsey": "The Five Rules for Successful Stock Investing.pdf"
     }
     
-    chroma_client = chromadb.Client()
+    chroma_client = chromadb.EphemeralClient()
     # Use get_or_create to avoid duplication errors on hot reloads
     collection = chroma_client.get_or_create_collection("investment_committee")
     
