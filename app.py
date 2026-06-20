@@ -855,8 +855,8 @@ div[data-baseweb] [aria-invalid] {
    ═══════════════════════════════════════════════ */
 button:has(p:contains("🔄")) {
     position: fixed !important;
-    top: 65px !important;
-    right: 15px !important;
+    bottom: 28px !important; /* Anchors the button to the bottom row */
+    left: 20px !important;   /* Anchors it to the left side */
     z-index: 99999 !important;
     width: auto !important;
     padding: 4px 16px !important;
@@ -867,6 +867,7 @@ button:has(p:contains("🔄")) {
     border-radius: 50px !important;
     box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 10px rgba(0, 245, 212, 0.1) !important;
 }
+
 
 button:has(p:contains("🔄")):hover {
     background: rgba(0, 245, 212, 0.15) !important;
