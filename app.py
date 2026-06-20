@@ -1,3 +1,4 @@
+import os; os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 """
 GRAHAM INVESTMENT AGENT — Web App
 ==================================
