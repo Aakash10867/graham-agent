@@ -133,51 +133,55 @@ st.markdown("""
 }
 
 /* ═══════════════════════════════════════════════
-   3D GLASSMORPHISM CHAT SPACE
+   3D GLASSMORPHISM (Aggressive Streamlit Override)
    ═══════════════════════════════════════════════ */
 
-/* Target the core chat container wrapper */
+/* 1. Strip the solid background from Streamlit's inner wrappers */
+[data-testid="stChatMessage"] > div,
+[data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] {
+    background: transparent !important;
+    background-color: transparent !important;
+}
+
+/* 2. Apply the heavy 3D glass directly to the main parent */
 [data-testid="stChatMessage"] {
-    background: rgba(15, 23, 42, 0.45) !important; /* Semi-transparent deep space slate tint */
-    backdrop-filter: blur(12px) saturate(180%) !important; /* Refracts the moving stars underneath */
-    -webkit-backdrop-filter: blur(12px) saturate(180%) !important;
+    background: rgba(20, 25, 45, 0.4) !important; /* Frosted dark slate */
+    background-color: rgba(20, 25, 45, 0.4) !important;
     
-    /* 3D Glass Borders & Highlights */
+    /* The Blur Engine */
+    backdrop-filter: blur(16px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(16px) saturate(180%) !important;
+    
+    /* 3D Lighting Borders */
     border: 1px solid rgba(255, 255, 255, 0.08) !important;
-    border-top: 1px solid rgba(255, 255, 255, 0.15) !important; /* Simulates top light reflection */
+    border-top: 1px solid rgba(0, 245, 212, 0.25) !important; /* Top edge neon light catch */
     border-left: 1px solid rgba(255, 255, 255, 0.12) !important;
     
-    /* Rounded corners & Deep Shadow Depth */
-    border-radius: 16px !important;
+    /* Structure & Depth */
+    border-radius: 18px !important;
     box-shadow: 
-        0 4px 30px rgba(0, 0, 0, 0.4), 
-        inset 0 1px 2px rgba(255, 255, 255, 0.1) !important; /* Subtle inner glowing edge */
+        0 10px 40px rgba(0, 0, 0, 0.5), /* Deep drop shadow */
+        inset 0 1px 3px rgba(255, 255, 255, 0.1) !important; /* Inner glass reflection */
         
-    margin-bottom: 16px !important;
-    padding: 1.2rem !important;
-    transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+    margin-bottom: 20px !important;
+    padding: 1.5rem !important;
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
 }
 
-/* Subtle 3D lift effect when hovering over messages */
+/* 3. Hover Physics */
 [data-testid="stChatMessage"]:hover {
-    transform: translateY(-2px);
+    transform: translateY(-3px) scale(1.01) !important;
     box-shadow: 
-        0 8px 35px rgba(0, 245, 212, 0.15), /* Adds a faint cyan glow on hover */
-        inset 0 1px 2px rgba(255, 255, 255, 0.2) !important;
-    border: 1px solid rgba(0, 245, 212, 0.3) !important;
+        0 15px 45px rgba(0, 245, 212, 0.15), 
+        inset 0 1px 3px rgba(255, 255, 255, 0.2) !important;
+    border-top: 1px solid rgba(0, 245, 212, 0.5) !important;
 }
 
-/* Clean up avatar spacing for the glass cards */
-[data-testid="stChatMessageAvatar"] {
-    background-color: rgba(255, 255, 255, 0.05) !important;
-    border: 1px solid rgba(255, 255, 255, 0.1) !important;
-    border-radius: 50% !important;
-}
-
-/* Make sure the text color pops clearly against the frosted glass */
-[data-testid="stChatMessage"] p {
-    color: #e2e8f0 !important;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+/* 4. Text contrast fix */
+[data-testid="stChatMessage"] p, 
+[data-testid="stChatMessage"] li {
+    color: rgba(240, 245, 255, 0.95) !important;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8) !important; /* Forces text to pop off the glass */
 }
 
 /* ═══════════════════════════════════════════════
