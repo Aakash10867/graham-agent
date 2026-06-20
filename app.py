@@ -991,15 +991,8 @@ collection = load_books()
 # ──────────────────────────────────────────────
 
 def show_stock_chart(ticker: str) -> dict:
-    """Render a 13-month closing price chart for a stock directly in the terminal UI.
-    Use this EXPLICITLY when the user asks to see a chart, graph, visual plot, 
-    or trajectory of a stock's price.
-    
-    Args:
-        ticker: Stock ticker symbol (e.g. AAPL, RELIANCE.NS, TCS).
-    """
+    """Render a 13-month closing price chart for a stock directly in the terminal UI."""
     try:
-        import datetime
         import pandas as pd
         import yfinance as yf
         import streamlit as st
@@ -1007,29 +1000,34 @@ def show_stock_chart(ticker: str) -> dict:
         resolved = _resolve_ticker(ticker)
         resolved_upper = str(resolved).strip().upper()
         
-        # 13-month lookback
-        end_dt = datetime.date.today()
-        start_dt = end_dt - datetime.timedelta(days=395)
-        
-        data_feed = yf.Ticker(resolved_upper).history(start=start_dt, end=end_dt)
+        # ── BUG FIX 1: Bypass yfinance timezone bug by using 'period' ──
+        data_feed = yf.Ticker(resolved_upper).history(period="2y")
         
         # Indian market fallback
         if data_feed.empty and not resolved_upper.endswith((".NS", ".BSE")):
-            data_feed = yf.Ticker(f"{resolved_upper}.NS").history(start=start_dt, end=end_dt)
+            data_feed = yf.Ticker(f"{resolved_upper}.NS").history(period="2y")
             if not data_feed.empty:
                 resolved_upper = f"{resolved_upper}.NS"
                 
         if not data_feed.empty:
+            # Slice to exactly the last 275 trading days (~13 months)
+            data_feed = data_feed.tail(275)
+            
             st.write(f"### 📈 13-Month Trend: {resolved_upper}")
             
-            # Isolate data
             close_series = pd.DataFrame(data_feed["Close"])
             close_series.columns = [f"{resolved_upper} Close"]
             
-            # BULLETPROOF THE DATES: Strip timezones and convert to pure Python date objects
-            close_series.index = pd.to_datetime(close_series.index).tz_localize(None).date
+            # ── BUG FIX 2: Universal timezone stripping for Streamlit ──
+            try:
+                if close_series.index.tz is not None:
+                    close_series.index = close_series.index.tz_localize(None)
+            except Exception:
+                pass # If it's already naive, ignore and continue
+                
+            close_series.index = pd.to_datetime(close_series.index).date
+            # ───────────────────────────────────────────────────────────
             
-            # Render chart WITHOUT the color argument (widest compatibility)
             st.line_chart(close_series)
             
             return {"success": f"Chart successfully rendered to the UI for {resolved_upper}."}
@@ -1037,7 +1035,6 @@ def show_stock_chart(ticker: str) -> dict:
             return {"error": f"Failed to fetch chart data for {resolved_upper}. The ticker might be invalid."}
             
     except Exception as e:
-        # If it STILL fails, force Streamlit to print the exact error on the screen
         st.error(f"🚨 Streamlit Chart Error: {str(e)}")
         return {"error": f"Chart rendering failed: {str(e)}"}
 
