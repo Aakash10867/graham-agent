@@ -372,11 +372,11 @@ header {visibility: hidden;}
 # ──────────────────────────────────────────────
 # HEADER
 # ──────────────────────────────────────────────
-st.title("📈 Graham Investment Agent")
-st.caption("Ask about stocks, investing, or Benjamin Graham's principles. Powered by *The Intelligent Investor*.")
+st.title("🏛️ AlphaConsensus Terminal")
+st.caption("Quantitative Multi-Agent Investment Committee. Operating on Graham, Greenblatt, and Dorsey frameworks.")
 
 # New Chat button
-if st.button("🔄 New Chat"):
+if st.button("🔄 Reset Terminal"):
     st.session_state.messages = []
     st.session_state.chat_history = []
     st.rerun()
