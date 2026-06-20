@@ -26,6 +26,215 @@ FREE_MODELS = [
 ]
 
 # ──────────────────────────────────────────────
+# TICKER ALIAS MAP — Layer 1 of resolution
+# Handles common abbreviations and Indian names
+# that don't match Yahoo Finance ticker symbols.
+# ──────────────────────────────────────────────
+TICKER_ALIASES = {
+    # ── Nifty 50 & common Indian abbreviations ──
+    "RIL": "RELIANCE.NS",
+    "RELIANCE": "RELIANCE.NS",
+    "RELIANCE INDUSTRIES": "RELIANCE.NS",
+    "TCS": "TCS.NS",
+    "TATA CONSULTANCY": "TCS.NS",
+    "TATA CONSULTANCY SERVICES": "TCS.NS",
+    "INFY": "INFY.NS",
+    "INFOSYS": "INFY.NS",
+    "HDFC": "HDFCBANK.NS",
+    "HDFC BANK": "HDFCBANK.NS",
+    "ICICI": "ICICIBANK.NS",
+    "ICICI BANK": "ICICIBANK.NS",
+    "SBI": "SBIN.NS",
+    "STATE BANK": "SBIN.NS",
+    "STATE BANK OF INDIA": "SBIN.NS",
+    "WIPRO": "WIPRO.NS",
+    "ITC": "ITC.NS",
+    "LT": "LT.NS",
+    "L&T": "LT.NS",
+    "LARSEN": "LT.NS",
+    "LARSEN AND TOUBRO": "LT.NS",
+    "M&M": "M&M.NS",
+    "MAHINDRA": "M&M.NS",
+    "BAJAJ FINANCE": "BAJFINANCE.NS",
+    "BAJAJ FINSERV": "BAJAJFINSV.NS",
+    "KOTAK": "KOTAKBANK.NS",
+    "KOTAK BANK": "KOTAKBANK.NS",
+    "KOTAK MAHINDRA": "KOTAKBANK.NS",
+    "MARUTI": "MARUTI.NS",
+    "MARUTI SUZUKI": "MARUTI.NS",
+    "TATA MOTORS": "TATAMOTORS.NS",
+    "TATA STEEL": "TATASTEEL.NS",
+    "AIRTEL": "BHARTIARTL.NS",
+    "BHARTI AIRTEL": "BHARTIARTL.NS",
+    "HUL": "HINDUNILVR.NS",
+    "HINDUSTAN UNILEVER": "HINDUNILVR.NS",
+    "ASIAN PAINTS": "ASIANPAINT.NS",
+    "SUN PHARMA": "SUNPHARMA.NS",
+    "SUNPHARMA": "SUNPHARMA.NS",
+    "ADANI": "ADANIENT.NS",
+    "ADANI ENTERPRISES": "ADANIENT.NS",
+    "ADANI PORTS": "ADANIPORTS.NS",
+    "ZOMATO": "ZOMATO.NS",
+    "PAYTM": "PAYTM.NS",
+    "NYKAA": "NYKAA.NS",
+    "DMART": "DMART.NS",
+    "AVENUE SUPERMARTS": "DMART.NS",
+    "TITAN": "TITAN.NS",
+    "NESTLE": "NESTLEIND.NS",
+    "NESTLE INDIA": "NESTLEIND.NS",
+    "POWER GRID": "POWERGRID.NS",
+    "NTPC": "NTPC.NS",
+    "COAL INDIA": "COALINDIA.NS",
+    "ONGC": "ONGC.NS",
+    "AXIS": "AXISBANK.NS",
+    "AXIS BANK": "AXISBANK.NS",
+    "TECH MAHINDRA": "TECHM.NS",
+    "HCL": "HCLTECH.NS",
+    "HCLTECH": "HCLTECH.NS",
+    "HCL TECH": "HCLTECH.NS",
+    "ULTRATECH": "ULTRACEMCO.NS",
+    "ULTRATECH CEMENT": "ULTRACEMCO.NS",
+    "BAJAJ AUTO": "BAJAJ-AUTO.NS",
+    "HERO": "HEROMOTOCO.NS",
+    "HERO MOTOCORP": "HEROMOTOCO.NS",
+    "BRITANNIA": "BRITANNIA.NS",
+    "CIPLA": "CIPLA.NS",
+    "DR REDDY": "DRREDDY.NS",
+    "DR REDDYS": "DRREDDY.NS",
+    "EICHER": "EICHERMOT.NS",
+    "EICHER MOTORS": "EICHERMOT.NS",
+    "GRASIM": "GRASIM.NS",
+    "HINDALCO": "HINDALCO.NS",
+    "INDUSIND": "INDUSINDBK.NS",
+    "INDUSIND BANK": "INDUSINDBK.NS",
+    "JSW STEEL": "JSWSTEEL.NS",
+    "TATA CONSUMER": "TATACONSUM.NS",
+    "UPL": "UPL.NS",
+    "DIVIS": "DIVISLAB.NS",
+    "DIVIS LAB": "DIVISLAB.NS",
+    "SHREE CEMENT": "SHREECEM.NS",
+    "SBI LIFE": "SBILIFE.NS",
+    "SBILIFE": "SBILIFE.NS",
+    "HDFC LIFE": "HDFCLIFE.NS",
+    "HDFCLIFE": "HDFCLIFE.NS",
+    "TATA POWER": "TATAPOWER.NS",
+    "TATA ELXSI": "TATAELXSI.NS",
+    "HAL": "HAL.NS",
+    "BEL": "BEL.NS",
+    "IRCTC": "IRCTC.NS",
+    "VEDANTA": "VEDL.NS",
+    "VEDL": "VEDL.NS",
+    "SAIL": "SAIL.NS",
+    "IOC": "IOC.NS",
+    "INDIAN OIL": "IOC.NS",
+    "BPCL": "BPCL.NS",
+    "HPCL": "HINDPETRO.NS",
+    "PNB": "PNB.NS",
+    "BANK OF BARODA": "BANKBARODA.NS",
+    "BOB": "BANKBARODA.NS",
+    "CANARA BANK": "CANBK.NS",
+    # ── Major US stocks ──
+    "APPLE": "AAPL",
+    "MICROSOFT": "MSFT",
+    "GOOGLE": "GOOGL",
+    "ALPHABET": "GOOGL",
+    "AMAZON": "AMZN",
+    "META": "META",
+    "FACEBOOK": "META",
+    "TESLA": "TSLA",
+    "NVIDIA": "NVDA",
+    "NETFLIX": "NFLX",
+    "BERKSHIRE": "BRK-B",
+    "JPMORGAN": "JPM",
+    "JP MORGAN": "JPM",
+    "GOLDMAN": "GS",
+    "GOLDMAN SACHS": "GS",
+    "DISNEY": "DIS",
+    "COCA COLA": "KO",
+    "PEPSI": "PEP",
+    "JOHNSON AND JOHNSON": "JNJ",
+    "WALMART": "WMT",
+    "VISA": "V",
+    "MASTERCARD": "MA",
+}
+
+
+def _search_yahoo(query: str) -> list[dict] | None:
+    """Search Yahoo Finance for ticker matches.
+    Layer 2: uses yf.Search() which handles Yahoo's cookie/crumb auth.
+    Falls back to raw API as a last resort.
+    """
+    # Try yfinance's built-in Search (handles auth properly)
+    try:
+        search_result = yf.Search(query)
+        quotes = getattr(search_result, "quotes", None)
+        if quotes:
+            return [
+                {
+                    "symbol": q.get("symbol"),
+                    "name": q.get("longname") or q.get("shortname"),
+                    "exchange": q.get("exchange"),
+                    "type": q.get("quoteType"),
+                }
+                for q in quotes[:5]
+            ]
+    except Exception:
+        pass
+
+    # Last resort: raw API (may fail, but costs nothing to try)
+    try:
+        url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        resp = requests.get(url, headers=headers, timeout=5)
+        data = resp.json()
+        if "quotes" in data and data["quotes"]:
+            return [
+                {
+                    "symbol": q.get("symbol"),
+                    "name": q.get("longname") or q.get("shortname"),
+                    "exchange": q.get("exchange"),
+                    "type": q.get("quoteType"),
+                }
+                for q in data["quotes"][:5]
+            ]
+    except Exception:
+        pass
+
+    return None
+
+
+def _resolve_ticker(query: str) -> str:
+    """Central ticker resolution: alias map → yf.Search → raw fallback.
+    Returns the best ticker string it can find.
+    """
+    key = query.strip().upper()
+
+    # Layer 1: alias map (instant, zero API calls)
+    if key in TICKER_ALIASES:
+        return TICKER_ALIASES[key]
+
+    # If it already has .NS or .BO suffix, trust it
+    if ".NS" in key or ".BO" in key:
+        return key
+
+    # Layer 2: dynamic search via yfinance
+    results = _search_yahoo(query)
+    if results:
+        # Prefer Indian exchange matches
+        indian = next(
+            (q for q in results if q.get("exchange") in ("NSI", "BSE", "NSE")),
+            None,
+        )
+        if indian and indian.get("symbol"):
+            return indian["symbol"]
+        if results[0].get("symbol"):
+            return results[0]["symbol"]
+
+    # Last resort: return the input uppercased and hope yfinance can handle it
+    return key
+
+
+# ──────────────────────────────────────────────
 # PAGE CONFIG
 # ──────────────────────────────────────────────
 st.set_page_config(
@@ -580,33 +789,21 @@ def get_stock_data(company_query: str) -> dict:
     Use this when the user asks about a specific company's financials.
 
     Args:
-        company_query: Stock ticker or company name, e.g. AAPL, TCS, "Mahindra", "Groww"
+        company_query: Stock ticker or company name, e.g. "AAPL", "RELIANCE.NS",
+                       "TCS", "Mahindra", "Groww". Indian tickers should end in .NS
+                       (NSE) or .BO (BSE). Common names like RIL, HDFC, SBI are
+                       resolved automatically.
     """
-    resolved_ticker = company_query.upper()
-
-    if ".NS" not in resolved_ticker and ".BO" not in resolved_ticker:
-        try:
-            url = f"https://query2.finance.yahoo.com/v1/finance/search?q={company_query}"
-            headers = {'User-Agent': 'Mozilla/5.0'}
-            response = requests.get(url, headers=headers, timeout=5)
-            data = response.json()
-
-            if "quotes" in data and len(data["quotes"]) > 0:
-                quotes = data["quotes"]
-                indian_match = next((q for q in quotes if q.get("exchange") in ["NSI", "BSE"]), None)
-                if indian_match:
-                    resolved_ticker = indian_match["symbol"]
-                else:
-                    resolved_ticker = quotes[0]["symbol"]
-        except Exception:
-            pass
+    resolved_ticker = _resolve_ticker(company_query)
 
     try:
         stock = yf.Ticker(resolved_ticker)
         info = stock.info
 
         if not info or info.get("regularMarketPrice") is None:
-            return {"error": f"No quantitative data found for '{company_query}'. Resolved to ticker [{resolved_ticker}] but it may be a private entity, mutual fund, or invalid."}
+            return {"error": f"No quantitative data found for '{company_query}'. "
+                    f"Resolved to ticker [{resolved_ticker}] but it may be a "
+                    f"private entity, mutual fund, or invalid."}
 
         return {
             "symbol": info.get("symbol"),
@@ -649,28 +846,29 @@ def lookup_ticker(company_name: str) -> dict:
     without providing a ticker symbol.
 
     Args:
-        company_name: The company name, e.g. "Groww", "Apple", "Tata Motors"
+        company_name: The company name, e.g. "Groww", "Apple", "Tata Motors", "RIL"
     """
-    try:
-        url = f"https://query2.finance.yahoo.com/v1/finance/search?q={company_name}"
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers, timeout=5)
-        data = response.json()
+    key = company_name.strip().upper()
 
-        if "quotes" in data and len(data["quotes"]) > 0:
-            matches = []
-            for q in data["quotes"][:5]:
-                matches.append({
-                    "symbol": q.get("symbol"),
-                    "name": q.get("longname") or q.get("shortname"),
-                    "exchange": q.get("exchange"),
-                    "type": q.get("quoteType"),
-                })
-            if matches:
-                return {"matches": matches}
-        return {"error": f"No ticker found for '{company_name}'. It may not be publicly listed."}
-    except Exception as e:
-        return {"error": f"Ticker lookup failed: {str(e)}"}
+    # Check alias map first (instant, no API call)
+    if key in TICKER_ALIASES:
+        ticker = TICKER_ALIASES[key]
+        return {
+            "matches": [{
+                "symbol": ticker,
+                "name": company_name,
+                "exchange": "Alias Map",
+                "type": "EQUITY",
+            }]
+        }
+
+    # Fall back to dynamic search
+    results = _search_yahoo(company_name)
+    if results:
+        return {"matches": results}
+
+    return {"error": f"No ticker found for '{company_name}'. "
+            "It may not be publicly listed."}
 
 
 # Register all tools
@@ -693,6 +891,7 @@ def fallback_router(prompt: str) -> str:
 
     if "mahindra" in prompt_lower: potential_tickers.append("M&M.NS")
     if "apple" in prompt_lower: potential_tickers.append("AAPL")
+    if "reliance" in prompt_lower or "ril" in prompt_lower: potential_tickers.append("RELIANCE.NS")
 
     tickers_to_check = list(set(potential_tickers))
     valid_stock_found = False
@@ -701,7 +900,9 @@ def fallback_router(prompt: str) -> str:
         if ticker in ["I", "A", "THE", "WHAT", "WHY", "HOW", "IS", "YES", "NO"]:
             continue
 
-        data = get_stock_data(ticker)
+        # Use the alias-aware resolver instead of raw get_stock_data
+        resolved = _resolve_ticker(ticker)
+        data = get_stock_data(resolved)
         if "error" not in data:
             valid_stock_found = True
             table = f"### 📊 Auto-Fetched Data for {data.get('symbol', ticker)}\n"
