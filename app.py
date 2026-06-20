@@ -1,4 +1,10 @@
-import os; os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+import os, sys
+from unittest.mock import MagicMock
+
+# Block chromadb's opentelemetry import (protobuf conflict on Streamlit Cloud)
+os.environ["ANONYMIZED_TELEMETRY"] = "False"
+sys.modules["chromadb.telemetry.opentelemetry"] = MagicMock()
+
 """
 GRAHAM INVESTMENT AGENT — Web App
 ==================================
