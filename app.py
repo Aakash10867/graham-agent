@@ -939,6 +939,7 @@ st.markdown("""
     <h1>AlphaConsensus Terminal</h1>
 </div>
 """, unsafe_allow_html=True)
+
 st.caption("Quantitative Multi-Agent Investment Committee. Operating on Graham, Greenblatt, and Dorsey frameworks.")
 
 # ──────────────────────────────────────────────
