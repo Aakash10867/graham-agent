@@ -1167,6 +1167,21 @@ for msg in st.session_state.messages:
         if msg.get("model"):
             st.caption(f"⚡ Powered by `{msg['model']}`")
 
+# ──────────────────────────────────────────────
+# NEW: BOTTOM RESET BUTTON
+# ──────────────────────────────────────────────
+if st.session_state.messages:
+    st.write("") # Small spacer
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        if st.button("🔄 Clear & Reset Terminal", key="bottom_reset", use_container_width=True):
+            st.session_state.messages = []
+            st.session_state.chat_history = []
+            st.rerun()
+# ──────────────────────────────────────────────
+
+
+
 # Handle new input
 if prompt := st.chat_input("Ask about a stock, Graham's principles, or anything..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
