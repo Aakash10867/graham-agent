@@ -784,8 +784,6 @@ Evaluate the data against the three frameworks. If you are unsure of a specific 
 **[YES or NO]** [If 2 out of 3 Pass, it is a YES. If not, it is a NO. Provide a brief, blunt, one-paragraph explanation of the final ruling.]
 """
 
-TOOLS = [search_book, get_stock_data, calculator]
-
 
 def agent_turn(user_message):
     """Try each free model until one responds."""
