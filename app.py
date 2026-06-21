@@ -412,8 +412,34 @@ st.markdown("""
     background: transparent !important;
 }
 
-/* ── Hide Streamlit chrome ── */
-#MainMenu, footer, header { visibility: hidden; }
+/* ── Hide Streamlit chrome but KEEP sidebar toggle ── */
+#MainMenu, footer { visibility: hidden !important; }
+header { background: transparent !important; }
+
+/* Hide the top-right toolbar (Deploy button, menu icon) */
+[data-testid="stToolbar"] { visibility: hidden !important; }
+
+/* ── Style the native sidebar toggle to look like a modern floating button ── */
+[data-testid="collapsedControl"] {
+    background-color: #161b22 !important;
+    border: 1px solid rgba(255,255,255,0.1) !important;
+    border-radius: 8px !important;
+    top: 15px !important;
+    left: 15px !important;
+    color: #00f5d4 !important;
+    transition: all 0.2s ease !important;
+    z-index: 99999 !important;
+}
+
+[data-testid="collapsedControl"]:hover {
+    background-color: rgba(0, 245, 212, 0.08) !important;
+    border-color: rgba(0, 245, 212, 0.4) !important;
+    box-shadow: 0 0 0 1px rgba(0, 245, 212, 0.15) !important;
+}
+
+[data-testid="collapsedControl"] svg {
+    fill: #00f5d4 !important;
+}
 
 /* ── Sidebar ── */
 [data-testid="stSidebar"] {
