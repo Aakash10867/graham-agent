@@ -676,6 +676,7 @@ universe_df = load_universe(CSV_PATH)
 # TOOL FUNCTIONS
 # ──────────────────────────────────────────────
 
+
 def show_stock_chart(ticker: str) -> dict:
     """Render a 13-month closing price chart for a stock directly in the terminal UI."""
     try:
