@@ -7,3 +7,4 @@ yfinance
 chromadb==0.6.3
 protobuf>=5.27,<6
 pysqlite3-binary
+supabase
