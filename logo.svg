@@ -1,10 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
-  <!-- Deep Terminal Background -->
-  <rect width="256" height="256" rx="40" fill="#0f1117"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="30 30 195 205">
+  <!-- Background removed for native transparency -->
   
   <!-- The Consensus 'C' (Silver Pop) -->
   <path d="M 160,70 C 80,40 40,110 50,180 C 60,220 120,230 160,190" 
-        fill="none" stroke="#F3F4F6" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+        fill="none" stroke="#F3F4F6" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
   
   <!-- The Alpha 'A' Core (Amber Warmth) -->
   <path d="M 60,200 C 90,130 110,60 135,60 C 150,60 170,110 180,160" 
