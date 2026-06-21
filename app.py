@@ -17,6 +17,11 @@ sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 import os
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
+
+
+import datetime
+import streamlit as st
+
 # ══════════════════════════════════════════════
 # PAGE CONFIG
 # ══════════════════════════════════════════════
@@ -27,8 +32,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-import datetime
-import streamlit as st
 from google import genai
 from google.genai import types
 import chromadb
