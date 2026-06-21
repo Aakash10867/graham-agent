@@ -907,7 +907,7 @@ def get_stock_data(company_query: str) -> dict:
                     f"Resolved to ticker [{resolved_ticker}] but it may be a "
                     f"private entity, mutual fund, or invalid."}
 
-        return {
+        result = {
             "symbol": info.get("symbol"),
             "name": info.get("longName") or info.get("shortName"),
             "sector": info.get("sector"),
@@ -924,6 +924,17 @@ def get_stock_data(company_query: str) -> dict:
             "return_on_equity": info.get("returnOnEquity"),
             "debt_to_equity": info.get("debtToEquity"),
         }
+
+        # Auto-inject earnings quality — LLM sees flags whether it asks or not
+        quality = get_earnings_quality_metrics(resolved_ticker)
+        if "error" not in quality:
+            result["earnings_quality"] = {
+                "cash_conversion_ratio": quality["cash_conversion_ratio"],
+                "unusual_items_pct": quality["unusual_items_pct_of_income"],
+                "anomaly_flags": quality["anomaly_flags"],
+            }
+
+        return result
     except Exception as e:
         return {"error": f"Data retrieval failed for [{resolved_ticker}]: {str(e)}"}
 
@@ -1688,9 +1699,6 @@ def get_macro_context(ticker: str) -> dict:
 # ──────────────────────────────────────────────
 # TOOLS REGISTRY
 # ──────────────────────────────────────────────
-# ──────────────────────────────────────────────
-# TOOLS REGISTRY
-# ──────────────────────────────────────────────
 TOOLS = [
     search_book,
     get_stock_data,
@@ -1708,7 +1716,6 @@ TOOLS = [
     get_csv_financial_data,
     get_macro_context,
     get_sip_candidates,
-    get_earnings_quality_metrics,
 ]
 
 tool_functions = {
@@ -1728,7 +1735,6 @@ tool_functions = {
     "get_csv_financial_data": get_csv_financial_data,
     "get_macro_context": get_macro_context,
     "get_sip_candidates": get_sip_candidates,
-    "get_earnings_quality_metrics": get_earnings_quality_metrics,
 }
 
 
@@ -1891,8 +1897,8 @@ VERDICT RULE:
 EXECUTION PROTOCOL:
 You are an intelligent, conversational, and highly analytical Quantitative Investment Committee. You are free from rigid formatting templates, but you are BOUND by strict quantitative logic. 
 
-EARNINGS QUALITY MANDATE:
-Earnings are an opinion; cash is a fact. You MUST call `get_earnings_quality_metrics` for every single stock you analyze deeply. If ANY anomaly flags are raised by this tool (e.g., Unusual items > 20% of net income, Cash conversion < 0.5), you MUST OVERRIDE any positive framework scores and issue a "NO" verdict. A low P/E driven by an unusual item is a value trap.
+EARNINGS QUALITY (AUTO-INJECTED):
+Earnings quality flags are automatically included in every get_stock_data response under the "earnings_quality" key. If ANY anomaly flags say "RED FLAG", you MUST OVERRIDE positive framework scores and issue a "NO" verdict regardless of how many frameworks pass. A low P/E driven by unusual items is a value trap, not a bargain.
 
 Follow these core behavioral directives:
 1. The Binary Verdict (No Waffling): Answer the user's specific question immediately. You MUST explicitly state your final investment decision as a bold "YES" or "NO" in the opening paragraph. 
@@ -1907,19 +1913,23 @@ Follow these core behavioral directives:
 AUDITOR_SYSTEM_PROMPT = """You are the Chief Risk Officer and Auditor for an Investment Committee.
 You are a truthful, disagreeable, first-principle thinker. Your sole job is to catch the Analyst making mistakes, specifically falling for statistical illusions.
 
-Review the Analyst's draft.
-1. Did the Analyst recommend a "YES" on a specific stock that has massive Unusual Items skewing its P/E or ROE?
-2. Did the Analyst recommend a "YES" on a stock while ignoring a terrible Cash Conversion ratio?
-3. Did the Analyst issue a final "YES" recommendation or include a stock in a FINAL SIP PORTFOLIO without running live earnings quality checks?
+You receive THREE inputs:
+1. The user's original query
+2. The Analyst's draft response
+3. Independent Earnings Quality Data — hard numbers YOU verify against
+
+AUDIT CHECKLIST (use the Independent data, not the Analyst's claims):
+1. For every stock where the Analyst recommends YES: check if unusual_items_pct > 20%. If so, the YES is invalid.
+2. For every stock where the Analyst recommends YES: check if cash_conversion < 0.5. If so, the YES is invalid.
+3. If the Independent data contains RED FLAG entries for a stock the Analyst recommended, but the Analyst did not mention or address those flags, the draft is invalid.
+4. If Independent Earnings Quality Data is empty (no tickers found or no flags raised), the draft is likely safe on this dimension.
 
 CRITICAL BYPASS RULES (Auto-Approve):
 - If the Analyst is simply asking the user a question (such as the 4-step SIP portfolio sequence), reply EXACTLY with: [APPROVED]
-- If the Analyst is just generating a raw bulk list via `find_investments` (not a finalized SIP portfolio), reply EXACTLY with: [APPROVED]
 - If the Analyst issued a "NO" verdict or is simply conversing, reply EXACTLY with: [APPROVED]
 
-If the Analyst's draft is fundamentally sound, mathematically safe, or triggers a bypass, reply EXACTLY with: [APPROVED]
-If the Analyst fell for an accounting trap or recommended a stock/portfolio without checking earnings quality, reply with: [REJECT] followed by a harsh, direct explanation of exactly what they missed and how they must rewrite the verdict.
-"""
+If the Analyst's draft is fundamentally sound and no Independent data contradicts it, reply EXACTLY with: [APPROVED]
+If the Independent data contradicts the Analyst's verdict, reply with: [REJECT] followed by which specific tickers failed quality checks and what the Analyst must change."""
 
 # ──────────────────────────────────────────────
 # AGENT
@@ -2007,10 +2017,35 @@ def agent_turn(user_message):
 
             draft_text = analyst_response.text
 
-            # --- PHASE 2: AUDITOR REVIEWS DRAFT ---
+            # --- PHASE 2: AUDITOR REVIEWS DRAFT (with independent data) ---
+            # Extract tickers mentioned in draft and run quality checks
+            NOISE_WORDS = {"PASS", "FAIL", "YES", "NO", "ROE", "EPS", "SIP",
+                           "AND", "THE", "FOR", "NOT", "USE", "ALL", "WHY",
+                           "HOW", "BUY", "TOP", "LOW", "HIGH", "CAP", "NET",
+                           "YOY", "INR", "USD", "FY", "PE", "PB", "DE",
+                           "SMA", "CAGR", "NAV", "IPO", "ETF", "PDF", "CSV"}
+            mentioned_tickers = set(re.findall(r'\b[A-Z]{2,15}(?:\.NS|\.BO)?\b', draft_text))
+            mentioned_tickers -= NOISE_WORDS
+
+            quality_checks = {}
+            for t in mentioned_tickers:
+                qc = get_earnings_quality_metrics(t)
+                if "error" not in qc and qc.get("anomaly_flags"):
+                    quality_checks[t] = {
+                        "cash_conversion": qc["cash_conversion_ratio"],
+                        "unusual_items_pct": qc["unusual_items_pct_of_income"],
+                        "flags": qc["anomaly_flags"],
+                    }
+
+            auditor_input = (
+                f"User Query: {user_message}\n\n"
+                f"Analyst Draft:\n{draft_text}\n\n"
+                f"Independent Earnings Quality Data:\n{json.dumps(quality_checks, indent=2)}"
+            )
+
             auditor_response = client.models.generate_content(
                 model=model_name,
-                contents=f"User Query: {user_message}\n\nAnalyst Draft: {draft_text}",
+                contents=auditor_input,
                 config=types.GenerateContentConfig(system_instruction=AUDITOR_SYSTEM_PROMPT)
             )
 
