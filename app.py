@@ -1252,6 +1252,7 @@ def find_investments(market: str) -> dict:
         "universe_scored.csv",
         Path(__file__).parent / "universe_scored.csv",
         os.path.join(os.getcwd(), "universe_scored.csv"),
+        "/mount/src/graham-agent/universe_scored.csv",
     ]
 
     df = None
