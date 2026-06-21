@@ -410,22 +410,24 @@ st.markdown("""
     background-color: #0f1117 !important;
 }
 
-/* Apply Inter font to standard elements */
-.stApp, .stApp p, .stApp h1, .stApp h2, .stApp h3, .stApp div, .stApp input, .stApp button, .stApp table, .stApp td, .stApp th {
+/* Apply Inter font to text, but EXCLUDE material icons so arrows don't break */
+.stApp *:not(.material-symbols-rounded):not(.material-icons):not([class*="icon"]):not(svg):not([data-testid="collapsedControl"] span) {
     font-family: 'Inter', sans-serif !important;
-}
-
-/* ── THE ICON FIX: Explicitly force the material font back onto the icons ── */
-.material-symbols-rounded, 
-.material-icons, 
-[data-testid="stSidebar"] button span,
-[data-testid="collapsedControl"] span {
-    font-family: 'Material Symbols Rounded', 'Material Icons', sans-serif !important;
-    font-size: 1.25rem !important;
 }
 
 [data-testid="stAppViewContainer"] {
     background: transparent !important;
+}
+
+/* ── 1. KILL STREAMLIT'S HOVER-TO-HIDE LOGIC ── */
+/* Force the header and its wrappers to stay at opacity 1 permanently */
+header[data-testid="stHeader"],
+header[data-testid="stHeader"] > div,
+header[data-testid="stHeader"] > div > div {
+    background: transparent !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    z-index: 99999 !important;
 }
 
 /* ── 2. Kill the right-side toolbar (Deploy, Menu) ── */
@@ -435,21 +437,21 @@ st.markdown("""
 
 /* ── 3. Gemini-Style Floating Sidebar Toggle ── */
 [data-testid="collapsedControl"] {
-    position: fixed !important;      /* Forces it to float above everything */
+    position: fixed !important;
     top: 14px !important;
     left: 14px !important;
-    background-color: #1e1f20 !important; /* Gemini dark tone */
+    background-color: #1e1f20 !important;
     border: 1px solid rgba(255, 255, 255, 0.1) !important;
-    border-radius: 12px !important;  /* Gemini squircle shape */
+    border-radius: 12px !important;
     width: 42px !important;
     height: 42px !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
     z-index: 999999 !important;
-    visibility: visible !important;
     opacity: 1 !important;
-    transition: all 0.2s ease !important;
+    visibility: visible !important;
+    transition: background-color 0.2s ease, border-color 0.2s ease !important;
 }
 
 [data-testid="collapsedControl"]:hover {
@@ -457,11 +459,13 @@ st.markdown("""
     border-color: rgba(255, 255, 255, 0.2) !important;
 }
 
+/* Ensure the icon renders properly and isn't hidden */
 [data-testid="collapsedControl"] svg {
     width: 22px !important;
     height: 22px !important;
-    fill: #d1d5db !important;        /* Soft white/gray icon color */
+    fill: #d1d5db !important;
     color: #d1d5db !important;
+    display: block !important;
 }
 
 /* ── Sidebar ── */
