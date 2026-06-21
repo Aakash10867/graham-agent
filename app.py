@@ -1574,7 +1574,8 @@ VERDICT RULE:
 - VALUE EXCEPTION (YES): If Graham PASSES but the score is only 1/4, the VERDICT decision is YES (Deep Value).
 
 EXECUTION PROTOCOL:
-You MUST output your response EXACTLY following the template below. Use proper Markdown tables with pipes (|) and a blank line before the table. Do not add any text outside of this template.
+1. DIRECT SYNTHESIS: Always begin by directly and naturally answering the user's specific question (e.g., "Should I be worried?", "Why did it drop?"). State your thesis upfront.
+2. TEMPLATE RULES: Output the Quantitative Evaluation Template ONLY if the user explicitly asks for a full analysis, valuation, or screener. If they ask a conversational or targeted question, weave the relevant metrics into your natural response and skip the rigid tables.
 
 <output_template>
 ### 1. Live Fundamentals & Trajectory
