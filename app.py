@@ -580,8 +580,17 @@ with st.sidebar:
 # ══════════════════════════════════════════════
 # HEADER
 # ══════════════════════════════════════════════
-st.markdown("# AlphaConsensus Terminal")
+# Lock the logo and title into a tight horizontal grid
+h_col1, h_col2 = st.columns([1, 11])
+
+with h_col1:
+    st.image("logo.svg", width=54) # Precise, discrete sizing
+
+with h_col2:
+    st.markdown("<h1 style='margin-top: -15px; padding-bottom: 0px;'>AlphaConsensus</h1>", unsafe_allow_html=True)
+
 st.caption("Quantitative investment analysis — Graham, Greenblatt, Dorsey, and Trajectory frameworks.")
+st.markdown("---")
 
 # ──────────────────────────────────────────────
 # LOAD BOOKS INTO CHROMADB (runs once, cached)
@@ -1640,22 +1649,10 @@ if not prompt and "pending_prompt" in st.session_state:
 # ── All chat content renders inside the container (above buttons) ──
 with chat_area:
     # Ephemeral Hero State (shown only when chat is empty)
+    # Terminal Ready State (shown only when chat is empty)
     if not st.session_state.messages:
-        st.markdown("<br><br>", unsafe_allow_html=True)
-        
-        # Force strict center alignment using a 1 : 1.5 : 1 column ratio
-        col1, col2, col3 = st.columns([1, 1.5, 1])
-        with col2:
-            st.image("logo.svg", use_container_width=True)
-            
-        st.markdown(
-            "<p style='color: #9ca3af; font-size: 0.95rem; text-align: center; margin-top: 20px;'>"
-            "Enter a company name in the sidebar, then pick an analysis below — "
-            "or scan the market with the screeners. You can also type anything in the chat."
-            "</p>",
-            unsafe_allow_html=True,
-        )
-        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("")
+        st.info("Terminal ready. Enter a company name in the sidebar, pick a preset, or run a screener.")
 
     # Display past messages
     for msg in st.session_state.messages:
