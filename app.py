@@ -1882,7 +1882,7 @@ if target:
 
 st.markdown("")
 st.caption("Market screeners")
-scr_cols = st.columns(2)
+scr_cols = st.columns(3)
 for i, (label, template) in enumerate(SCREENER_PRESETS):
     with scr_cols[i]:
         if st.button(label, key=f"screener_{i}", use_container_width=True):
