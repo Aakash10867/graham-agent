@@ -766,12 +766,6 @@ universe_df = load_universe(CSV_PATH)
 # ──────────────────────────────────────────────
 
 def get_earnings_quality_metrics(ticker: str) -> dict:
-    """
-    CRITICAL TOOL: Calculates intrinsic BS-detectors to catch statistical illusions.
-    1. Cash Conversion (Net Income vs Operating Cash Flow)
-    2. Unusual Items % of Net Income
-    Use this on EVERY single-stock deep dive to verify the numbers are real.
-    """
     resolved = _resolve_ticker(ticker)
     try:
         t = yf.Ticker(resolved)
@@ -779,40 +773,84 @@ def get_earnings_quality_metrics(ticker: str) -> dict:
         cf = t.cashflow
 
         if inc.empty or cf.empty:
-            return {"error": "Financial statements unavailable to verify earnings quality."}
+            return {"error": "Financial statements unavailable."}
 
         def get_latest(df, row_names):
             for name in row_names:
                 if name in df.index:
                     val = df.loc[name].dropna()
-                    if not val.empty: return float(val.iloc[0])
+                    if not val.empty:
+                        return float(val.iloc[0])
             return 0.0
+
+        def get_series(df, row_names, n=3):
+            """Get up to n years of a metric."""
+            for name in row_names:
+                if name in df.index:
+                    vals = df.loc[name].dropna().tolist()
+                    return [float(v) for v in vals[:n]]
+            return []
 
         net_income = get_latest(inc, ['Net Income', 'Net Income Common Stockholders'])
         ocf = get_latest(cf, ['Operating Cash Flow', 'Total Cash From Operating Activities'])
-        unusual_items = get_latest(inc, ['Unusual Items', 'Extraordinary Items'])
+        operating_income = get_latest(inc, ['Operating Income', 'EBIT'])
+        total_revenue = get_latest(inc, ['Total Revenue'])
 
         if net_income == 0:
             return {"error": "Net income is 0 or missing."}
 
-        cash_conversion = ocf / net_income if net_income > 0 else 0
-        unusual_impact = abs(unusual_items / net_income)
-
         flags = []
+
+        # CHECK 1: Cash conversion
+        cash_conversion = ocf / net_income if net_income > 0 else 0
         if cash_conversion < 0.5 and net_income > 0:
-            flags.append(f"RED FLAG: Poor cash conversion ({round(cash_conversion, 2)}). Earnings are not translating to cash. Potential manipulation or massive working capital drain.")
-        if unusual_impact > 0.2:
-            flags.append(f"RED FLAG: Unusual/Non-recurring items make up {round(unusual_impact*100, 1)}% of Net Income. Profitability is artificially inflated and NOT sustainable.")
+            flags.append(
+                f"RED FLAG: Cash conversion is {round(cash_conversion, 2)}. "
+                f"Only {round(cash_conversion * 100)}% of reported profit is real cash."
+            )
+
+        # CHECK 2: Earnings spike (net income vs prior years)
+        ni_series = get_series(inc, ['Net Income', 'Net Income Common Stockholders'], n=4)
+        if len(ni_series) >= 3:
+            prior_avg = sum(ni_series[1:]) / len(ni_series[1:])
+            current = ni_series[0]
+            if prior_avg > 0 and current > 3 * prior_avg:
+                spike_multiple = round(current / prior_avg, 1)
+                flags.append(
+                    f"RED FLAG: Net income is {spike_multiple}x the prior-year average. "
+                    f"Current: {current:,.0f}, Prior avg: {prior_avg:,.0f}. "
+                    f"Likely driven by non-recurring event."
+                )
+
+        # CHECK 3: Non-operating income gap
+        if operating_income > 0 and net_income > 0:
+            non_op_gap = (net_income - operating_income) / net_income
+            if non_op_gap > 0.4:
+                flags.append(
+                    f"RED FLAG: {round(non_op_gap * 100)}% of net income comes from "
+                    f"below the operating line (non-operational sources). "
+                    f"Operating income: {operating_income:,.0f}, Net income: {net_income:,.0f}."
+                )
+
+        # ALSO check the legacy unusual items field (catch it if available)
+        unusual_items = get_latest(inc, ['Unusual Items', 'Extraordinary Items',
+                                         'Special Items', 'Other Special Charges'])
+        unusual_pct = abs(unusual_items / net_income) * 100 if net_income != 0 else 0
+
+        if unusual_pct > 20:
+            flags.append(
+                f"RED FLAG: Tagged non-recurring items are {round(unusual_pct, 1)}% of net income."
+            )
 
         return {
             "ticker": resolved,
             "net_income_reported": net_income,
+            "operating_income": operating_income,
             "operating_cash_flow": ocf,
-            "unusual_items": unusual_items,
             "cash_conversion_ratio": round(cash_conversion, 2),
-            "unusual_items_pct_of_income": round(unusual_impact * 100, 2),
-            "anomaly_flags": flags if flags else ["CLEAN: No major accounting anomalies detected in latest filings."],
-            "directive": "If ANY red flags are present, you MUST reject the framework scores and issue a NO verdict."
+            "unusual_items_pct_of_income": round(unusual_pct, 2),
+            "anomaly_flags": flags if flags else ["CLEAN: No major anomalies detected."],
+            "directive": "If ANY RED FLAG is present, reject positive framework scores."
         }
     except Exception as e:
         return {"error": f"Failed anomaly check: {str(e)}"}
@@ -1429,6 +1467,10 @@ def find_investments(market: str) -> dict:
         market: Which market to screen. Use 'india' or 'all' (both return Indian stocks).
     """
     df = universe_df
+    # Strip value traps pre-flagged by universe_updater
+    if "quality_pass" in df.columns:
+        df = df[df["quality_pass"] != False]
+
     tier_4 = df[df["score"] == 4].copy()
     tier_3 = df[df["score"] == 3].copy()
     tier_2 = df[df["score"] == 2].copy()
@@ -1523,6 +1565,9 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
     df = universe_df.copy()
 
     # ── Base quality filter (all profiles) ──
+    # ── Base quality filter (all profiles) ──
+    if "quality_pass" in df.columns:
+        df = df[df["quality_pass"] != False]
     df = df[df["years_of_data"] >= 2]
     df = df[pd.notna(df["pe"]) & pd.notna(df["roe_pct"]) & pd.notna(df["de"])]
     df = df[df["pe"] > 0]  # Exclude negative P/E (loss-making)
