@@ -399,6 +399,10 @@ SCREENER_PRESETS = [
 # ══════════════════════════════════════════════
 # CSS — CLEAN, SOLID, MINIMAL
 # ══════════════════════════════════════════════
+# ══════════════════════════════════════════════
+# CSS — CLEAN, SOLID, MINIMAL
+# ══════════════════════════════════════════════
+st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@300;400;500&display=swap');
 
@@ -550,7 +554,7 @@ div[data-baseweb] [aria-invalid] { box-shadow: none !important; }
 [data-testid="stChatMessage"] table { display: block !important; overflow-x: auto !important; white-space: nowrap !important; max-width: 100% !important; }
 @media (max-width: 768px) { .stApp h1 { font-size: 1.5rem !important; } }
 </style>
-
+""", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════
 # SIDEBAR
