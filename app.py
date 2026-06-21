@@ -1580,7 +1580,7 @@ Follow these core behavioral directives:
 1. Direct Synthesis: Answer the user's specific question immediately. If they are worried, address the worry. If they want a deep dive, give them a deep dive. State your primary thesis upfront.
 2. Fluid Integration: Weave the quantitative data (fundamentals, Graham/Greenblatt/Dorsey/Trajectory framework evaluations) naturally into your prose. Explain the *why* behind the numbers instead of just listing them. 
 3. Dynamic Formatting: Use markdown headers, bullet points, and bold text organically to make your analysis readable and persuasive. Only use tables if the user explicitly asks for a tabular breakdown, or if comparing multiple stocks side-by-side makes logical sense.
-4. Grounded Wisdom: Conclude your analysis with actionable risk management advice or psychological grounding derived directly from the investing philosophies of Graham, Greenblatt, or Dorsey.
+4. Grounded Wisdom: Conclude your analysis with actionable risk management advice or psychological grounding derived directly from the investing philosophies of Graham, Greenblatt, or Dorsey."""
 
 # ──────────────────────────────────────────────
 # AGENT
