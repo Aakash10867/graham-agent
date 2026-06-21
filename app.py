@@ -640,6 +640,12 @@ def load_books():
 
 collection = load_books()
 
+@st.cache_data
+def load_universe():
+    return pd.read_csv("universe_scored.csv")
+
+universe_df = load_universe()
+
 
 # ──────────────────────────────────────────────
 # TOOL FUNCTIONS
@@ -1244,27 +1250,7 @@ def find_investments(market: str) -> dict:
     Args:
         market: Which market to screen. Use 'india' or 'all' (both return Indian stocks).
     """
-    import os
-    from pathlib import Path
-
-    # Try multiple paths
-    paths_to_try = [
-        "universe_scored.csv",
-        Path(__file__).parent / "universe_scored.csv",
-        os.path.join(os.getcwd(), "universe_scored.csv"),
-        "/mount/src/graham-agent/universe_scored.csv",
-    ]
-
-    df = None
-    for p in paths_to_try:
-        if os.path.exists(p):
-            df = pd.read_csv(p)
-            break
-
-    if df is None:
-        debug = f"CWD: {os.getcwd()} | Files: {[f for f in os.listdir('.') if f.endswith('.csv')]} | Script dir: {Path(__file__).parent} | Script files: {[f for f in os.listdir(Path(__file__).parent) if f.endswith('.csv')]}"
-        st.error(f"CSV NOT FOUND: {debug}")
-        return {"error": debug}
+    df = universe_df
     tier_4 = df[df["score"] == 4].copy()
     tier_3 = df[df["score"] == 3].copy()
     tier_2 = df[df["score"] == 2].copy()
