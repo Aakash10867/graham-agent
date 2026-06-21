@@ -1599,7 +1599,7 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
 USER_AVATAR = "👤"
-AGENT_AVATAR = "📈"
+AGENT_AVATAR = "logo.svg"
 
 # ── Reserve a container for all chat content (renders ABOVE buttons) ──
 chat_area = st.container()
