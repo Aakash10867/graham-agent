@@ -54,7 +54,7 @@ if (!doc.getElementById("custom-gemini-btn")) {
     const btn = doc.createElement("button");
     btn.id = "custom-gemini-btn";
     
-    // Gemini-style Sidebar Icon (Raw SVG, immune to font breaking)
+    // Gemini-style Sidebar Icon
     btn.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#d1d5db" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>`;
     
     // Style the button perfectly
@@ -68,7 +68,7 @@ if (!doc.getElementById("custom-gemini-btn")) {
         border: "1px solid rgba(255, 255, 255, 0.1)",
         borderRadius: "12px",
         cursor: "pointer",
-        zIndex: "9999999", // Sits above the open sidebar
+        zIndex: "9999999",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -88,18 +88,27 @@ if (!doc.getElementById("custom-gemini-btn")) {
         btn.querySelector("svg").style.stroke = "#d1d5db";
     };
 
-    // The Remote Control Logic
+    // Upgraded React-Friendly Remote Control Logic
     btn.onclick = () => {
         const sidebar = doc.querySelector('[data-testid="stSidebar"]');
         
+        // Create a true mouse event that React will recognize
+        const reactClick = new MouseEvent('click', {
+            view: window.parent,
+            bubbles: true,
+            cancelable: true
+        });
+        
         if (sidebar && sidebar.getBoundingClientRect().width > 0) {
-            // Sidebar is OPEN -> Find native close button and click it
-            const closeBtn = doc.querySelector('[data-testid="stSidebar"] button[kind="header"]');
-            if (closeBtn) closeBtn.click();
+            // Sidebar is OPEN -> Find native close button
+            // Streamlit sometimes changes "kind", so we target it safely
+            const closeBtn = doc.querySelector('[data-testid="stSidebar"] button[kind="header"]') 
+                          || doc.querySelector('[data-testid="stSidebar"] button[kind="headerNoPadding"]');
+            if (closeBtn) closeBtn.dispatchEvent(reactClick);
         } else {
-            // Sidebar is CLOSED -> Find native expand button and click it
+            // Sidebar is CLOSED -> Find native expand button
             const expandBtn = doc.querySelector('[data-testid="collapsedControl"]');
-            if (expandBtn) expandBtn.click();
+            if (expandBtn) expandBtn.dispatchEvent(reactClick);
         }
     };
 
@@ -482,16 +491,22 @@ st.markdown("""
     background: transparent !important;
 }
 
-/* ── Hide ALL Native Streamlit Clutter ── */
-/* This makes the native top-bar completely invisible but leaves it clickable for our JS */
+/* ── Hide ALL Native Streamlit Clutter Safely ── */
+/* We make them 0x0 pixels and invisible, but DO NOT disable pointer-events so JS can click them */
 header[data-testid="stHeader"],
 [data-testid="stToolbar"],
 [data-testid="collapsedControl"],
-[data-testid="stSidebar"] button[kind="header"] {
+[data-testid="stSidebar"] button[kind="header"],
+[data-testid="stSidebar"] button[kind="headerNoPadding"] {
     opacity: 0 !important;
-    pointer-events: none !important;
     position: absolute !important;
+    width: 0px !important;
+    height: 0px !important;
+    overflow: hidden !important;
     z-index: -100 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    /* pointer-events: none is strictly REMOVED */
 }
 
 /* ── Sidebar ── */
