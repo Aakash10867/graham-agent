@@ -43,20 +43,21 @@ st.set_page_config(
 )
 
 # ══════════════════════════════════════════════
-# CUSTOM GEMINI SIDEBAR TOGGLE (BULLETPROOF JS)
+# CUSTOM GEMINI SIDEBAR TOGGLE (TRUSTED JS EVENT)
 # ══════════════════════════════════════════════
 components.html("""
 <script>
-const doc = window.parent.document;
+const parentWin = window.parent;
+const parentDoc = parentWin.document;
 
-if (!doc.getElementById("custom-gemini-btn")) {
-    const btn = doc.createElement("div");
+if (!parentDoc.getElementById("custom-gemini-btn")) {
+    const btn = parentDoc.createElement("div");
     btn.id = "custom-gemini-btn";
     
     // Gemini-style Sidebar Icon
     btn.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#d1d5db" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>`;
     
-    // Style the button perfectly
+    // Style the button
     Object.assign(btn.style, {
         position: "fixed", top: "14px", left: "14px", width: "42px", height: "42px",
         backgroundColor: "#1e1f20", border: "1px solid rgba(255, 255, 255, 0.1)",
@@ -77,27 +78,34 @@ if (!doc.getElementById("custom-gemini-btn")) {
         btn.querySelector("svg").style.stroke = "#d1d5db";
     };
 
-    // The Bulletproof Click Logic
+    // The Trusted React Click Logic
     btn.onclick = () => {
-        // Look for the "Open" button first
-        const expandBtn = doc.querySelector('[data-testid="collapsedControl"]');
-        if (expandBtn) {
-            expandBtn.click();
-        } else {
-            // If "Open" isn't there, the sidebar must be open. Find the first button inside the sidebar (which is always the Close 'X' button).
-            const sidebar = doc.querySelector('[data-testid="stSidebar"]');
-            if (sidebar) {
-                const closeBtn = sidebar.querySelector('button');
-                if (closeBtn) closeBtn.click();
-            }
+        // Find Native Buttons
+        const expandBtn = parentDoc.querySelector('[data-testid="collapsedControl"]');
+        const sidebar = parentDoc.querySelector('[data-testid="stSidebar"]');
+        let targetBtn = null;
+
+        if (expandBtn && parentWin.getComputedStyle(expandBtn).display !== "none") {
+            targetBtn = expandBtn; // Sidebar is closed
+        } else if (sidebar) {
+            targetBtn = sidebar.querySelector('button'); // Sidebar is open
+        }
+
+        if (targetBtn) {
+            // CRITICAL: We MUST use the parent window's MouseEvent so React trusts it
+            const clickEvent = new parentWin.MouseEvent("click", {
+                bubbles: true,
+                cancelable: true,
+                view: parentWin
+            });
+            targetBtn.dispatchEvent(clickEvent);
         }
     };
 
-    doc.body.appendChild(btn);
+    parentDoc.body.appendChild(btn);
 }
 </script>
 """, height=0, width=0)
-
 # ──────────────────────────────────────────────
 # FREE MODEL FALLBACK LIST
 # ──────────────────────────────────────────────
@@ -473,22 +481,22 @@ st.markdown("""
 }
 
 /* ── Safely Hide Native Streamlit Clutter ── */
-/* We make them invisible but leave them completely functional for the JS to click */
+/* Keep the header transparent so it doesn't block the screen */
 header[data-testid="stHeader"] {
     background: transparent !important;
     box-shadow: none !important;
 }
 
+/* Kill the top-right toolbar completely */
 [data-testid="stToolbar"] {
     display: none !important;
 }
 
-[data-testid="collapsedControl"],
-[data-testid="stSidebar"] button[kind="header"],
-[data-testid="stSidebar"] button[kind="headerNoPadding"] {
-    opacity: 0 !important;
-    color: transparent !important;
-    background: transparent !important;
+/* Hide the SVGs inside the native buttons, but leave the invisible buttons physically there for JS to click */
+[data-testid="collapsedControl"] svg,
+[data-testid="stSidebar"] button[kind="header"] svg,
+[data-testid="stSidebar"] button[kind="headerNoPadding"] svg {
+    display: none !important;
 }
 
 /* ── Sidebar ── */
