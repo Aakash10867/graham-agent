@@ -1748,26 +1748,10 @@ if "chat_history" not in st.session_state:
 USER_AVATAR = "👤"
 AGENT_AVATAR = "📈"
 
-# ── Welcome text (shown only when chat is empty) ──
-if not st.session_state.messages:
-    st.markdown("")
-    st.markdown(
-        "<p style='color: #9ca3af; font-size: 0.9rem;'>"
-        "Enter a company name in the sidebar, then pick an analysis below — "
-        "or scan the market with the screeners. You can also type anything in the chat."
-        "</p>",
-        unsafe_allow_html=True,
-    )
+# ── Reserve a container for all chat content (renders ABOVE buttons) ──
+chat_area = st.container()
 
-# ── Display past messages ──
-for msg in st.session_state.messages:
-    avatar = USER_AVATAR if msg["role"] == "user" else AGENT_AVATAR
-    with st.chat_message(msg["role"], avatar=avatar):
-        st.markdown(msg["content"])
-        if msg.get("model"):
-            st.caption(f"⚡ {msg['model']}")
-
-# ── Preset buttons (ALWAYS visible at bottom, after messages) ──
+# ── Preset buttons (ALWAYS below all messages) ──
 target = st.session_state.get("target_company", "").strip()
 
 if target:
@@ -1794,39 +1778,61 @@ for i, (label, template) in enumerate(SCREENER_PRESETS):
             st.session_state.pending_prompt = template
             st.rerun()
 
-# ── Handle new input ──
+# ── Chat input (pinned to bottom by Streamlit) ──
 prompt = st.chat_input("Ask about any stock, or type a question...")
 
 if not prompt and "pending_prompt" in st.session_state:
     prompt = st.session_state.pop("pending_prompt")
 
-if prompt:
-    st.session_state.messages.append({"role": "user", "content": prompt})
+# ── All chat content renders inside the container (above buttons) ──
+with chat_area:
+    # Welcome text (shown only when chat is empty)
+    if not st.session_state.messages:
+        st.markdown("")
+        st.markdown(
+            "<p style='color: #9ca3af; font-size: 0.9rem;'>"
+            "Enter a company name in the sidebar, then pick an analysis below — "
+            "or scan the market with the screeners. You can also type anything in the chat."
+            "</p>",
+            unsafe_allow_html=True,
+        )
 
-    with st.chat_message("user", avatar=USER_AVATAR):
-        st.markdown(prompt)
+    # Display past messages
+    for msg in st.session_state.messages:
+        avatar = USER_AVATAR if msg["role"] == "user" else AGENT_AVATAR
+        with st.chat_message(msg["role"], avatar=avatar):
+            st.markdown(msg["content"])
+            if msg.get("model"):
+                st.caption(f"⚡ {msg['model']}")
 
-    with st.chat_message("assistant", avatar=AGENT_AVATAR):
-        with st.spinner("Analyzing..."):
-            try:
-                answer, model_used = agent_turn(prompt)
-                st.markdown(answer)
-                st.caption(f"⚡ {model_used}")
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": answer,
-                    "model": model_used,
-                })
+    # Handle new input (renders inside container = above buttons)
+    if prompt:
+        st.session_state.messages.append({"role": "user", "content": prompt})
 
-            except Exception as e:
-                error_msg = str(e)
-                if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg or "All models rate-limited" in error_msg:
-                    st.warning("API limit reached. Using fallback system...")
-                    fallback_answer = fallback_router(prompt)
-                    st.markdown(fallback_answer)
+        with st.chat_message("user", avatar=USER_AVATAR):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant", avatar=AGENT_AVATAR):
+            with st.spinner("Analyzing..."):
+                try:
+                    answer, model_used = agent_turn(prompt)
+                    st.markdown(answer)
+                    st.caption(f"⚡ {model_used}")
                     st.session_state.messages.append({
                         "role": "assistant",
-                        "content": f"*(Fallback)*\n\n{fallback_answer}",
+                        "content": answer,
+                        "model": model_used,
                     })
-                else:
-                    st.error(f"Error: {error_msg[:150]}")
+
+                except Exception as e:
+                    error_msg = str(e)
+                    if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg or "All models rate-limited" in error_msg:
+                        st.warning("API limit reached. Using fallback system...")
+                        fallback_answer = fallback_router(prompt)
+                        st.markdown(fallback_answer)
+                        st.session_state.messages.append({
+                            "role": "assistant",
+                            "content": f"*(Fallback)*\n\n{fallback_answer}",
+                        })
+                    else:
+                        st.error(f"Error: {error_msg[:150]}")
