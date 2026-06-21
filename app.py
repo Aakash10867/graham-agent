@@ -410,24 +410,22 @@ st.markdown("""
     background-color: #0f1117 !important;
 }
 
-/* Apply Inter font, but EXCLUDE material icons so they don't break */
-.stApp *:not(.material-icons):not([class*="icon"]):not(svg) {
+/* Apply Inter font to standard elements */
+.stApp, .stApp p, .stApp h1, .stApp h2, .stApp h3, .stApp div, .stApp input, .stApp button, .stApp table, .stApp td, .stApp th {
     font-family: 'Inter', sans-serif !important;
+}
+
+/* ── THE ICON FIX: Explicitly force the material font back onto the icons ── */
+.material-symbols-rounded, 
+.material-icons, 
+[data-testid="stSidebar"] button span,
+[data-testid="collapsedControl"] span {
+    font-family: 'Material Symbols Rounded', 'Material Icons', sans-serif !important;
+    font-size: 1.25rem !important;
 }
 
 [data-testid="stAppViewContainer"] {
     background: transparent !important;
-}
-
-/* ── Hide Streamlit chrome but KEEP sidebar toggle ── */
-#MainMenu, footer { visibility: hidden !important; }
-
-/* ── 1. Force the transparent header to stay alive permanently ── */
-header[data-testid="stHeader"] {
-    background: transparent !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    z-index: 99999 !important;
 }
 
 /* ── 2. Kill the right-side toolbar (Deploy, Menu) ── */
