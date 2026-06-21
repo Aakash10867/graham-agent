@@ -410,7 +410,8 @@ st.markdown("""
     background-color: #0f1117 !important;
 }
 
-.stApp, .stApp * {
+/* Apply Inter font, but EXCLUDE material icons so they don't break */
+.stApp *:not(.material-icons):not([class*="icon"]):not(svg) {
     font-family: 'Inter', sans-serif !important;
 }
 
@@ -434,29 +435,35 @@ header[data-testid="stHeader"] {
     display: none !important;
 }
 
-/* ── 3. Force the Sidebar Toggle Button to render boldly when closed ── */
+/* ── 3. Gemini-Style Floating Sidebar Toggle ── */
 [data-testid="collapsedControl"] {
-    visibility: visible !important;
+    position: fixed !important;      /* Forces it to float above everything */
+    top: 14px !important;
+    left: 14px !important;
+    background-color: #1e1f20 !important; /* Gemini dark tone */
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: 12px !important;  /* Gemini squircle shape */
+    width: 42px !important;
+    height: 42px !important;
     display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    z-index: 999999 !important;
+    visibility: visible !important;
     opacity: 1 !important;
-    background-color: #161b22 !important;
-    border: 1px solid rgba(255,255,255,0.1) !important;
-    border-radius: 8px !important;
-    top: 15px !important;
-    left: 15px !important;
-    color: #00f5d4 !important;
     transition: all 0.2s ease !important;
-    z-index: 99999 !important;
 }
 
 [data-testid="collapsedControl"]:hover {
-    background-color: rgba(0, 245, 212, 0.08) !important;
-    border-color: rgba(0, 245, 212, 0.4) !important;
-    box-shadow: 0 0 0 1px rgba(0, 245, 212, 0.15) !important;
+    background-color: #2a2b2f !important;
+    border-color: rgba(255, 255, 255, 0.2) !important;
 }
 
 [data-testid="collapsedControl"] svg {
-    fill: #00f5d4 !important;
+    width: 22px !important;
+    height: 22px !important;
+    fill: #d1d5db !important;        /* Soft white/gray icon color */
+    color: #d1d5db !important;
 }
 
 /* ── Sidebar ── */
