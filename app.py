@@ -1639,16 +1639,23 @@ if not prompt and "pending_prompt" in st.session_state:
 
 # ── All chat content renders inside the container (above buttons) ──
 with chat_area:
-    # Welcome text (shown only when chat is empty)
+    # Ephemeral Hero State (shown only when chat is empty)
     if not st.session_state.messages:
-        st.markdown("")
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        
+        # Force strict center alignment using a 1 : 1.5 : 1 column ratio
+        col1, col2, col3 = st.columns([1, 1.5, 1])
+        with col2:
+            st.image("logo.svg", use_container_width=True)
+            
         st.markdown(
-            "<p style='color: #9ca3af; font-size: 0.9rem;'>"
+            "<p style='color: #9ca3af; font-size: 0.95rem; text-align: center; margin-top: 20px;'>"
             "Enter a company name in the sidebar, then pick an analysis below — "
             "or scan the market with the screeners. You can also type anything in the chat."
             "</p>",
             unsafe_allow_html=True,
         )
+        st.markdown("<br>", unsafe_allow_html=True)
 
     # Display past messages
     for msg in st.session_state.messages:
