@@ -582,7 +582,8 @@ with st.sidebar:
 # ══════════════════════════════════════════════
 st.markdown("# AlphaConsensus Terminal")
 st.caption("Quantitative investment analysis — Graham, Greenblatt, Dorsey, and Trajectory frameworks.")
-
+import os
+st.write(f"DEBUG: CWD={os.getcwd()}, CSV exists={os.path.exists('universe_scored.csv')}, Files={[f for f in os.listdir('.') if f.endswith('.csv')]}")
 
 # ──────────────────────────────────────────────
 # LOAD BOOKS INTO CHROMADB (runs once, cached)
