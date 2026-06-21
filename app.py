@@ -1282,7 +1282,72 @@ def find_investments(market: str) -> dict:
     tier_3 = df[df["score"] == 3].copy()
     tier_2 = df[df["score"] == 2].copy()
 
-    def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, review_freq: str) -> dict:
+
+    
+
+    # Rank-sum sorting within each tier (value + quality + momentum)
+    def apply_rank_sort(tier_df):
+        if tier_df.empty:
+            return tier_df
+        t = tier_df.copy()
+        t["_pe_sort"] = t["pe"].apply(lambda x: x if pd.notna(x) else 9999)
+        t["_roe_sort"] = t["roe_pct"].apply(lambda x: -x if pd.notna(x) else 9999)
+        t["_rev_sort"] = t["rev_growth"].apply(lambda x: -x if pd.notna(x) else 9999)
+        t = t.sort_values(["_pe_sort", "_roe_sort", "_rev_sort"])
+        return t.drop(columns=["_pe_sort", "_roe_sort", "_rev_sort"])
+
+    tier_4 = apply_rank_sort(tier_4)
+    tier_3 = apply_rank_sort(tier_3)
+    tier_2 = apply_rank_sort(tier_2)
+
+    def to_list(tier_df, max_n=10):
+        entries = []
+        for _, row in tier_df.head(max_n).iterrows():
+            entries.append({
+                "ticker": row["ticker"],
+                "name": row.get("name", row["ticker"]) if pd.notna(row.get("name")) else row["ticker"],
+                "sector": row.get("sector", "N/A") if pd.notna(row.get("sector")) else "N/A",
+                "price": round(row["price"], 2) if pd.notna(row.get("price")) else "N/A",
+                "pe": round(row["pe"], 2) if pd.notna(row.get("pe")) else "N/A",
+                "pb": round(row["pb"], 2) if pd.notna(row.get("pb")) else "N/A",
+                "roe_pct": round(row["roe_pct"], 2) if pd.notna(row.get("roe_pct")) else "N/A",
+                "de_pct": round(row["de"], 2) if pd.notna(row.get("de")) else "N/A",
+                "earnings_yield_pct": round(row["earnings_yield"], 2) if pd.notna(row.get("earnings_yield")) else "N/A",
+                "dividend_yield_pct": round(row["dividend_yield_pct"], 2) if pd.notna(row.get("dividend_yield_pct")) else "N/A",
+                "rev_growth_pct": round(row["rev_growth"], 2) if pd.notna(row.get("rev_growth")) else "N/A",
+                "ni_growth_pct": round(row["ni_growth"], 2) if pd.notna(row.get("ni_growth")) else "N/A",
+                "debt_growth_pct": round(row["debt_growth"], 2) if pd.notna(row.get("debt_growth")) else "N/A",
+                "score": f"{int(row['score'])}/4",
+                "passed": [f for f in ["Graham", "Greenblatt", "Dorsey", "Trajectory"]
+                           if pd.notna(row.get(f"{f.lower()}_pass")) and row.get(f"{f.lower()}_pass")],
+                "failed": [f for f in ["Graham", "Greenblatt", "Dorsey", "Trajectory"]
+                           if pd.notna(row.get(f"{f.lower()}_pass")) and not row.get(f"{f.lower()}_pass")],
+                "years_of_data": int(row["years_of_data"]) if pd.notna(row.get("years_of_data")) else 0,
+            })
+        return entries
+
+    updated = df["updated_date"].iloc[0] if "updated_date" in df.columns else "Unknown"
+
+    return {
+        "market": "india",
+        "stocks_in_universe": len(df),
+        "data_as_of": updated,
+        "perfect_consensus_4_of_4": {
+            "count": len(tier_4),
+            "top_10": to_list(tier_4),
+        },
+        "strong_consensus_3_of_4": {
+            "count": len(tier_3),
+            "top_10": to_list(tier_3),
+        },
+        "moderate_consensus_2_of_4": {
+            "count": len(tier_2),
+            "top_10": to_list(tier_2),
+        },
+        "note": "Pre-scored universe of ~4500 Indian stocks (NSE + BSE). Data updated monthly. After presenting results, use search_book to explain WHY each investment style delivers returns, citing Graham, Greenblatt, and Dorsey.",
+    }
+
+def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, review_freq: str) -> dict:
     """Filter the pre-scored universe to 30-50 SIP-suitable candidates based on investor profile.
     The LLM then selects the final 5-8 stocks using book wisdom and qualitative judgment.
 
@@ -1422,69 +1487,8 @@ def find_investments(market: str) -> dict:
             f"Output the final portfolio as a clean table with: ticker, name, sector, allocation_pct, sip_amount_inr, score, and a one-line thesis."
         ),
     }
-    
 
-    # Rank-sum sorting within each tier (value + quality + momentum)
-    def apply_rank_sort(tier_df):
-        if tier_df.empty:
-            return tier_df
-        t = tier_df.copy()
-        t["_pe_sort"] = t["pe"].apply(lambda x: x if pd.notna(x) else 9999)
-        t["_roe_sort"] = t["roe_pct"].apply(lambda x: -x if pd.notna(x) else 9999)
-        t["_rev_sort"] = t["rev_growth"].apply(lambda x: -x if pd.notna(x) else 9999)
-        t = t.sort_values(["_pe_sort", "_roe_sort", "_rev_sort"])
-        return t.drop(columns=["_pe_sort", "_roe_sort", "_rev_sort"])
 
-    tier_4 = apply_rank_sort(tier_4)
-    tier_3 = apply_rank_sort(tier_3)
-    tier_2 = apply_rank_sort(tier_2)
-
-    def to_list(tier_df, max_n=10):
-        entries = []
-        for _, row in tier_df.head(max_n).iterrows():
-            entries.append({
-                "ticker": row["ticker"],
-                "name": row.get("name", row["ticker"]) if pd.notna(row.get("name")) else row["ticker"],
-                "sector": row.get("sector", "N/A") if pd.notna(row.get("sector")) else "N/A",
-                "price": round(row["price"], 2) if pd.notna(row.get("price")) else "N/A",
-                "pe": round(row["pe"], 2) if pd.notna(row.get("pe")) else "N/A",
-                "pb": round(row["pb"], 2) if pd.notna(row.get("pb")) else "N/A",
-                "roe_pct": round(row["roe_pct"], 2) if pd.notna(row.get("roe_pct")) else "N/A",
-                "de_pct": round(row["de"], 2) if pd.notna(row.get("de")) else "N/A",
-                "earnings_yield_pct": round(row["earnings_yield"], 2) if pd.notna(row.get("earnings_yield")) else "N/A",
-                "dividend_yield_pct": round(row["dividend_yield_pct"], 2) if pd.notna(row.get("dividend_yield_pct")) else "N/A",
-                "rev_growth_pct": round(row["rev_growth"], 2) if pd.notna(row.get("rev_growth")) else "N/A",
-                "ni_growth_pct": round(row["ni_growth"], 2) if pd.notna(row.get("ni_growth")) else "N/A",
-                "debt_growth_pct": round(row["debt_growth"], 2) if pd.notna(row.get("debt_growth")) else "N/A",
-                "score": f"{int(row['score'])}/4",
-                "passed": [f for f in ["Graham", "Greenblatt", "Dorsey", "Trajectory"]
-                           if pd.notna(row.get(f"{f.lower()}_pass")) and row.get(f"{f.lower()}_pass")],
-                "failed": [f for f in ["Graham", "Greenblatt", "Dorsey", "Trajectory"]
-                           if pd.notna(row.get(f"{f.lower()}_pass")) and not row.get(f"{f.lower()}_pass")],
-                "years_of_data": int(row["years_of_data"]) if pd.notna(row.get("years_of_data")) else 0,
-            })
-        return entries
-
-    updated = df["updated_date"].iloc[0] if "updated_date" in df.columns else "Unknown"
-
-    return {
-        "market": "india",
-        "stocks_in_universe": len(df),
-        "data_as_of": updated,
-        "perfect_consensus_4_of_4": {
-            "count": len(tier_4),
-            "top_10": to_list(tier_4),
-        },
-        "strong_consensus_3_of_4": {
-            "count": len(tier_3),
-            "top_10": to_list(tier_3),
-        },
-        "moderate_consensus_2_of_4": {
-            "count": len(tier_2),
-            "top_10": to_list(tier_2),
-        },
-        "note": "Pre-scored universe of ~4500 Indian stocks (NSE + BSE). Data updated monthly. After presenting results, use search_book to explain WHY each investment style delivers returns, citing Graham, Greenblatt, and Dorsey.",
-    }
 
 def get_csv_financial_data(ticker: str) -> dict:
     """
