@@ -663,7 +663,6 @@ with st.sidebar:
         st.rerun()
 
     st.markdown("---")
-
     st.markdown("### How it works")
     st.markdown(
         "Ask about any stock by name or ticker. "
