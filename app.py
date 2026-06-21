@@ -18,8 +18,6 @@ os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
 import datetime
 import streamlit as st
-import streamlit.components.v1 as components  # <--- THIS PREVENTS THE NAME ERROR
-
 from google import genai
 from google.genai import types
 import chromadb
@@ -30,17 +28,6 @@ import re
 import requests
 import pandas as pd
 import numpy as np
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
-# ══════════════════════════════════════════════
-# PAGE CONFIG (MUST BE THE FIRST STREAMLIT COMMAND)
-# ══════════════════════════════════════════════
-st.set_page_config(
-    page_title="AlphaConsensus Terminal",
-    page_icon="📈",
-    layout="centered",
-    initial_sidebar_state="expanded"
-)
 
 # ──────────────────────────────────────────────
 # FREE MODEL FALLBACK LIST
@@ -185,31 +172,7 @@ TICKER_ALIASES = {
     "MASTERCARD": "MA",
 }
 
-# ──────────────────────────────────────────────
-# SCREENING UNIVERSE — stocks to scan
-# ──────────────────────────────────────────────
-SCREENING_UNIVERSE = {
-    "Nifty 50": [
-        "RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS", "ICICIBANK.NS",
-        "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "LT.NS", "HINDUNILVR.NS",
-        "KOTAKBANK.NS", "AXISBANK.NS", "BAJFINANCE.NS", "ASIANPAINT.NS",
-        "MARUTI.NS", "TATAMOTORS.NS", "SUNPHARMA.NS", "TITAN.NS",
-        "WIPRO.NS", "HCLTECH.NS", "ULTRACEMCO.NS", "NTPC.NS",
-        "POWERGRID.NS", "TATASTEEL.NS", "NESTLEIND.NS", "TECHM.NS",
-        "BAJAJ-AUTO.NS", "INDUSINDBK.NS", "JSWSTEEL.NS", "M&M.NS",
-        "ADANIENT.NS", "ADANIPORTS.NS", "COALINDIA.NS", "ONGC.NS",
-        "BAJAJFINSV.NS", "BRITANNIA.NS", "CIPLA.NS", "DRREDDY.NS",
-        "EICHERMOT.NS", "GRASIM.NS", "HEROMOTOCO.NS", "HINDALCO.NS",
-        "DIVISLAB.NS", "SBILIFE.NS", "HDFCLIFE.NS", "TATACONSUM.NS",
-        "SHREECEM.NS", "TATAPOWER.NS", "BEL.NS", "HAL.NS",
-    ],
-    "US Large Cap": [
-        "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA",
-        "BRK-B", "JPM", "V", "JNJ", "WMT", "PG", "MA", "UNH",
-        "HD", "DIS", "KO", "PEP", "NFLX", "COST", "ABBV", "MRK",
-        "CRM", "AMD", "INTC", "GS", "BA", "CAT", "GE",
-    ],
-}
+
 
 
 # ──────────────────────────────────────────────
@@ -278,96 +241,14 @@ def _resolve_ticker(query):
     return key
 
 
-# ──────────────────────────────────────────────
-# SCREENER ENGINE
-# ──────────────────────────────────────────────
-def _fetch_single_ticker(ticker):
-    """Fetch key metrics + trajectory data for one ticker. Returns dict or None."""
-    try:
-        stock = yf.Ticker(ticker)
-        info = stock.info
-        if not info or not info.get("regularMarketPrice"):
-            return None
-
-        pe = info.get("trailingPE")
-
-        data = {
-            "ticker": ticker,
-            "name": info.get("longName") or info.get("shortName", ticker),
-            "sector": info.get("sector", "N/A"),
-            "price": info.get("regularMarketPrice") or info.get("currentPrice"),
-            "pe": pe,
-            "pb": info.get("priceToBook"),
-            "roe": info.get("returnOnEquity"),
-            "de": info.get("debtToEquity"),
-            "dividend_yield": info.get("dividendYield"),
-            "eps": info.get("trailingEps"),
-            "earnings_yield": round(1.0 / pe * 100, 2) if pe and pe > 0 else None,
-            "profit_margin": info.get("profitMargins"),
-            "market_cap": info.get("marketCap"),
-            "rev_growth": None,
-            "ni_growth": None,
-            "debt_growth": None,
-        }
-
-        # Trajectory: 1-year YoY growth from financial statements
-        try:
-            income_stmt = stock.financials
-            if income_stmt is not None and not income_stmt.empty and len(income_stmt.columns) >= 2:
-                cols = sorted(income_stmt.columns)[-2:]
-
-                try:
-                    rev = [income_stmt.loc["Total Revenue", c] for c in cols]
-                    if all(pd.notna(v) and v > 0 for v in rev):
-                        data["rev_growth"] = round((rev[1] / rev[0] - 1) * 100, 2)
-                except (KeyError, ZeroDivisionError):
-                    pass
-
-                try:
-                    ni = [income_stmt.loc["Net Income", c] for c in cols]
-                    if all(pd.notna(v) for v in ni) and ni[0] != 0:
-                        data["ni_growth"] = round((ni[1] / ni[0] - 1) * 100, 2)
-                except (KeyError, ZeroDivisionError):
-                    pass
-        except Exception:
-            pass
-
-        try:
-            balance_sheet = stock.balance_sheet
-            if balance_sheet is not None and not balance_sheet.empty and len(balance_sheet.columns) >= 2:
-                cols = sorted(balance_sheet.columns)[-2:]
-                try:
-                    debt = [balance_sheet.loc["Total Debt", c] for c in cols]
-                    if all(pd.notna(v) for v in debt) and debt[0] > 0:
-                        data["debt_growth"] = round((debt[1] / debt[0] - 1) * 100, 2)
-                except (KeyError, ZeroDivisionError):
-                    pass
-        except Exception:
-            pass
-
-        return data
-    except Exception:
-        return None
-
-
-@st.cache_data(ttl=21600, show_spinner="Scanning stock universe (fundamentals + trajectory)... First run takes ~60s, then cached for 6 hours.")
-def _fetch_universe_data():
-    """Fetch metrics for all stocks in the screening universe (parallel)."""
-    all_tickers = []
-    for group in SCREENING_UNIVERSE.values():
-        all_tickers.extend(group)
-
-    results = {}
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(_fetch_single_ticker, t): t for t in all_tickers}
-        for future in as_completed(futures):
-            data = future.result()
-            if data:
-                results[data["ticker"]] = data
-
-    return results
-
-
+# ══════════════════════════════════════════════
+# PAGE CONFIG
+# ══════════════════════════════════════════════
+st.set_page_config(
+    page_title="AlphaConsensus Terminal",
+    page_icon="📈",
+    layout="centered",
+)
 
 # ══════════════════════════════════════════════
 # PRESET PROMPTS — reduced to essentials
@@ -389,16 +270,11 @@ STOCK_PRESETS = [
 
 SCREENER_PRESETS = [
     ("🇮🇳 Screen Indian Stocks",
-     "Find the best Indian stocks to invest in right now. Show me which Nifty 50 stocks pass all 4 frameworks and which pass 3 out of 4 and which pass 2 out of 4, with upto top 10 from each tier. Explain why each tier is a good investment using the book philosophies."),
-    ("🇺🇸 Screen US Stocks",
-     "Find the best US stocks to invest in right now. Show me which large cap stocks pass all 4 frameworks and which pass 3 out of 4 and which pass 2 out of 4, with upto top 10 from each tier. Explain why each tier is a good investment using the book philosophies."),
-    ("🌍 Screen All Markets",
-     "Screen all stocks across India and US markets. Show me the best investment candidates that pass all 4 frameworks or 3 out of 4. Explain why each category is good for long-term returns based on Graham, Greenblatt, and Dorsey."),
+     "Find the best Indian stocks to invest in right now. Show me which stocks pass all 4 frameworks and which pass 3 out of 4 and which pass 2 out of 4, with upto top 10 from each tier. Explain why each tier is a good investment using the book philosophies."),
+    ("💎 Find Hidden Gems",
+     "Find hidden gem stocks — small and mid cap Indian companies outside the Nifty 50 that pass at least 3 out of 4 frameworks. Show top 10 with key metrics. Explain why each is a good investment using book philosophies."),
 ]
 
-# ══════════════════════════════════════════════
-# CSS — CLEAN, SOLID, MINIMAL
-# ══════════════════════════════════════════════
 # ══════════════════════════════════════════════
 # CSS — CLEAN, SOLID, MINIMAL
 # ══════════════════════════════════════════════
@@ -406,26 +282,12 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@300;400;500&display=swap');
 
-/* ── FORCE THE OPEN BUTTON TO EXIST ── */
-[data-testid="collapsedControl"] {
-    display: flex !important;
-    opacity: 1 !important;
-    visibility: visible !important;
-    width: 42px !important;
-    height: 42px !important;
-    position: fixed !important;
-    top: 16px !important;
-    left: 16px !important;
-    z-index: 9999999 !important;
-    background-color: #1e1f20 !important;
-}
 /* ── Base ── */
 .stApp {
     background-color: #0f1117 !important;
 }
 
-/* Apply Inter font ONLY to text so we don't break Streamlit's SVG icons! */
-.stApp p, .stApp h1, .stApp h2, .stApp h3, .stApp div, .stApp input, .stApp button, .stApp table, .stApp td, .stApp th {
+.stApp, .stApp * {
     font-family: 'Inter', sans-serif !important;
 }
 
@@ -433,146 +295,250 @@ st.markdown("""
     background: transparent !important;
 }
 
-/* ── 1. DISABLE STREAMLIT'S FADE-OUT HEADER ── */
-/* This forces the header area to stay permanently visible so the button doesn't disappear */
-header[data-testid="stHeader"], .stAppHeader {
-    background: transparent !important;
-    opacity: 1 !important;
-    visibility: visible !important;
-    z-index: 99999 !important;
-}
+/* ── Hide Streamlit chrome ── */
+#MainMenu, footer, header { visibility: hidden; }
 
-/* Hide the Deploy/Menu items on the right side */
-[data-testid="stToolbar"] {
-    display: none !important;
-}
-
-/* ── 2. HIJACK THE "OPEN SIDEBAR" BUTTON (Gemini Style) ── */
-[data-testid="collapsedControl"] {
-    position: fixed !important;
-    top: 16px !important;
-    left: 16px !important;
-    width: 42px !important;
-    height: 42px !important;
-    background-color: #1e1f20 !important;
-    border: 1px solid rgba(255, 255, 255, 0.1) !important;
-    border-radius: 12px !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    z-index: 999999 !important;
-    transition: all 0.2s ease !important;
-    opacity: 1 !important;
-    visibility: visible !important;
-}
-
-[data-testid="collapsedControl"]:hover {
-    background-color: #2a2b2f !important;
-    border-color: rgba(0, 245, 212, 0.4) !important;
-}
-
-/* Style the icon inside the Open button */
-[data-testid="collapsedControl"] svg {
-    fill: #d1d5db !important;
-    color: #d1d5db !important;
-    width: 22px !important;
-    height: 22px !important;
-}
-[data-testid="collapsedControl"]:hover svg {
-    fill: #00f5d4 !important;
-    color: #00f5d4 !important;
-}
-
-/* ── 3. HIJACK THE "CLOSE SIDEBAR" BUTTON (Inside the sidebar) ── */
-/* Make it match the Open button perfectly */
-[data-testid="stSidebar"] button[kind="header"], 
-[data-testid="stSidebar"] button[kind="headerNoPadding"] {
-    background-color: #1e1f20 !important;
-    border: 1px solid rgba(255, 255, 255, 0.1) !important;
-    border-radius: 12px !important;
-    width: 42px !important;
-    height: 42px !important;
-    margin-top: 16px !important;
-    margin-left: 16px !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    transition: all 0.2s ease !important;
-}
-
-[data-testid="stSidebar"] button[kind="header"]:hover,
-[data-testid="stSidebar"] button[kind="headerNoPadding"]:hover {
-    background-color: #2a2b2f !important;
-    border-color: rgba(0, 245, 212, 0.4) !important;
-}
-
-/* Style the icon inside the Close button */
-[data-testid="stSidebar"] button[kind="header"] svg,
-[data-testid="stSidebar"] button[kind="headerNoPadding"] svg {
-    fill: #d1d5db !important;
-    color: #d1d5db !important;
-    width: 22px !important;
-    height: 22px !important;
-}
-
-/* ── Remaining UI Styles (Sidebar, Inputs, Chat) ── */
+/* ── Sidebar ── */
 [data-testid="stSidebar"] {
     background-color: #161b22 !important;
     border-right: 1px solid rgba(255,255,255,0.06) !important;
 }
 
-[data-testid="stSidebar"] [data-testid="stMarkdown"] p { color: #9ca3af !important; font-size: 0.85rem !important; }
-[data-testid="stSidebar"] h1 { font-family: 'Space Grotesk', sans-serif !important; color: #00f5d4 !important; font-size: 1.3rem !important; font-weight: 700 !important; letter-spacing: 1px !important; }
-[data-testid="stSidebar"] h3 { font-family: 'Space Grotesk', sans-serif !important; color: #e5e7eb !important; font-size: 0.85rem !important; font-weight: 600 !important; text-transform: uppercase !important; letter-spacing: 1.5px !important; margin-top: 1.5rem !important; }
-[data-testid="stSidebar"] hr { border-color: rgba(255,255,255,0.06) !important; }
-.stApp h1 { font-family: 'Space Grotesk', sans-serif !important; font-weight: 700 !important; font-size: 2rem !important; color: #00f5d4 !important; padding-bottom: 2px; }
-.stApp .stCaption, .stApp [data-testid="stCaptionContainer"] p { color: #6b7280 !important; font-size: 0.88rem !important; }
+[data-testid="stSidebar"] [data-testid="stMarkdown"] p {
+    color: #9ca3af !important;
+    font-size: 0.85rem !important;
+}
 
-/* Chat Bubbles */
-[data-testid="stChatMessage"] { background: #161b22 !important; border: 1px solid rgba(255,255,255,0.06) !important; border-radius: 12px !important; padding: 1rem 1.2rem !important; margin-bottom: 10px !important; }
-[data-testid="stChatMessage"] p, [data-testid="stChatMessage"] li, [data-testid="stChatMessage"] span { color: #e5e7eb !important; line-height: 1.7 !important; font-size: 0.93rem !important; }
-[data-testid="stChatMessage"] strong { color: #00f5d4 !important; }
-[data-testid="stChatMessage"] code { background: rgba(0, 245, 212, 0.08) !important; color: #00f5d4 !important; border-radius: 4px !important; padding: 2px 6px !important; }
-[data-testid="stChatMessage"] [data-testid="stAvatar"] { border: 1px solid rgba(0, 245, 212, 0.3) !important; border-radius: 50% !important; }
+[data-testid="stSidebar"] h1 {
+    font-family: 'Space Grotesk', sans-serif !important;
+    color: #00f5d4 !important;
+    font-size: 1.3rem !important;
+    font-weight: 700 !important;
+    letter-spacing: 1px !important;
+}
 
-/* Inputs */
-[data-testid="stChatInput"], [data-testid="stChatInputContainer"] { background: transparent !important; }
-[data-testid="stChatInput"] textarea, [data-testid="stChatInputContainer"] textarea { background: #161b22 !important; border: 1px solid rgba(255,255,255,0.1) !important; border-radius: 12px !important; color: #e5e7eb !important; font-size: 0.93rem !important; padding: 12px 16px !important; }
-[data-testid="stChatInput"] textarea:focus, [data-testid="stChatInputContainer"] textarea:focus { border-color: rgba(0, 245, 212, 0.4) !important; box-shadow: 0 0 0 1px rgba(0, 245, 212, 0.15) !important; outline: none !important; }
-[data-testid="stChatInput"] textarea::placeholder { color: #4b5563 !important; }
-[data-testid="stChatInput"] button, [data-testid="stChatInputContainer"] button { background: #00f5d4 !important; border: none !important; border-radius: 8px !important; }
-[data-testid="stChatInput"] button:hover, [data-testid="stChatInputContainer"] button:hover { background: #00dfc0 !important; }
-[data-testid="stChatInput"] > div:focus-within, [data-testid="stChatInputContainer"] > div:focus-within { outline: none !important; box-shadow: none !important; border: none !important; }
-[data-testid="stChatInput"] [data-baseweb="textarea"], [data-testid="stChatInput"] [data-baseweb="base-input"] { outline: none !important; box-shadow: none !important; background-color: transparent !important; }
-[data-testid="stChatInput"] [data-baseweb="base-input"]:focus-within { border-color: rgba(0, 245, 212, 0.4) !important; box-shadow: none !important; }
+[data-testid="stSidebar"] h3 {
+    font-family: 'Space Grotesk', sans-serif !important;
+    color: #e5e7eb !important;
+    font-size: 0.85rem !important;
+    font-weight: 600 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 1.5px !important;
+    margin-top: 1.5rem !important;
+}
+
+[data-testid="stSidebar"] hr {
+    border-color: rgba(255,255,255,0.06) !important;
+}
+
+/* ── Title ── */
+.stApp h1 {
+    font-family: 'Space Grotesk', sans-serif !important;
+    font-weight: 700 !important;
+    font-size: 2rem !important;
+    color: #00f5d4 !important;
+    padding-bottom: 2px;
+}
+
+.stApp .stCaption, .stApp [data-testid="stCaptionContainer"] p {
+    color: #6b7280 !important;
+    font-size: 0.88rem !important;
+}
+
+/* ── Chat bubbles ── */
+[data-testid="stChatMessage"] {
+    background: #161b22 !important;
+    border: 1px solid rgba(255,255,255,0.06) !important;
+    border-radius: 12px !important;
+    padding: 1rem 1.2rem !important;
+    margin-bottom: 10px !important;
+}
+
+[data-testid="stChatMessage"] p,
+[data-testid="stChatMessage"] li,
+[data-testid="stChatMessage"] span {
+    color: #e5e7eb !important;
+    line-height: 1.7 !important;
+    font-size: 0.93rem !important;
+}
+
+[data-testid="stChatMessage"] strong {
+    color: #00f5d4 !important;
+}
+
+[data-testid="stChatMessage"] code {
+    background: rgba(0, 245, 212, 0.08) !important;
+    color: #00f5d4 !important;
+    border-radius: 4px !important;
+    padding: 2px 6px !important;
+}
+
+[data-testid="stChatMessage"] [data-testid="stAvatar"] {
+    border: 1px solid rgba(0, 245, 212, 0.3) !important;
+    border-radius: 50% !important;
+}
+
+/* ── Chat input ── */
+[data-testid="stChatInput"],
+[data-testid="stChatInputContainer"] {
+    background: transparent !important;
+}
+
+[data-testid="stChatInput"] textarea,
+[data-testid="stChatInputContainer"] textarea {
+    background: #161b22 !important;
+    border: 1px solid rgba(255,255,255,0.1) !important;
+    border-radius: 12px !important;
+    color: #e5e7eb !important;
+    font-size: 0.93rem !important;
+    padding: 12px 16px !important;
+}
+
+[data-testid="stChatInput"] textarea:focus,
+[data-testid="stChatInputContainer"] textarea:focus {
+    border-color: rgba(0, 245, 212, 0.4) !important;
+    box-shadow: 0 0 0 1px rgba(0, 245, 212, 0.15) !important;
+    outline: none !important;
+}
+
+[data-testid="stChatInput"] textarea::placeholder {
+    color: #4b5563 !important;
+}
+
+[data-testid="stChatInput"] button,
+[data-testid="stChatInputContainer"] button {
+    background: #00f5d4 !important;
+    border: none !important;
+    border-radius: 8px !important;
+}
+
+[data-testid="stChatInput"] button:hover,
+[data-testid="stChatInputContainer"] button:hover {
+    background: #00dfc0 !important;
+}
+
+/* ── Kill red focus outlines ── */
+[data-testid="stChatInput"] > div:focus-within,
+[data-testid="stChatInputContainer"] > div:focus-within {
+    outline: none !important;
+    box-shadow: none !important;
+    border: none !important;
+}
+
+[data-testid="stChatInput"] [data-baseweb="textarea"],
+[data-testid="stChatInput"] [data-baseweb="base-input"] {
+    outline: none !important;
+    box-shadow: none !important;
+    background-color: transparent !important;
+}
+
+[data-testid="stChatInput"] [data-baseweb="base-input"]:focus-within {
+    border-color: rgba(0, 245, 212, 0.4) !important;
+    box-shadow: none !important;
+}
+
 *:focus, *:active, *:focus-visible { outline: none !important; }
 div[data-baseweb] [aria-invalid] { box-shadow: none !important; }
 
-/* Standard Buttons & Misc */
-.stButton > button { background: rgba(255,255,255,0.04) !important; border: 1px solid rgba(255,255,255,0.1) !important; border-radius: 8px !important; color: #d1d5db !important; font-size: 0.84rem !important; font-weight: 500 !important; padding: 8px 20px !important; transition: all 0.15s ease !important; }
-.stButton > button:hover { background: rgba(0, 245, 212, 0.08) !important; border-color: rgba(0, 245, 212, 0.3) !important; color: #00f5d4 !important; }
-.stTextInput > div > div > input { background: #161b22 !important; border: 1px solid rgba(255,255,255,0.1) !important; border-radius: 8px !important; color: #e5e7eb !important; font-family: 'Space Grotesk', sans-serif !important; font-size: 0.93rem !important; padding: 10px 14px !important; text-align: center !important; }
-.stTextInput > div > div > input::placeholder { color: #4b5563 !important; }
-.stTextInput > div > div > input:focus { border-color: rgba(0, 245, 212, 0.4) !important; box-shadow: 0 0 0 1px rgba(0, 245, 212, 0.1) !important; outline: none !important; }
-.stTextInput label { color: #6b7280 !important; font-size: 0.78rem !important; letter-spacing: 1px !important; text-transform: uppercase !important; }
-[data-testid="stBottom"] { background: #0f1117 !important; background-color: #0f1117 !important; border-top: 1px solid rgba(255,255,255,0.06) !important; }
-[data-testid="stBottom"] > div { background: transparent !important; background-color: transparent !important; }
+/* ── Buttons — clean pill ── */
+.stButton > button {
+    background: rgba(255,255,255,0.04) !important;
+    border: 1px solid rgba(255,255,255,0.1) !important;
+    border-radius: 8px !important;
+    color: #d1d5db !important;
+    font-size: 0.84rem !important;
+    font-weight: 500 !important;
+    padding: 8px 20px !important;
+    transition: all 0.15s ease !important;
+}
+
+.stButton > button:hover {
+    background: rgba(0, 245, 212, 0.08) !important;
+    border-color: rgba(0, 245, 212, 0.3) !important;
+    color: #00f5d4 !important;
+}
+
+/* ── Text input ── */
+.stTextInput > div > div > input {
+    background: #161b22 !important;
+    border: 1px solid rgba(255,255,255,0.1) !important;
+    border-radius: 8px !important;
+    color: #e5e7eb !important;
+    font-family: 'Space Grotesk', sans-serif !important;
+    font-size: 0.93rem !important;
+    padding: 10px 14px !important;
+    text-align: center !important;
+}
+
+.stTextInput > div > div > input::placeholder {
+    color: #4b5563 !important;
+}
+
+.stTextInput > div > div > input:focus {
+    border-color: rgba(0, 245, 212, 0.4) !important;
+    box-shadow: 0 0 0 1px rgba(0, 245, 212, 0.1) !important;
+    outline: none !important;
+}
+
+.stTextInput label {
+    color: #6b7280 !important;
+    font-size: 0.78rem !important;
+    letter-spacing: 1px !important;
+    text-transform: uppercase !important;
+}
+
+/* ── Bottom dock ── */
+[data-testid="stBottom"] {
+    background: #0f1117 !important;
+    background-color: #0f1117 !important;
+    border-top: 1px solid rgba(255,255,255,0.06) !important;
+}
+
+[data-testid="stBottom"] > div {
+    background: transparent !important;
+    background-color: transparent !important;
+}
+
+/* ── Spinner ── */
 .stSpinner > div { border-top-color: #00f5d4 !important; }
 [data-testid="stSpinnerContainer"] { color: #6b7280 !important; }
+
+/* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
-.stDataFrame, .stTable { max-width: 100% !important; overflow-x: auto !important; }
-[data-testid="stChatMessage"] table { display: block !important; overflow-x: auto !important; white-space: nowrap !important; max-width: 100% !important; }
-@media (max-width: 768px) { .stApp h1 { font-size: 1.5rem !important; } }
+
+/* ── Tables — scoped to actual tables only ── */
+.stDataFrame, .stTable {
+    max-width: 100% !important;
+    overflow-x: auto !important;
+}
+
+[data-testid="stChatMessage"] table {
+    display: block !important;
+    overflow-x: auto !important;
+    white-space: nowrap !important;
+    max-width: 100% !important;
+}
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+    .stApp h1 { font-size: 1.5rem !important; }
+}
 </style>
 """, unsafe_allow_html=True)
+
 
 # ══════════════════════════════════════════════
 # SIDEBAR
 # ══════════════════════════════════════════════
 with st.sidebar:
+    st.markdown("# 📈 AlphaConsensus")
+    st.markdown("Multi-framework investment analysis powered by Graham, Greenblatt, Dorsey, and momentum scoring.")
+
+    st.markdown("---")
+
     st.text_input(
         "TARGET COMPANY",
         placeholder="e.g. TCS, Reliance, Apple",
@@ -585,6 +551,7 @@ with st.sidebar:
         st.rerun()
 
     st.markdown("---")
+
     st.markdown("### How it works")
     st.markdown(
         "Ask about any stock by name or ticker. "
@@ -1261,15 +1228,11 @@ def calculate_graham_value(ticker: str) -> dict:
 
 
 def find_investments(market: str) -> dict:
-    """Find the best investment candidates by scoring stocks against ALL 4 frameworks.
-    Returns two tiers: Perfect Consensus (4/4 pass) and Strong Consensus (3/4 pass),
-    with the top 3 from each tier and which frameworks each stock passed or failed.
+    """Find the best investment candidates from the pre-scored universe of ~4500 Indian stocks.
+    Reads from universe_scored.csv which is updated monthly via universe_updater.py.
 
     Use this when the user asks to find, discover, or recommend stocks to invest in,
     or asks which stocks are the best buys, or wants investment ideas.
-
-    This screens ~80 stocks (Nifty 50 + US Large Cap 30). First call takes ~60 seconds
-    to fetch all data; subsequent calls are cached for 6 hours.
 
     The 4 frameworks scored are:
     1. Graham — P/E <= 15 AND P/B <= 1.5 (deep value)
@@ -1278,122 +1241,77 @@ def find_investments(market: str) -> dict:
     4. Trajectory — (Revenue Growth > 0% OR Net Income Growth > 0%) AND (Debt Growth < 0% OR D/E < 50%)
 
     Args:
-        market: Which market to screen. Must be one of:
-                india — Nifty 50 stocks only
-                us — US Large Cap stocks only
-                all — Both markets combined
+        market: Which market to screen. Use 'india' or 'all' (both return Indian stocks).
     """
-    universe_data = _fetch_universe_data()
+    try:
+        df = pd.read_csv("universe_scored.csv")
+    except FileNotFoundError:
+        return {"error": "universe_scored.csv not found. Run universe_updater.py first."}
 
-    tier_4 = []
-    tier_3 = []
-    tier_2 = []
+    tier_4 = df[df["score"] == 4].copy()
+    tier_3 = df[df["score"] == 3].copy()
+    tier_2 = df[df["score"] == 2].copy()
 
-    screened_count = 0
+    # Rank-sum sorting within each tier (value + quality + momentum)
+    def apply_rank_sort(tier_df):
+        if tier_df.empty:
+            return tier_df
+        t = tier_df.copy()
+        t["_pe_sort"] = t["pe"].apply(lambda x: x if pd.notna(x) else 9999)
+        t["_roe_sort"] = t["roe_pct"].apply(lambda x: -x if pd.notna(x) else 9999)
+        t["_rev_sort"] = t["rev_growth"].apply(lambda x: -x if pd.notna(x) else 9999)
+        t = t.sort_values(["_pe_sort", "_roe_sort", "_rev_sort"])
+        return t.drop(columns=["_pe_sort", "_roe_sort", "_rev_sort"])
 
-    for ticker, m in universe_data.items():
-        is_indian = ticker.endswith(".NS") or ticker.endswith(".BO")
-        if market == "india" and not is_indian:
-            continue
-        if market == "us" and is_indian:
-            continue
+    tier_4 = apply_rank_sort(tier_4)
+    tier_3 = apply_rank_sort(tier_3)
+    tier_2 = apply_rank_sort(tier_2)
 
-        screened_count += 1
+    def to_list(tier_df, max_n=10):
+        entries = []
+        for _, row in tier_df.head(max_n).iterrows():
+            entries.append({
+                "ticker": row["ticker"],
+                "name": row.get("name", row["ticker"]),
+                "sector": row.get("sector", "N/A"),
+                "price": round(row["price"], 2) if pd.notna(row.get("price")) else "N/A",
+                "pe": round(row["pe"], 2) if pd.notna(row.get("pe")) else "N/A",
+                "pb": round(row["pb"], 2) if pd.notna(row.get("pb")) else "N/A",
+                "roe_pct": row.get("roe_pct", "N/A"),
+                "de_pct": round(row["de"], 2) if pd.notna(row.get("de")) else "N/A",
+                "earnings_yield_pct": row.get("earnings_yield", "N/A"),
+                "dividend_yield_pct": row.get("dividend_yield_pct", "N/A"),
+                "rev_growth_pct": row.get("rev_growth", "N/A"),
+                "ni_growth_pct": row.get("ni_growth", "N/A"),
+                "debt_growth_pct": row.get("debt_growth", "N/A"),
+                "score": f"{int(row['score'])}/4",
+                "passed": [f for f in ["Graham", "Greenblatt", "Dorsey", "Trajectory"]
+                           if row.get(f"{f.lower()}_pass")],
+                "failed": [f for f in ["Graham", "Greenblatt", "Dorsey", "Trajectory"]
+                           if not row.get(f"{f.lower()}_pass")],
+                "years_of_data": int(row["years_of_data"]) if pd.notna(row.get("years_of_data")) else 0,
+            })
+        return entries
 
-        pe = m.get("pe")
-        pb = m.get("pb")
-        roe = m.get("roe")
-        de = m.get("de")
-        ey = m.get("earnings_yield")
-        rev_g = m.get("rev_growth")
-        ni_g = m.get("ni_growth")
-        debt_g = m.get("debt_growth")
-
-        graham = bool(pe and pb and pe <= 15 and pb <= 1.5)
-        greenblatt = bool(roe and ey and roe > 0.15 and ey > 5)
-        dorsey = bool(roe and de is not None and roe > 0.15 and de < 50)
-
-        growth_ok = (rev_g is not None and rev_g > 0) or (ni_g is not None and ni_g > 0)
-        debt_ok = (debt_g is not None and debt_g < 0) or (de is not None and de < 50)
-        trajectory = bool(growth_ok and debt_ok)
-
-        results_map = {
-            "Graham": graham,
-            "Greenblatt": greenblatt,
-            "Dorsey": dorsey,
-            "Trajectory": trajectory,
-        }
-        score = sum(results_map.values())
-
-        if score >= 2:
-            entry = {
-                "ticker": ticker,
-                "name": m.get("name", ticker),
-                "sector": m.get("sector", "N/A"),
-                "price": round(m["price"], 2) if m.get("price") else "N/A",
-                "pe": round(pe, 2) if pe else "N/A",
-                "pb": round(pb, 2) if pb else "N/A",
-                "roe_pct": round(roe * 100, 2) if roe else "N/A",
-                "de_pct": round(de, 2) if de is not None else "N/A",
-                "earnings_yield_pct": round(ey, 2) if ey else "N/A",
-                "dividend_yield_pct": round(m["dividend_yield"] * 100, 2) if m.get("dividend_yield") else "N/A",
-                "rev_growth_pct": rev_g if rev_g is not None else "N/A",
-                "ni_growth_pct": ni_g if ni_g is not None else "N/A",
-                "debt_growth_pct": debt_g if debt_g is not None else "N/A",
-                "score": f"{score}/4",
-                "passed": [name for name, passed in results_map.items() if passed],
-                "failed": [name for name, passed in results_map.items() if not passed],
-            }
-
-            if score == 4:
-                tier_4.append(entry)
-            elif score == 3:
-                tier_3.append(entry)
-            else:
-                tier_2.append(entry)
-
-    def apply_rank_sum(tier_list):
-        if not tier_list:
-            return tier_list
-
-        tier_list.sort(key=lambda x: x["pe"] if isinstance(x["pe"], (int, float)) else 9999)
-        for i, item in enumerate(tier_list): item["value_rank"] = i + 1
-
-        tier_list.sort(key=lambda x: x["roe_pct"] if isinstance(x["roe_pct"], (int, float)) else -9999, reverse=True)
-        for i, item in enumerate(tier_list): item["quality_rank"] = i + 1
-
-        tier_list.sort(key=lambda x: x["rev_growth_pct"] if isinstance(x["rev_growth_pct"], (int, float)) else -9999, reverse=True)
-        for i, item in enumerate(tier_list): item["momentum_rank"] = i + 1
-
-        for item in tier_list:
-            item["composite_rank_score"] = item["value_rank"] + item["quality_rank"] + item["momentum_rank"]
-
-        tier_list.sort(key=lambda x: x["composite_rank_score"])
-        return tier_list
-
-    tier_4 = apply_rank_sum(tier_4)
-    tier_3 = apply_rank_sum(tier_3)
-    tier_2 = apply_rank_sum(tier_2)
+    updated = df["updated_date"].iloc[0] if "updated_date" in df.columns else "Unknown"
 
     return {
-        "market": market,
-        "stocks_screened": screened_count,
+        "market": "india",
+        "stocks_in_universe": len(df),
+        "data_as_of": updated,
         "perfect_consensus_4_of_4": {
             "count": len(tier_4),
-            "top_10": tier_4[:10],
-            "investment_style": "Rare finds where deep value, capital efficiency, quality, and positive momentum ALL align. These represent the strongest quantitative buy signals across all philosophies.",
+            "top_10": to_list(tier_4),
         },
         "strong_consensus_3_of_4": {
             "count": len(tier_3),
-            "top_10": tier_3[:10],
-            "investment_style": "Strong candidates that pass 3 frameworks. The single failing framework identifies the specific risk to monitor. Still well above average conviction.",
+            "top_10": to_list(tier_3),
         },
         "moderate_consensus_2_of_4": {
             "count": len(tier_2),
-            "top_10": tier_2[:10],
-            "investment_style": "Partial alignment — these stocks show strength in 2 areas but have 2 gaps. May suit investors with specific theses (e.g. a cheap turnaround, or a quality grower at a premium). Requires more due diligence on the failing frameworks before committing.",
+            "top_10": to_list(tier_2),
         },
-        "note": "Screened Nifty 50 + US Large Cap 30. Dorsey moat is qualitative and checked only on quantitative criteria (ROE, D/E) here. Data cached for 6 hours. After presenting results, use search_book to explain WHY each investment style delivers returns, citing Graham, Greenblatt, and Dorsey.",
+        "note": "Pre-scored universe of ~4500 Indian stocks (NSE + BSE). Data updated monthly. After presenting results, use search_book to explain WHY each investment style delivers returns, citing Graham, Greenblatt, and Dorsey.",
     }
 
 
@@ -1503,7 +1421,7 @@ You have 11 tools available. Pick the right combination for each question — yo
 9. get_ownership_info — Get major shareholders, institutional holders, and insider transactions.
 10. get_dividend_history — Get complete dividend payment history, annual totals, growth rate, and yield.
 11. calculate_graham_value — Compute Grahams intrinsic value formula (V = EPS x (8.5 + 2g) x 4.4/Y) and margin of safety.
-12. find_investments — Screen ~80 stocks (Nifty 50 + US Large Cap 30) against ALL 4 frameworks and return two tiers: Perfect Consensus (4/4 pass) and Strong Consensus (3/4 pass), top 3 each. Use when the user asks to find, discover, or recommend stocks, or wants investment ideas. Call with market='india', 'us', or 'all'.
+12. find_investments — Screen ~4500 Indian stocks (NSE + BSE) from a pre-scored universe against ALL 4 frameworks. Returns three tiers: Perfect Consensus (4/4 pass), Strong Consensus (3/4 pass), and Moderate Consensus (2/4 pass), top 10 each. Use when the user asks to find, discover, or recommend stocks, or wants investment ideas. Call with market='india' or 'all'.
 13. show_stock_chart — Renders a visual 13-month line chart of a stock's closing price directly in the UI. Use this whenever the user asks for a chart, graph, or visual trajectory.
 
 TOOL SELECTION RULES:
@@ -1687,7 +1605,7 @@ if target:
 
 st.markdown("")
 st.caption("Market screeners")
-scr_cols = st.columns(3)
+scr_cols = st.columns(2)
 for i, (label, template) in enumerate(SCREENER_PRESETS):
     with scr_cols[i]:
         if st.button(label, key=f"screener_{i}", use_container_width=True):
@@ -1705,6 +1623,13 @@ with chat_area:
     # Welcome text (shown only when chat is empty)
     if not st.session_state.messages:
         st.markdown("")
+        st.markdown(
+            "<p style='color: #9ca3af; font-size: 0.9rem;'>"
+            "Enter a company name in the sidebar, then pick an analysis below — "
+            "or scan the market with the screeners. You can also type anything in the chat."
+            "</p>",
+            unsafe_allow_html=True,
+        )
 
     # Display past messages
     for msg in st.session_state.messages:
