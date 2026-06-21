@@ -1760,13 +1760,14 @@ with chat_area:
                 st.caption(f"⚡ {msg['model']}")
 
     # Handle new input (renders inside container = above buttons)
+    # Handle new input (renders inside container = above buttons)
     if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
 
         with st.chat_message("user", avatar=USER_AVATAR):
             st.markdown(prompt)
 
-       with st.chat_message("assistant", avatar=AGENT_AVATAR):
+        with st.chat_message("assistant", avatar=AGENT_AVATAR):
             with st.spinner("Routing & Analyzing..."):
                 try:
                     # 1. INTERCEPT & REWRITE
