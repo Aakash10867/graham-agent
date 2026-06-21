@@ -410,9 +410,18 @@ st.markdown("""
     background-color: #0f1117 !important;
 }
 
-/* Apply Inter font to text, but EXCLUDE material icons so arrows don't break */
-.stApp *:not(.material-symbols-rounded):not(.material-icons):not([class*="icon"]):not(svg):not([data-testid="collapsedControl"] span) {
+/* 1. Apply Inter font ONLY to actual text elements to perfectly protect all icons */
+.stApp p, .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6, 
+.stApp li, .stApp label, .stApp input, .stApp textarea, .stApp td, .stApp th {
     font-family: 'Inter', sans-serif !important;
+}
+
+/* 2. Bulletproof the Streamlit sidebar toggles with the Material Font */
+[data-testid="collapsedControl"],
+[data-testid="collapsedControl"] *,
+[data-testid="stSidebar"] button[kind="header"],
+[data-testid="stSidebar"] button[kind="header"] * {
+    font-family: 'Material Symbols Rounded', 'Material Icons', sans-serif !important;
 }
 
 [data-testid="stAppViewContainer"] {
