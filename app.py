@@ -1605,14 +1605,17 @@ def intercept_and_rewrite_query(user_query: str) -> str:
     """
     try:
         # Use a highly efficient model for routing latency
-        response = client.models.generate_content(
-            model='gemini-2.5-flash-lite', 
-            contents=router_prompt,
-        )
-        return f"SYSTEM DIRECTIVE (Translated Intent): {response.text}"
-    except Exception:
-        # Fallback to the raw query if the router fails
-        return user_query
+        for model_name in FREE_MODELS:
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=router_prompt,
+                )
+                break
+            except Exception as inner_e:
+                if "429" in str(inner_e) or "RESOURCE_EXHAUSTED" in str(inner_e):
+                    continue
+                raise inner_e
 
 
 def sanitize_history(history):
