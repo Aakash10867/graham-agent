@@ -406,6 +406,19 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@300;400;500&display=swap');
 
+/* ── FORCE THE OPEN BUTTON TO EXIST ── */
+[data-testid="collapsedControl"] {
+    display: flex !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    width: 42px !important;
+    height: 42px !important;
+    position: fixed !important;
+    top: 16px !important;
+    left: 16px !important;
+    z-index: 9999999 !important;
+    background-color: #1e1f20 !important;
+}
 /* ── Base ── */
 .stApp {
     background-color: #0f1117 !important;
