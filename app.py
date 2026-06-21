@@ -399,7 +399,6 @@ SCREENER_PRESETS = [
 # ══════════════════════════════════════════════
 # CSS — CLEAN, SOLID, MINIMAL
 # ══════════════════════════════════════════════
-st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@300;400;500&display=swap');
 
