@@ -651,9 +651,6 @@ div[data-baseweb] [aria-invalid] { box-shadow: none !important; }
 # SIDEBAR
 # ══════════════════════════════════════════════
 with st.sidebar:
-
-    st.markdown("---")
-
     st.text_input(
         "TARGET COMPANY",
         placeholder="e.g. TCS, Reliance, Apple",
