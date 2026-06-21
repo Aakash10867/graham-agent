@@ -21,17 +21,6 @@ os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
 import datetime
 import streamlit as st
-
-# ══════════════════════════════════════════════
-# PAGE CONFIG
-# ══════════════════════════════════════════════
-st.set_page_config(
-    page_title="AlphaConsensus Terminal",
-    page_icon="📈",
-    layout="centered",
-    initial_sidebar_state="expanded"
-)
-
 from google import genai
 from google.genai import types
 import chromadb
@@ -43,6 +32,17 @@ import requests
 import pandas as pd
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+
+# ══════════════════════════════════════════════
+# PAGE CONFIG
+# ══════════════════════════════════════════════
+st.set_page_config(
+    page_title="AlphaConsensus Terminal",
+    page_icon="📈",
+    layout="centered",
+    initial_sidebar_state="expanded"
+)
 
 # ──────────────────────────────────────────────
 # FREE MODEL FALLBACK LIST
