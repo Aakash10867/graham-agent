@@ -1244,7 +1244,9 @@ def find_investments(market: str) -> dict:
         market: Which market to screen. Use 'india' or 'all' (both return Indian stocks).
     """
     try:
-        df = pd.read_csv("universe_scored.csv")
+        import os
+        csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "universe_scored.csv")
+        df = pd.read_csv(csv_path)
     except FileNotFoundError:
         return {"error": "universe_scored.csv not found. Run universe_updater.py first."}
 
