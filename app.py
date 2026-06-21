@@ -453,7 +453,6 @@ header[data-testid="stHeader"] {
 [data-testid="collapsedControl"] svg {
     fill: #00f5d4 !important;
 }
-header { background: transparent !important; }
 
 /* Hide the top-right toolbar (Deploy button, menu icon) */
 [data-testid="stToolbar"] { visibility: hidden !important; }
