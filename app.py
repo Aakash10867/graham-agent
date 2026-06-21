@@ -1343,7 +1343,64 @@ def find_investments(market: str) -> dict:
         "note": "Pre-scored universe of ~4500 Indian stocks (NSE + BSE). Data updated monthly. After presenting results, use search_book to explain WHY each investment style delivers returns, citing Graham, Greenblatt, and Dorsey.",
     }
 
+def get_csv_financial_data(ticker: str) -> dict:
+    """
+    Reads the pre-scored universe database and returns the specific row for the requested ticker.
+    Extracts core metrics, trajectories, and the boolean pass/fail status for the 4 investment frameworks.
+    Use this when you need proprietary framework scores or specific local data for a single company.
+    """
+    resolved = _resolve_ticker(ticker)
+    try:
+        # universe_df is globally cached at the top of your script
+        company_data = universe_df[universe_df['ticker'] == resolved]
+        
+        if company_data.empty:
+            # Fallback to name search if ticker fails
+            company_data = universe_df[universe_df['name'].str.contains(ticker, case=False, na=False)]
+            
+        if company_data.empty:
+            return {"error": f"No proprietary CSV data found for {ticker}."}
+            
+        # Return the specific row as a dictionary
+        return company_data.iloc[0].fillna("N/A").to_dict()
+    except Exception as e:
+        return {"error": f"Error reading CSV data: {str(e)}"}
 
+def get_macro_context(ticker: str) -> dict:
+    """
+    Uses Yahoo Finance to return the company's sector and the 5-day 
+    performance of the broader market index (Nifty 50: ^NSEI) to gauge macro momentum.
+    """
+    resolved = _resolve_ticker(ticker)
+    try:
+        stock = yf.Ticker(resolved)
+        sector = stock.info.get('sector', 'Unknown Sector')
+        
+        # Get Nifty 50 momentum
+        nifty = yf.Ticker("^NSEI")
+        hist = nifty.history(period="5d")
+        
+        if not hist.empty and len(hist) >= 1:
+            start_price = float(hist['Close'].iloc[0])
+            end_price = float(hist['Close'].iloc[-1])
+            pct_change = ((end_price - start_price) / start_price) * 100
+        else:
+            pct_change = None
+            
+        return {
+            "ticker": resolved,
+            "sector": sector,
+            "nifty_50_5d_performance_pct": round(pct_change, 2) if pct_change is not None else "N/A"
+        }
+    except Exception as e:
+        return {"error": f"Error fetching macro context: {str(e)}"}
+
+
+
+
+# ──────────────────────────────────────────────
+# TOOLS REGISTRY
+# ──────────────────────────────────────────────
 # ──────────────────────────────────────────────
 # TOOLS REGISTRY
 # ──────────────────────────────────────────────
@@ -1361,6 +1418,8 @@ TOOLS = [
     calculate_graham_value,
     find_investments,
     show_stock_chart,
+    get_csv_financial_data,
+    get_macro_context,
 ]
 
 tool_functions = {
@@ -1377,6 +1436,8 @@ tool_functions = {
     "calculate_graham_value": calculate_graham_value,
     "find_investments": find_investments,
     "show_stock_chart": show_stock_chart,
+    "get_csv_financial_data": get_csv_financial_data,
+    "get_macro_context": get_macro_context,
 }
 
 
@@ -1452,6 +1513,8 @@ You have 11 tools available. Pick the right combination for each question — yo
 11. calculate_graham_value — Compute Grahams intrinsic value formula (V = EPS x (8.5 + 2g) x 4.4/Y) and margin of safety.
 12. find_investments — Screen ~4500 Indian stocks (NSE + BSE) from a pre-scored universe against ALL 4 frameworks. Returns three tiers: Perfect Consensus (4/4 pass), Strong Consensus (3/4 pass), and Moderate Consensus (2/4 pass), top 10 each. Use when the user asks to find, discover, or recommend stocks, or wants investment ideas. Call with market='india' or 'all'.
 13. show_stock_chart — Renders a visual 13-month line chart of a stock's closing price directly in the UI. Use this whenever the user asks for a chart, graph, or visual trajectory.
+14. get_csv_financial_data — Reads the pre-scored universe database for a specific ticker to get proprietary framework scores (Graham, Greenblatt, Dorsey, Trajectory pass/fail flags).
+15. get_macro_context — Gets the sector and 5-day performance of the broader market (Nifty 50) to gauge macro momentum versus asset momentum.
 
 TOOL SELECTION RULES:
 - For a comprehensive stock analysis: call get_stock_data + get_historical_trends + get_financial_statements (income) + calculate_graham_value + search_book.
@@ -1496,6 +1559,9 @@ CRITICAL RULES:
 - Do NOT "think out loud" or correct yourself in the output.
 - Do NOT copy the instruction text into your response.
 - Each framework MUST be evaluated using ONLY its own criteria. Cross-contamination between frameworks is an error.
+SYNTHESIS PROTOCOL:
+- If the local CSV tool returns framework flags (e.g., graham_pass = True/False), you MUST query search_book for the theoretical definition of that framework (e.g., 'Margin of Safety').
+- Cross-reference company metrics with get_macro_context to determine if the company is outperforming or being dragged by market beta.
 
 PASS/FAIL THRESHOLDS (Apply mechanically):
 1. Graham: PASS IF (P/E <= 15) AND (P/B <= 1.5).
@@ -1542,6 +1608,36 @@ You MUST output your response EXACTLY following the template below. Use proper M
 # ──────────────────────────────────────────────
 # AGENT
 # ──────────────────────────────────────────────
+def intercept_and_rewrite_query(user_query: str) -> str:
+    """
+    Intercepts the layman question and translates it into strict technical 
+    directives for the main execution agent using a fast model.
+    """
+    client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+    
+    router_prompt = f"""
+    You are the Pre-Processing Routing Agent for a quantitative financial system.
+    Translate this layman user query into a strict, step-by-step technical directive for the Execution Agent.
+
+    The Execution Agent has tools: get_csv_financial_data, get_macro_context, search_book, get_stock_data, get_price_history, etc.
+
+    User Query: "{user_query}"
+
+    Identify the ticker symbol. Tell the agent EXACTLY which tools to use and what to cross-reference based on the query intent. 
+    DO NOT ANSWER THE QUESTION. ONLY OUTPUT THE DIRECTIVE.
+    """
+    try:
+        # Use a highly efficient model for routing latency
+        response = client.models.generate_content(
+            model='gemini-2.5-flash-lite', 
+            contents=router_prompt,
+        )
+        return f"SYSTEM DIRECTIVE (Translated Intent): {response.text}"
+    except Exception:
+        # Fallback to the raw query if the router fails
+        return user_query
+
+
 def sanitize_history(history):
     """Filters out malformed messages missing a role."""
     clean = []
@@ -1670,12 +1766,20 @@ with chat_area:
         with st.chat_message("user", avatar=USER_AVATAR):
             st.markdown(prompt)
 
-        with st.chat_message("assistant", avatar=AGENT_AVATAR):
-            with st.spinner("Analyzing..."):
+       with st.chat_message("assistant", avatar=AGENT_AVATAR):
+            with st.spinner("Routing & Analyzing..."):
                 try:
-                    answer, model_used = agent_turn(prompt)
+                    # 1. INTERCEPT & REWRITE
+                    rewritten_directive = intercept_and_rewrite_query(prompt)
+                    
+                    # 2. EXECUTE (Pass the directive, not the layman prompt)
+                    answer, model_used = agent_turn(rewritten_directive)
+                    
+                    # 3. RENDER
                     st.markdown(answer)
-                    st.caption(f"⚡ {model_used}")
+                    st.caption(f"⚡ {model_used} | Routed via Interceptor")
+                    
+                    # Append the true answer to history, but keep the user's original prompt for continuity
                     st.session_state.messages.append({
                         "role": "assistant",
                         "content": answer,
