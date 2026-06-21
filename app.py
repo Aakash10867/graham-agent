@@ -651,8 +651,6 @@ div[data-baseweb] [aria-invalid] { box-shadow: none !important; }
 # SIDEBAR
 # ══════════════════════════════════════════════
 with st.sidebar:
-    st.markdown("# 📈 AlphaConsensus")
-    st.markdown("Multi-framework investment analysis powered by Graham, Greenblatt, Dorsey, and momentum scoring.")
 
     st.markdown("---")
 
@@ -1789,13 +1787,6 @@ with chat_area:
     # Welcome text (shown only when chat is empty)
     if not st.session_state.messages:
         st.markdown("")
-        st.markdown(
-            "<p style='color: #9ca3af; font-size: 0.9rem;'>"
-            "Enter a company name in the sidebar, then pick an analysis below — "
-            "or scan the market with the screeners. You can also type anything in the chat."
-            "</p>",
-            unsafe_allow_html=True,
-        )
 
     # Display past messages
     for msg in st.session_state.messages:
