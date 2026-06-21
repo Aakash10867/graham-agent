@@ -1,0 +1,37 @@
+name: Monthly Universe Update
+
+on:
+  schedule:
+    # Runs at 6:00 AM UTC on the 29th of every month
+    - cron: '0 6 29 * *'
+  # Allow manual trigger from GitHub Actions tab
+  workflow_dispatch:
+
+jobs:
+  update-universe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install yfinance pandas requests
+
+      - name: Run universe updater
+        run: python universe_updater.py
+
+      - name: Commit updated CSV
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add universe_scored.csv universe_tickers.csv
+          git diff --cached --quiet || git commit -m "Auto-update: universe scored $(date +%Y-%m-%d)"
+          git push
