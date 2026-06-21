@@ -1652,7 +1652,7 @@ with chat_area:
     # Terminal Ready State (shown only when chat is empty)
     if not st.session_state.messages:
         st.markdown("")
-        st.info("Terminal ready. Enter a company name in the sidebar, pick a preset, or run a screener.")
+        st.info("Choose a company in the sidebar then select a framework below, or find best stocks by clicking below buttons.")
 
     # Display past messages
     for msg in st.session_state.messages:
