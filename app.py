@@ -246,7 +246,7 @@ def _resolve_ticker(query):
 # ══════════════════════════════════════════════
 st.set_page_config(
     page_title="AlphaConsensus Terminal",
-    page_icon="📈",
+    page_icon="logo.svg",
     layout="centered",
 )
 
@@ -534,7 +534,7 @@ div[data-baseweb] [aria-invalid] { box-shadow: none !important; }
 # SIDEBAR
 # ══════════════════════════════════════════════
 with st.sidebar:
-    st.markdown("# 📈 AlphaConsensus")
+    st.logo("logo.svg", icon_image="logo.svg")
     st.markdown("Multi-framework investment analysis powered by Graham, Greenblatt, Dorsey, and momentum scoring.")
 
     st.markdown("---")
