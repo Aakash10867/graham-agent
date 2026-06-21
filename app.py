@@ -6,15 +6,7 @@ Operating on Graham, Greenblatt, Dorsey, and Trajectory frameworks.
 
 Streamlit web app with Gemini LLM, ChromaDB RAG, and yfinance tools.
 """
-# ══════════════════════════════════════════════
-# PAGE CONFIG
-# ══════════════════════════════════════════════
-st.set_page_config(
-    page_title="AlphaConsensus Terminal",
-    page_icon="📈",
-    layout="centered",
-    initial_sidebar_state="expanded"
-)
+
 
 # --- SQLITE PATCH FOR STREAMLIT CLOUD ---
 __import__('pysqlite3')
@@ -24,6 +16,16 @@ sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
 import os
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
+
+# ══════════════════════════════════════════════
+# PAGE CONFIG
+# ══════════════════════════════════════════════
+st.set_page_config(
+    page_title="AlphaConsensus Terminal",
+    page_icon="📈",
+    layout="centered",
+    initial_sidebar_state="expanded"
+)
 
 import datetime
 import streamlit as st
