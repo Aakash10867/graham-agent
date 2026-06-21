@@ -765,6 +765,58 @@ universe_df = load_universe(CSV_PATH)
 # TOOL FUNCTIONS
 # ──────────────────────────────────────────────
 
+def get_earnings_quality_metrics(ticker: str) -> dict:
+    """
+    CRITICAL TOOL: Calculates intrinsic BS-detectors to catch statistical illusions.
+    1. Cash Conversion (Net Income vs Operating Cash Flow)
+    2. Unusual Items % of Net Income
+    Use this on EVERY single-stock deep dive to verify the numbers are real.
+    """
+    resolved = _resolve_ticker(ticker)
+    try:
+        t = yf.Ticker(resolved)
+        inc = t.financials
+        cf = t.cashflow
+
+        if inc.empty or cf.empty:
+            return {"error": "Financial statements unavailable to verify earnings quality."}
+
+        def get_latest(df, row_names):
+            for name in row_names:
+                if name in df.index:
+                    val = df.loc[name].dropna()
+                    if not val.empty: return float(val.iloc[0])
+            return 0.0
+
+        net_income = get_latest(inc, ['Net Income', 'Net Income Common Stockholders'])
+        ocf = get_latest(cf, ['Operating Cash Flow', 'Total Cash From Operating Activities'])
+        unusual_items = get_latest(inc, ['Unusual Items', 'Extraordinary Items'])
+
+        if net_income == 0:
+            return {"error": "Net income is 0 or missing."}
+
+        cash_conversion = ocf / net_income if net_income > 0 else 0
+        unusual_impact = abs(unusual_items / net_income)
+
+        flags = []
+        if cash_conversion < 0.5 and net_income > 0:
+            flags.append(f"RED FLAG: Poor cash conversion ({round(cash_conversion, 2)}). Earnings are not translating to cash. Potential manipulation or massive working capital drain.")
+        if unusual_impact > 0.2:
+            flags.append(f"RED FLAG: Unusual/Non-recurring items make up {round(unusual_impact*100, 1)}% of Net Income. Profitability is artificially inflated and NOT sustainable.")
+
+        return {
+            "ticker": resolved,
+            "net_income_reported": net_income,
+            "operating_cash_flow": ocf,
+            "unusual_items": unusual_items,
+            "cash_conversion_ratio": round(cash_conversion, 2),
+            "unusual_items_pct_of_income": round(unusual_impact * 100, 2),
+            "anomaly_flags": flags if flags else ["CLEAN: No major accounting anomalies detected in latest filings."],
+            "directive": "If ANY red flags are present, you MUST reject the framework scores and issue a NO verdict."
+        }
+    except Exception as e:
+        return {"error": f"Failed anomaly check: {str(e)}"}
+
 
 def show_stock_chart(ticker: str) -> dict:
     """Render a 13-month closing price chart for a stock directly in the terminal UI."""
@@ -1656,6 +1708,7 @@ TOOLS = [
     get_csv_financial_data,
     get_macro_context,
     get_sip_candidates,
+    get_earnings_quality_metrics,
 ]
 
 tool_functions = {
@@ -1675,6 +1728,7 @@ tool_functions = {
     "get_csv_financial_data": get_csv_financial_data,
     "get_macro_context": get_macro_context,
     "get_sip_candidates": get_sip_candidates,
+    "get_earnings_quality_metrics": get_earnings_quality_metrics,
 }
 
 
@@ -1837,6 +1891,9 @@ VERDICT RULE:
 EXECUTION PROTOCOL:
 You are an intelligent, conversational, and highly analytical Quantitative Investment Committee. You are free from rigid formatting templates, but you are BOUND by strict quantitative logic. 
 
+EARNINGS QUALITY MANDATE:
+Earnings are an opinion; cash is a fact. You MUST call `get_earnings_quality_metrics` for every single stock you analyze deeply. If ANY anomaly flags are raised by this tool (e.g., Unusual items > 20% of net income, Cash conversion < 0.5), you MUST OVERRIDE any positive framework scores and issue a "NO" verdict. A low P/E driven by an unusual item is a value trap.
+
 Follow these core behavioral directives:
 1. The Binary Verdict (No Waffling): Answer the user's specific question immediately. You MUST explicitly state your final investment decision as a bold "YES" or "NO" in the opening paragraph. 
    - YES CONDITION: If ANY 2 out of the 4 frameworks PASS, the verdict is YES.
@@ -1845,6 +1902,18 @@ Follow these core behavioral directives:
 2. Fluid Integration: Weave the quantitative data (fundamentals, Graham/Greenblatt/Dorsey/Trajectory pass/fail states) naturally into your prose. Explain the *why* behind the numbers instead of just listing them. 
 3. Dynamic Formatting: Use markdown headers, bullet points, and bold text organically to make your analysis readable. 
 4. Grounded Wisdom: Conclude your analysis with a bolded "Committee Note" providing actionable risk management advice or psychological grounding derived directly from Graham, Greenblatt, or Dorsey.
+"""
+
+AUDITOR_SYSTEM_PROMPT = """You are the Chief Risk Officer and Auditor for an Investment Committee.
+You are a truthful, disagreeable, first-principle thinker. Your sole job is to catch the Analyst making mistakes, specifically falling for statistical illusions.
+
+Review the Analyst's draft.
+1. Did the Analyst recommend a "YES" on a stock that has massive Unusual Items skewing its P/E or ROE?
+2. Did the Analyst ignore a terrible Cash Conversion ratio?
+3. Did the Analyst blindly trust CSV data without running live earnings quality checks on a suspect company?
+
+If the Analyst's draft is fundamentally sound and mathematically safe, reply EXACTLY with: [APPROVED]
+If the Analyst fell for an accounting trap or statistical illusion, reply with: [REJECT] followed by a harsh, direct explanation of exactly what they missed and how they must rewrite the verdict to a NO.
 """
 
 # ──────────────────────────────────────────────
@@ -1907,7 +1976,8 @@ def agent_turn(user_message):
     last_error = None
     for model_name in FREE_MODELS:
         try:
-            chat = client.chats.create(
+            # --- PHASE 1: ANALYST DRAFTS THESIS ---
+            analyst_chat = client.chats.create(
                 model=model_name,
                 config=types.GenerateContentConfig(
                     system_instruction=SYSTEM_INSTRUCTION,
@@ -1916,11 +1986,11 @@ def agent_turn(user_message):
                 history=history,
             )
 
-            response = chat.send_message(user_message)
+            analyst_response = analyst_chat.send_message(user_message)
 
-            while response.function_calls:
+            while analyst_response.function_calls:
                 function_responses = []
-                for fc in response.function_calls:
+                for fc in analyst_response.function_calls:
                     if fc.name in tool_functions:
                         result = tool_functions[fc.name](**fc.args)
                     else:
@@ -1928,10 +1998,32 @@ def agent_turn(user_message):
                     function_responses.append(
                         types.Part.from_function_response(name=fc.name, response=result)
                     )
-                response = chat.send_message(function_responses)
+                analyst_response = analyst_chat.send_message(function_responses)
 
-            st.session_state.chat_history = chat.get_history()
-            return response.text, model_name
+            draft_text = analyst_response.text
+
+            # --- PHASE 2: AUDITOR REVIEWS DRAFT ---
+            auditor_response = client.models.generate_content(
+                model=model_name,
+                contents=f"User Query: {user_message}\n\nAnalyst Draft: {draft_text}",
+                config=types.GenerateContentConfig(system_instruction=AUDITOR_SYSTEM_PROMPT)
+            )
+
+            audit_result = auditor_response.text.strip()
+
+            # --- PHASE 3: RESOLUTION ---
+            if audit_result.startswith("[REJECT]"):
+                # Force the Analyst to read the Auditor's rejection and rewrite
+                correction_prompt = f"The Chief Risk Officer REJECTED your draft with the following feedback:\n\n{audit_result}\n\nRewrite your entire analysis to comply with this feedback. Change your verdict if necessary."
+                final_response = analyst_chat.send_message(correction_prompt)
+                st.session_state.chat_history = analyst_chat.get_history()
+                
+                # Append an internal note to the UI so the user sees the system working
+                return f"*(Internal Audit Triggered: Adjusted thesis based on earnings quality)*\n\n{final_response.text}", model_name
+            else:
+                # Auditor approved
+                st.session_state.chat_history = analyst_chat.get_history()
+                return draft_text, model_name
 
         except Exception as e:
             last_error = str(e)
@@ -1940,6 +2032,7 @@ def agent_turn(user_message):
             raise e
 
     raise Exception(f"All models rate-limited. Last error: {last_error}")
+
 
 
 # ══════════════════════════════════════════════
