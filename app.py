@@ -1291,23 +1291,23 @@ def find_investments(market: str) -> dict:
         for _, row in tier_df.head(max_n).iterrows():
             entries.append({
                 "ticker": row["ticker"],
-                "name": row.get("name", row["ticker"]),
-                "sector": row.get("sector", "N/A"),
+                "name": row.get("name", row["ticker"]) if pd.notna(row.get("name")) else row["ticker"],
+                "sector": row.get("sector", "N/A") if pd.notna(row.get("sector")) else "N/A",
                 "price": round(row["price"], 2) if pd.notna(row.get("price")) else "N/A",
                 "pe": round(row["pe"], 2) if pd.notna(row.get("pe")) else "N/A",
                 "pb": round(row["pb"], 2) if pd.notna(row.get("pb")) else "N/A",
-                "roe_pct": row.get("roe_pct", "N/A"),
+                "roe_pct": round(row["roe_pct"], 2) if pd.notna(row.get("roe_pct")) else "N/A",
                 "de_pct": round(row["de"], 2) if pd.notna(row.get("de")) else "N/A",
-                "earnings_yield_pct": row.get("earnings_yield", "N/A"),
-                "dividend_yield_pct": row.get("dividend_yield_pct", "N/A"),
-                "rev_growth_pct": row.get("rev_growth", "N/A"),
-                "ni_growth_pct": row.get("ni_growth", "N/A"),
-                "debt_growth_pct": row.get("debt_growth", "N/A"),
+                "earnings_yield_pct": round(row["earnings_yield"], 2) if pd.notna(row.get("earnings_yield")) else "N/A",
+                "dividend_yield_pct": round(row["dividend_yield_pct"], 2) if pd.notna(row.get("dividend_yield_pct")) else "N/A",
+                "rev_growth_pct": round(row["rev_growth"], 2) if pd.notna(row.get("rev_growth")) else "N/A",
+                "ni_growth_pct": round(row["ni_growth"], 2) if pd.notna(row.get("ni_growth")) else "N/A",
+                "debt_growth_pct": round(row["debt_growth"], 2) if pd.notna(row.get("debt_growth")) else "N/A",
                 "score": f"{int(row['score'])}/4",
                 "passed": [f for f in ["Graham", "Greenblatt", "Dorsey", "Trajectory"]
-                           if row.get(f"{f.lower()}_pass")],
+                           if pd.notna(row.get(f"{f.lower()}_pass")) and row.get(f"{f.lower()}_pass")],
                 "failed": [f for f in ["Graham", "Greenblatt", "Dorsey", "Trajectory"]
-                           if not row.get(f"{f.lower()}_pass")],
+                           if pd.notna(row.get(f"{f.lower()}_pass")) and not row.get(f"{f.lower()}_pass")],
                 "years_of_data": int(row["years_of_data"]) if pd.notna(row.get("years_of_data")) else 0,
             })
         return entries
