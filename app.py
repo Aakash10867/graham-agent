@@ -42,70 +42,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ══════════════════════════════════════════════
-# CUSTOM GEMINI SIDEBAR TOGGLE (TRUSTED JS EVENT)
-# ══════════════════════════════════════════════
-components.html("""
-<script>
-const parentWin = window.parent;
-const parentDoc = parentWin.document;
-
-if (!parentDoc.getElementById("custom-gemini-btn")) {
-    const btn = parentDoc.createElement("div");
-    btn.id = "custom-gemini-btn";
-    
-    // Gemini-style Sidebar Icon
-    btn.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#d1d5db" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>`;
-    
-    // Style the button
-    Object.assign(btn.style, {
-        position: "fixed", top: "14px", left: "14px", width: "42px", height: "42px",
-        backgroundColor: "#1e1f20", border: "1px solid rgba(255, 255, 255, 0.1)",
-        borderRadius: "12px", cursor: "pointer", zIndex: "9999999",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        transition: "all 0.2s ease", padding: "0"
-    });
-
-    // Hover effects
-    btn.onmouseover = () => {
-        btn.style.backgroundColor = "#2a2b2f";
-        btn.style.borderColor = "rgba(0, 245, 212, 0.4)";
-        btn.querySelector("svg").style.stroke = "#00f5d4";
-    };
-    btn.onmouseout = () => {
-        btn.style.backgroundColor = "#1e1f20";
-        btn.style.borderColor = "rgba(255, 255, 255, 0.1)";
-        btn.querySelector("svg").style.stroke = "#d1d5db";
-    };
-
-    // The Trusted React Click Logic
-    btn.onclick = () => {
-        // Find Native Buttons
-        const expandBtn = parentDoc.querySelector('[data-testid="collapsedControl"]');
-        const sidebar = parentDoc.querySelector('[data-testid="stSidebar"]');
-        let targetBtn = null;
-
-        if (expandBtn && parentWin.getComputedStyle(expandBtn).display !== "none") {
-            targetBtn = expandBtn; // Sidebar is closed
-        } else if (sidebar) {
-            targetBtn = sidebar.querySelector('button'); // Sidebar is open
-        }
-
-        if (targetBtn) {
-            // CRITICAL: We MUST use the parent window's MouseEvent so React trusts it
-            const clickEvent = new parentWin.MouseEvent("click", {
-                bubbles: true,
-                cancelable: true,
-                view: parentWin
-            });
-            targetBtn.dispatchEvent(clickEvent);
-        }
-    };
-
-    parentDoc.body.appendChild(btn);
-}
-</script>
-""", height=0, width=0)
 # ──────────────────────────────────────────────
 # FREE MODEL FALLBACK LIST
 # ──────────────────────────────────────────────
@@ -472,7 +408,8 @@ st.markdown("""
     background-color: #0f1117 !important;
 }
 
-.stApp * {
+/* Apply Inter font ONLY to text so we don't break Streamlit's SVG icons! */
+.stApp p, .stApp h1, .stApp h2, .stApp h3, .stApp div, .stApp input, .stApp button, .stApp table, .stApp td, .stApp th {
     font-family: 'Inter', sans-serif !important;
 }
 
@@ -480,255 +417,140 @@ st.markdown("""
     background: transparent !important;
 }
 
-/* ── Safely Hide Native Streamlit Clutter ── */
-/* Keep the header transparent so it doesn't block the screen */
-header[data-testid="stHeader"] {
+/* ── 1. DISABLE STREAMLIT'S FADE-OUT HEADER ── */
+/* This forces the header area to stay permanently visible so the button doesn't disappear */
+header[data-testid="stHeader"], .stAppHeader {
     background: transparent !important;
-    box-shadow: none !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    z-index: 99999 !important;
 }
 
-/* Kill the top-right toolbar completely */
+/* Hide the Deploy/Menu items on the right side */
 [data-testid="stToolbar"] {
     display: none !important;
 }
 
-/* Hide the SVGs inside the native buttons, but leave the invisible buttons physically there for JS to click */
-[data-testid="collapsedControl"] svg,
-[data-testid="stSidebar"] button[kind="header"] svg,
-[data-testid="stSidebar"] button[kind="headerNoPadding"] svg {
-    display: none !important;
+/* ── 2. HIJACK THE "OPEN SIDEBAR" BUTTON (Gemini Style) ── */
+[data-testid="collapsedControl"] {
+    position: fixed !important;
+    top: 16px !important;
+    left: 16px !important;
+    width: 42px !important;
+    height: 42px !important;
+    background-color: #1e1f20 !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: 12px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    z-index: 999999 !important;
+    transition: all 0.2s ease !important;
+    opacity: 1 !important;
+    visibility: visible !important;
 }
 
-/* ── Sidebar ── */
+[data-testid="collapsedControl"]:hover {
+    background-color: #2a2b2f !important;
+    border-color: rgba(0, 245, 212, 0.4) !important;
+}
+
+/* Style the icon inside the Open button */
+[data-testid="collapsedControl"] svg {
+    fill: #d1d5db !important;
+    color: #d1d5db !important;
+    width: 22px !important;
+    height: 22px !important;
+}
+[data-testid="collapsedControl"]:hover svg {
+    fill: #00f5d4 !important;
+    color: #00f5d4 !important;
+}
+
+/* ── 3. HIJACK THE "CLOSE SIDEBAR" BUTTON (Inside the sidebar) ── */
+/* Make it match the Open button perfectly */
+[data-testid="stSidebar"] button[kind="header"], 
+[data-testid="stSidebar"] button[kind="headerNoPadding"] {
+    background-color: #1e1f20 !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: 12px !important;
+    width: 42px !important;
+    height: 42px !important;
+    margin-top: 16px !important;
+    margin-left: 16px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    transition: all 0.2s ease !important;
+}
+
+[data-testid="stSidebar"] button[kind="header"]:hover,
+[data-testid="stSidebar"] button[kind="headerNoPadding"]:hover {
+    background-color: #2a2b2f !important;
+    border-color: rgba(0, 245, 212, 0.4) !important;
+}
+
+/* Style the icon inside the Close button */
+[data-testid="stSidebar"] button[kind="header"] svg,
+[data-testid="stSidebar"] button[kind="headerNoPadding"] svg {
+    fill: #d1d5db !important;
+    color: #d1d5db !important;
+    width: 22px !important;
+    height: 22px !important;
+}
+
+/* ── Remaining UI Styles (Sidebar, Inputs, Chat) ── */
 [data-testid="stSidebar"] {
     background-color: #161b22 !important;
     border-right: 1px solid rgba(255,255,255,0.06) !important;
 }
 
-[data-testid="stSidebar"] [data-testid="stMarkdown"] p {
-    color: #9ca3af !important;
-    font-size: 0.85rem !important;
-}
+[data-testid="stSidebar"] [data-testid="stMarkdown"] p { color: #9ca3af !important; font-size: 0.85rem !important; }
+[data-testid="stSidebar"] h1 { font-family: 'Space Grotesk', sans-serif !important; color: #00f5d4 !important; font-size: 1.3rem !important; font-weight: 700 !important; letter-spacing: 1px !important; }
+[data-testid="stSidebar"] h3 { font-family: 'Space Grotesk', sans-serif !important; color: #e5e7eb !important; font-size: 0.85rem !important; font-weight: 600 !important; text-transform: uppercase !important; letter-spacing: 1.5px !important; margin-top: 1.5rem !important; }
+[data-testid="stSidebar"] hr { border-color: rgba(255,255,255,0.06) !important; }
+.stApp h1 { font-family: 'Space Grotesk', sans-serif !important; font-weight: 700 !important; font-size: 2rem !important; color: #00f5d4 !important; padding-bottom: 2px; }
+.stApp .stCaption, .stApp [data-testid="stCaptionContainer"] p { color: #6b7280 !important; font-size: 0.88rem !important; }
 
-[data-testid="stSidebar"] h1 {
-    font-family: 'Space Grotesk', sans-serif !important;
-    color: #00f5d4 !important;
-    font-size: 1.3rem !important;
-    font-weight: 700 !important;
-    letter-spacing: 1px !important;
-}
+/* Chat Bubbles */
+[data-testid="stChatMessage"] { background: #161b22 !important; border: 1px solid rgba(255,255,255,0.06) !important; border-radius: 12px !important; padding: 1rem 1.2rem !important; margin-bottom: 10px !important; }
+[data-testid="stChatMessage"] p, [data-testid="stChatMessage"] li, [data-testid="stChatMessage"] span { color: #e5e7eb !important; line-height: 1.7 !important; font-size: 0.93rem !important; }
+[data-testid="stChatMessage"] strong { color: #00f5d4 !important; }
+[data-testid="stChatMessage"] code { background: rgba(0, 245, 212, 0.08) !important; color: #00f5d4 !important; border-radius: 4px !important; padding: 2px 6px !important; }
+[data-testid="stChatMessage"] [data-testid="stAvatar"] { border: 1px solid rgba(0, 245, 212, 0.3) !important; border-radius: 50% !important; }
 
-[data-testid="stSidebar"] h3 {
-    font-family: 'Space Grotesk', sans-serif !important;
-    color: #e5e7eb !important;
-    font-size: 0.85rem !important;
-    font-weight: 600 !important;
-    text-transform: uppercase !important;
-    letter-spacing: 1.5px !important;
-    margin-top: 1.5rem !important;
-}
-
-[data-testid="stSidebar"] hr {
-    border-color: rgba(255,255,255,0.06) !important;
-}
-
-/* ── Title ── */
-.stApp h1 {
-    font-family: 'Space Grotesk', sans-serif !important;
-    font-weight: 700 !important;
-    font-size: 2rem !important;
-    color: #00f5d4 !important;
-    padding-bottom: 2px;
-}
-
-.stApp .stCaption, .stApp [data-testid="stCaptionContainer"] p {
-    color: #6b7280 !important;
-    font-size: 0.88rem !important;
-}
-
-/* ── Chat bubbles ── */
-[data-testid="stChatMessage"] {
-    background: #161b22 !important;
-    border: 1px solid rgba(255,255,255,0.06) !important;
-    border-radius: 12px !important;
-    padding: 1rem 1.2rem !important;
-    margin-bottom: 10px !important;
-}
-
-[data-testid="stChatMessage"] p,
-[data-testid="stChatMessage"] li,
-[data-testid="stChatMessage"] span {
-    color: #e5e7eb !important;
-    line-height: 1.7 !important;
-    font-size: 0.93rem !important;
-}
-
-[data-testid="stChatMessage"] strong {
-    color: #00f5d4 !important;
-}
-
-[data-testid="stChatMessage"] code {
-    background: rgba(0, 245, 212, 0.08) !important;
-    color: #00f5d4 !important;
-    border-radius: 4px !important;
-    padding: 2px 6px !important;
-}
-
-[data-testid="stChatMessage"] [data-testid="stAvatar"] {
-    border: 1px solid rgba(0, 245, 212, 0.3) !important;
-    border-radius: 50% !important;
-}
-
-/* ── Chat input ── */
-[data-testid="stChatInput"],
-[data-testid="stChatInputContainer"] {
-    background: transparent !important;
-}
-
-[data-testid="stChatInput"] textarea,
-[data-testid="stChatInputContainer"] textarea {
-    background: #161b22 !important;
-    border: 1px solid rgba(255,255,255,0.1) !important;
-    border-radius: 12px !important;
-    color: #e5e7eb !important;
-    font-size: 0.93rem !important;
-    padding: 12px 16px !important;
-}
-
-[data-testid="stChatInput"] textarea:focus,
-[data-testid="stChatInputContainer"] textarea:focus {
-    border-color: rgba(0, 245, 212, 0.4) !important;
-    box-shadow: 0 0 0 1px rgba(0, 245, 212, 0.15) !important;
-    outline: none !important;
-}
-
-[data-testid="stChatInput"] textarea::placeholder {
-    color: #4b5563 !important;
-}
-
-[data-testid="stChatInput"] button,
-[data-testid="stChatInputContainer"] button {
-    background: #00f5d4 !important;
-    border: none !important;
-    border-radius: 8px !important;
-}
-
-[data-testid="stChatInput"] button:hover,
-[data-testid="stChatInputContainer"] button:hover {
-    background: #00dfc0 !important;
-}
-
-/* ── Kill red focus outlines ── */
-[data-testid="stChatInput"] > div:focus-within,
-[data-testid="stChatInputContainer"] > div:focus-within {
-    outline: none !important;
-    box-shadow: none !important;
-    border: none !important;
-}
-
-[data-testid="stChatInput"] [data-baseweb="textarea"],
-[data-testid="stChatInput"] [data-baseweb="base-input"] {
-    outline: none !important;
-    box-shadow: none !important;
-    background-color: transparent !important;
-}
-
-[data-testid="stChatInput"] [data-baseweb="base-input"]:focus-within {
-    border-color: rgba(0, 245, 212, 0.4) !important;
-    box-shadow: none !important;
-}
-
+/* Inputs */
+[data-testid="stChatInput"], [data-testid="stChatInputContainer"] { background: transparent !important; }
+[data-testid="stChatInput"] textarea, [data-testid="stChatInputContainer"] textarea { background: #161b22 !important; border: 1px solid rgba(255,255,255,0.1) !important; border-radius: 12px !important; color: #e5e7eb !important; font-size: 0.93rem !important; padding: 12px 16px !important; }
+[data-testid="stChatInput"] textarea:focus, [data-testid="stChatInputContainer"] textarea:focus { border-color: rgba(0, 245, 212, 0.4) !important; box-shadow: 0 0 0 1px rgba(0, 245, 212, 0.15) !important; outline: none !important; }
+[data-testid="stChatInput"] textarea::placeholder { color: #4b5563 !important; }
+[data-testid="stChatInput"] button, [data-testid="stChatInputContainer"] button { background: #00f5d4 !important; border: none !important; border-radius: 8px !important; }
+[data-testid="stChatInput"] button:hover, [data-testid="stChatInputContainer"] button:hover { background: #00dfc0 !important; }
+[data-testid="stChatInput"] > div:focus-within, [data-testid="stChatInputContainer"] > div:focus-within { outline: none !important; box-shadow: none !important; border: none !important; }
+[data-testid="stChatInput"] [data-baseweb="textarea"], [data-testid="stChatInput"] [data-baseweb="base-input"] { outline: none !important; box-shadow: none !important; background-color: transparent !important; }
+[data-testid="stChatInput"] [data-baseweb="base-input"]:focus-within { border-color: rgba(0, 245, 212, 0.4) !important; box-shadow: none !important; }
 *:focus, *:active, *:focus-visible { outline: none !important; }
 div[data-baseweb] [aria-invalid] { box-shadow: none !important; }
 
-/* ── Buttons — clean pill ── */
-.stButton > button {
-    background: rgba(255,255,255,0.04) !important;
-    border: 1px solid rgba(255,255,255,0.1) !important;
-    border-radius: 8px !important;
-    color: #d1d5db !important;
-    font-size: 0.84rem !important;
-    font-weight: 500 !important;
-    padding: 8px 20px !important;
-    transition: all 0.15s ease !important;
-}
-
-.stButton > button:hover {
-    background: rgba(0, 245, 212, 0.08) !important;
-    border-color: rgba(0, 245, 212, 0.3) !important;
-    color: #00f5d4 !important;
-}
-
-/* ── Text input ── */
-.stTextInput > div > div > input {
-    background: #161b22 !important;
-    border: 1px solid rgba(255,255,255,0.1) !important;
-    border-radius: 8px !important;
-    color: #e5e7eb !important;
-    font-family: 'Space Grotesk', sans-serif !important;
-    font-size: 0.93rem !important;
-    padding: 10px 14px !important;
-    text-align: center !important;
-}
-
-.stTextInput > div > div > input::placeholder {
-    color: #4b5563 !important;
-}
-
-.stTextInput > div > div > input:focus {
-    border-color: rgba(0, 245, 212, 0.4) !important;
-    box-shadow: 0 0 0 1px rgba(0, 245, 212, 0.1) !important;
-    outline: none !important;
-}
-
-.stTextInput label {
-    color: #6b7280 !important;
-    font-size: 0.78rem !important;
-    letter-spacing: 1px !important;
-    text-transform: uppercase !important;
-}
-
-/* ── Bottom dock ── */
-[data-testid="stBottom"] {
-    background: #0f1117 !important;
-    background-color: #0f1117 !important;
-    border-top: 1px solid rgba(255,255,255,0.06) !important;
-}
-
-[data-testid="stBottom"] > div {
-    background: transparent !important;
-    background-color: transparent !important;
-}
-
-/* ── Spinner ── */
+/* Standard Buttons & Misc */
+.stButton > button { background: rgba(255,255,255,0.04) !important; border: 1px solid rgba(255,255,255,0.1) !important; border-radius: 8px !important; color: #d1d5db !important; font-size: 0.84rem !important; font-weight: 500 !important; padding: 8px 20px !important; transition: all 0.15s ease !important; }
+.stButton > button:hover { background: rgba(0, 245, 212, 0.08) !important; border-color: rgba(0, 245, 212, 0.3) !important; color: #00f5d4 !important; }
+.stTextInput > div > div > input { background: #161b22 !important; border: 1px solid rgba(255,255,255,0.1) !important; border-radius: 8px !important; color: #e5e7eb !important; font-family: 'Space Grotesk', sans-serif !important; font-size: 0.93rem !important; padding: 10px 14px !important; text-align: center !important; }
+.stTextInput > div > div > input::placeholder { color: #4b5563 !important; }
+.stTextInput > div > div > input:focus { border-color: rgba(0, 245, 212, 0.4) !important; box-shadow: 0 0 0 1px rgba(0, 245, 212, 0.1) !important; outline: none !important; }
+.stTextInput label { color: #6b7280 !important; font-size: 0.78rem !important; letter-spacing: 1px !important; text-transform: uppercase !important; }
+[data-testid="stBottom"] { background: #0f1117 !important; background-color: #0f1117 !important; border-top: 1px solid rgba(255,255,255,0.06) !important; }
+[data-testid="stBottom"] > div { background: transparent !important; background-color: transparent !important; }
 .stSpinner > div { border-top-color: #00f5d4 !important; }
 [data-testid="stSpinnerContainer"] { color: #6b7280 !important; }
-
-/* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
-
-/* ── Tables — scoped to actual tables only ── */
-.stDataFrame, .stTable {
-    max-width: 100% !important;
-    overflow-x: auto !important;
-}
-
-[data-testid="stChatMessage"] table {
-    display: block !important;
-    overflow-x: auto !important;
-    white-space: nowrap !important;
-    max-width: 100% !important;
-}
-
-/* ── Responsive ── */
-@media (max-width: 768px) {
-    .stApp h1 { font-size: 1.5rem !important; }
-}
+.stDataFrame, .stTable { max-width: 100% !important; overflow-x: auto !important; }
+[data-testid="stChatMessage"] table { display: block !important; overflow-x: auto !important; white-space: nowrap !important; max-width: 100% !important; }
+@media (max-width: 768px) { .stApp h1 { font-size: 1.5rem !important; } }
 </style>
-""", unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════
