@@ -356,284 +356,146 @@ def _fetch_universe_data():
     return results
 
 
-# ──────────────────────────────────────────────
+# ══════════════════════════════════════════════
 # PAGE CONFIG
-# ──────────────────────────────────────────────
+# ══════════════════════════════════════════════
 st.set_page_config(
-    page_title="Graham Investment Agent",
+    page_title="AlphaConsensus Terminal",
     page_icon="📈",
-    layout="centered"
+    layout="centered",
 )
 
-# ──────────────────────────────────────────────
-# PRESET PROMPTS (data only — UI rendered later)
-# ──────────────────────────────────────────────
-PRESET_PROMPTS = [
+# ══════════════════════════════════════════════
+# PRESET PROMPTS — reduced to essentials
+# ══════════════════════════════════════════════
+STOCK_PRESETS = [
     ("📊 Full Analysis",
-     "Give me a complete investment analysis of {company} — valuation, financials, growth, and recommendation using all three frameworks."),
-    ("📈 Revenue & Growth",
-     "Analyze {company} revenue growth, profit margins, and earnings trend over the last 3-4 years. Is the business growing?"),
+     "Give me a complete investment analysis of {company} — valuation, financials, growth, and recommendation using all frameworks."),
     ("💰 Graham Value",
      "Calculate the Graham intrinsic value for {company}. Is it undervalued or overvalued? What is the margin of safety?"),
-    ("🏃 Price Performance",
-     "How has {company} stock performed over the last 1 year? Show me returns, highs/lows, and volatility."),
-    ("🎯 Analyst Consensus",
+    ("📈 Performance & Chart",
+     "How has {company} stock performed over the last 1 year? Show me returns, highs/lows, volatility, and a price chart."),
+    ("🎯 Analyst View",
      "What do analysts recommend for {company}? What are the price targets?"),
-    ("🏦 Debt & Balance Sheet",
-     "Analyze {company} balance sheet — total debt, debt-to-equity, cash position, and overall financial health."),
-    ("💸 Dividend History",
+    ("💸 Dividends",
      "Does {company} pay dividends? Show me the full dividend track record, growth rate, and current yield."),
-    ("📰 Recent News",
-     "What are the latest news and developments about {company}?"),
-    ("🏢 Who Owns It?",
-     "Who are the major shareholders of {company}? Show institutional holders and any recent insider transactions."),
-    ("⚖️ Compare Stocks",
+    ("⚖️ Compare",
      "Compare {company} as investments — valuation, growth, profitability, and which is the better buy."),
-    ("🔍 Find Indian Investments",
+]
+
+SCREENER_PRESETS = [
+    ("🇮🇳 Screen Indian Stocks",
      "Find the best Indian stocks to invest in right now. Show me which Nifty 50 stocks pass all 4 frameworks and which pass 3 out of 4 and which pass 2 out of 4, with upto top 10 from each tier. Explain why each tier is a good investment using the book philosophies."),
-    ("🔍 Find US Investments",
+    ("🇺🇸 Screen US Stocks",
      "Find the best US stocks to invest in right now. Show me which large cap stocks pass all 4 frameworks and which pass 3 out of 4 and which pass 2 out of 4, with upto top 10 from each tier. Explain why each tier is a good investment using the book philosophies."),
-    ("🌍 Find Best Global Picks",
+    ("🌍 Screen All Markets",
      "Screen all stocks across India and US markets. Show me the best investment candidates that pass all 4 frameworks or 3 out of 4. Explain why each category is good for long-term returns based on Graham, Greenblatt, and Dorsey."),
 ]
 
-# ──────────────────────────────────────────────
-# CUSTOM CSS
-# ──────────────────────────────────────────────
+# ══════════════════════════════════════════════
+# CSS — CLEAN, SOLID, MINIMAL
+# ══════════════════════════════════════════════
 st.markdown("""
 <style>
-/* ═══════════════════════════════════════════════
-   MOBILE RESPONSIVE TABLE FIX
-   ═══════════════════════════════════════════════ */
-/* Wrap the table in a scrollable div */
-.stDataFrame, .stTable {
-    max-width: 100% !important;
-    overflow-x: auto !important;
-    display: block !important;
-}
-
-/* Force table cells to stay within the viewport */
-table {
-    width: 100% !important;
-    table-layout: auto !important;
-    word-wrap: break-word !important;
-}
-
-/* Ensure the container doesn't overflow */
-[data-testid="stChatMessage"] {
-    overflow-x: hidden !important;
-}
-/* ═══════════════════════════════════════════════
-   ANIMATED AURORA GRADIENT BACKGROUND
-   ═══════════════════════════════════════════════ */
-@keyframes aurora {
-    0%   { background-position: 0% 50%; }
-    25%  { background-position: 50% 100%; }
-    50%  { background-position: 100% 50%; }
-    75%  { background-position: 50% 0%; }
-    100% { background-position: 0% 50%; }
-}
-
-.stApp {
-    background: linear-gradient(
-        -45deg,
-        #0f0c29,
-        #1a1a40,
-        #302b63,
-        #24243e,
-        #0f0c29,
-        #1b1145,
-        #0d2137,
-        #0a1628
-    );
-    background-size: 400% 400%;
-    animation: aurora 20s ease infinite;
-}
-
-/* ═══════════════════════════════════════════════
-   DEEP SPACE PARALLAX
-   ═══════════════════════════════════════════════ */
-.stApp::before,
-.stApp::after,
-[data-testid="stAppViewContainer"]::before {
-    content: '';
-    position: fixed;
-    top: -100vh; left: -100vw; right: -100vw; bottom: -100vh;
-    pointer-events: none;
-    z-index: 0;
-}
-
-.stApp::before {
-    background-image:
-        radial-gradient(1px 1px at 10% 20%, rgba(255, 255, 255, 0.7) 50%, transparent),
-        radial-gradient(1.5px 1.5px at 80% 40%, rgba(255, 255, 255, 0.4) 50%, transparent),
-        radial-gradient(1px 1px at 30% 70%, rgba(0, 245, 212, 0.6) 50%, transparent),
-        radial-gradient(1px 1px at 60% 90%, rgba(255, 255, 255, 0.8) 50%, transparent);
-    background-size: 150px 150px;
-    animation: starLayer1 25s linear infinite;
-}
-
-.stApp::after {
-    background-image:
-        radial-gradient(1.5px 1.5px at 15% 15%, rgba(0, 245, 212, 0.8) 50%, transparent),
-        radial-gradient(2px 2px at 75% 25%, rgba(255, 255, 255, 0.9) 50%, transparent),
-        radial-gradient(1.5px 1.5px at 25% 85%, rgba(0, 245, 212, 0.5) 50%, transparent),
-        radial-gradient(2px 2px at 85% 65%, rgba(255, 255, 255, 0.7) 50%, transparent);
-    background-size: 200px 200px;
-    animation: starLayer2 18s linear infinite;
-}
-
-[data-testid="stAppViewContainer"]::before {
-    background-image:
-        radial-gradient(2px 2px at 5% 5%, rgba(255, 255, 255, 1) 50%, transparent),
-        radial-gradient(2.5px 2.5px at 95% 95%, rgba(200, 210, 230, 0.9) 50%, transparent),
-        radial-gradient(2px 2px at 45% 45%, rgba(0, 245, 212, 0.7) 50%, transparent);
-    background-size: 300px 300px;
-    animation: starLayer3 12s linear infinite;
-}
-
-@keyframes starLayer1 {
-    0%   { transform: translateY(0); opacity: 0.3; }
-    50%  { opacity: 0.9; }
-    100% { transform: translateY(-150px); opacity: 0.3; }
-}
-
-@keyframes starLayer2 {
-    0%   { transform: translate(0, 0); opacity: 0.2; }
-    25%  { opacity: 1; }
-    75%  { opacity: 0.3; }
-    100% { transform: translate(-200px, -200px); opacity: 0.2; }
-}
-
-@keyframes starLayer3 {
-    0%   { transform: translate(0, 0); opacity: 0.5; }
-    33%  { opacity: 0.9; }
-    66%  { opacity: 0.4; }
-    100% { transform: translate(300px, -300px); opacity: 0.5; }
-}
-
-/* ═══════════════════════════════════════════════
-   3D GLASSMORPHISM CHAT INPUT BAR
-   ═══════════════════════════════════════════════ */
-[data-testid="stChatInput"] {
-    background: rgba(20, 25, 45, 0.3) !important;
-    backdrop-filter: blur(24px) saturate(200%) !important;
-    -webkit-backdrop-filter: blur(24px) saturate(200%) !important;
-    border: 1px solid rgba(255, 255, 255, 0.08) !important;
-    border-top: 1px solid rgba(0, 245, 212, 0.4) !important;
-    border-radius: 24px !important;
-    box-shadow:
-        0 20px 40px rgba(0, 0, 0, 0.6),
-        inset 0 1px 3px rgba(255, 255, 255, 0.15) !important;
-    transition: all 0.3s ease !important;
-}
-
-[data-testid="stChatInput"] > div {
-    background: transparent !important;
-    background-color: transparent !important;
-}
-
-[data-testid="stChatInput"] textarea {
-    background: transparent !important;
-    background-color: transparent !important;
-    color: #00f5d4 !important;
-    font-family: 'Space Grotesk', sans-serif !important;
-    font-size: 1rem !important;
-}
-
-[data-testid="stChatInput"]:hover, [data-testid="stChatInput"]:focus-within {
-    border-top: 1px solid rgba(0, 245, 212, 0.8) !important;
-    box-shadow:
-        0 20px 50px rgba(0, 245, 212, 0.15),
-        inset 0 1px 3px rgba(255, 255, 255, 0.2) !important;
-    transform: translateY(-2px);
-}
-
-/* ═══════════════════════════════════════════════
-   TYPOGRAPHY & TITLE — NEON GLOW
-   ═══════════════════════════════════════════════ */
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@300;400;500&display=swap');
+
+/* ── Base ── */
+.stApp {
+    background-color: #0f1117 !important;
+}
 
 .stApp, .stApp * {
     font-family: 'Inter', sans-serif !important;
 }
 
+[data-testid="stAppViewContainer"] {
+    background: transparent !important;
+}
+
+/* ── Hide Streamlit chrome ── */
+#MainMenu, footer, header { visibility: hidden; }
+
+/* ── Sidebar ── */
+[data-testid="stSidebar"] {
+    background-color: #161b22 !important;
+    border-right: 1px solid rgba(255,255,255,0.06) !important;
+}
+
+[data-testid="stSidebar"] [data-testid="stMarkdown"] p {
+    color: #9ca3af !important;
+    font-size: 0.85rem !important;
+}
+
+[data-testid="stSidebar"] h1 {
+    font-family: 'Space Grotesk', sans-serif !important;
+    color: #00f5d4 !important;
+    font-size: 1.3rem !important;
+    font-weight: 700 !important;
+    letter-spacing: 1px !important;
+}
+
+[data-testid="stSidebar"] h3 {
+    font-family: 'Space Grotesk', sans-serif !important;
+    color: #e5e7eb !important;
+    font-size: 0.85rem !important;
+    font-weight: 600 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 1.5px !important;
+    margin-top: 1.5rem !important;
+}
+
+[data-testid="stSidebar"] hr {
+    border-color: rgba(255,255,255,0.06) !important;
+}
+
+/* ── Title ── */
 .stApp h1 {
     font-family: 'Space Grotesk', sans-serif !important;
     font-weight: 700 !important;
-    font-size: 2.6rem !important;
-    background: linear-gradient(135deg, #00f5d4, #7bf1a8, #fee440, #f15bb5, #9b5de5);
-    background-size: 300% 300%;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    animation: aurora 6s ease infinite;
-    text-shadow: none;
-    filter: drop-shadow(0 0 30px rgba(0, 245, 212, 0.3));
-    padding-bottom: 4px;
+    font-size: 2rem !important;
+    color: #00f5d4 !important;
+    padding-bottom: 2px;
 }
 
 .stApp .stCaption, .stApp [data-testid="stCaptionContainer"] p {
-    color: rgba(200, 210, 230, 0.6) !important;
-    font-size: 0.95rem !important;
-    letter-spacing: 0.3px;
+    color: #6b7280 !important;
+    font-size: 0.88rem !important;
 }
 
-/* ═══════════════════════════════════════════════
-   GLASSMORPHISM CHAT BUBBLES
-   ═══════════════════════════════════════════════ */
+/* ── Chat bubbles ── */
 [data-testid="stChatMessage"] {
-    background: rgba(255, 255, 255, 0.04) !important;
-    backdrop-filter: blur(20px) !important;
-    -webkit-backdrop-filter: blur(20px) !important;
-    border: 1px solid rgba(255, 255, 255, 0.08) !important;
-    border-radius: 16px !important;
-    padding: 1.2rem 1.4rem !important;
-    margin-bottom: 12px !important;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
-    box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.3),
-        inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
-}
-
-[data-testid="stChatMessage"]:hover {
-    background: rgba(255, 255, 255, 0.07) !important;
-    border-color: rgba(120, 200, 255, 0.15) !important;
-    box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.3),
-        0 0 20px rgba(120, 200, 255, 0.05),
-        inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
-    transform: translateY(-1px);
+    background: #161b22 !important;
+    border: 1px solid rgba(255,255,255,0.06) !important;
+    border-radius: 12px !important;
+    padding: 1rem 1.2rem !important;
+    margin-bottom: 10px !important;
 }
 
 [data-testid="stChatMessage"] p,
 [data-testid="stChatMessage"] li,
 [data-testid="stChatMessage"] span {
-    color: rgba(230, 235, 245, 0.92) !important;
+    color: #e5e7eb !important;
     line-height: 1.7 !important;
-    font-size: 0.95rem !important;
+    font-size: 0.93rem !important;
 }
 
 [data-testid="stChatMessage"] strong {
-    color: #7bf1a8 !important;
+    color: #00f5d4 !important;
 }
 
 [data-testid="stChatMessage"] code {
-    background: rgba(0, 245, 212, 0.1) !important;
+    background: rgba(0, 245, 212, 0.08) !important;
     color: #00f5d4 !important;
     border-radius: 4px !important;
     padding: 2px 6px !important;
 }
 
 [data-testid="stChatMessage"] [data-testid="stAvatar"] {
-    border: 2px solid rgba(0, 245, 212, 0.4) !important;
+    border: 1px solid rgba(0, 245, 212, 0.3) !important;
     border-radius: 50% !important;
-    box-shadow: 0 0 12px rgba(0, 245, 212, 0.15) !important;
 }
 
-/* ═══════════════════════════════════════════════
-   CHAT INPUT — GLOWING BAR
-   ═══════════════════════════════════════════════ */
+/* ── Chat input ── */
 [data-testid="stChatInput"],
 [data-testid="stChatInputContainer"] {
     background: transparent !important;
@@ -641,188 +503,38 @@ table {
 
 [data-testid="stChatInput"] textarea,
 [data-testid="stChatInputContainer"] textarea {
-    background: rgba(255, 255, 255, 0.05) !important;
-    backdrop-filter: blur(12px) !important;
-    border: 1px solid rgba(255, 255, 255, 0.12) !important;
-    border-radius: 14px !important;
-    color: #e6ebf5 !important;
-    font-size: 0.95rem !important;
-    padding: 14px 18px !important;
-    transition: all 0.3s ease !important;
+    background: #161b22 !important;
+    border: 1px solid rgba(255,255,255,0.1) !important;
+    border-radius: 12px !important;
+    color: #e5e7eb !important;
+    font-size: 0.93rem !important;
+    padding: 12px 16px !important;
 }
 
 [data-testid="stChatInput"] textarea:focus,
 [data-testid="stChatInputContainer"] textarea:focus {
-    border-color: rgba(0, 245, 212, 0.5) !important;
-    box-shadow:
-        0 0 20px rgba(0, 245, 212, 0.1),
-        0 0 40px rgba(0, 245, 212, 0.05),
-        inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+    border-color: rgba(0, 245, 212, 0.4) !important;
+    box-shadow: 0 0 0 1px rgba(0, 245, 212, 0.15) !important;
     outline: none !important;
 }
 
 [data-testid="stChatInput"] textarea::placeholder {
-    color: rgba(200, 210, 230, 0.35) !important;
+    color: #4b5563 !important;
 }
 
 [data-testid="stChatInput"] button,
 [data-testid="stChatInputContainer"] button {
-    background: linear-gradient(135deg, #00f5d4, #9b5de5) !important;
+    background: #00f5d4 !important;
     border: none !important;
-    border-radius: 10px !important;
-    transition: all 0.3s ease !important;
+    border-radius: 8px !important;
 }
 
 [data-testid="stChatInput"] button:hover,
 [data-testid="stChatInputContainer"] button:hover {
-    filter: brightness(1.2) !important;
-    box-shadow: 0 0 20px rgba(0, 245, 212, 0.3) !important;
+    background: #00dfc0 !important;
 }
 
-/* ═══════════════════════════════════════════════
-   BUTTONS — PILL STYLE
-   ═══════════════════════════════════════════════ */
-.stButton > button {
-    background: rgba(255, 255, 255, 0.06) !important;
-    backdrop-filter: blur(12px) !important;
-    border: 1px solid rgba(255, 255, 255, 0.12) !important;
-    border-radius: 50px !important;
-    color: rgba(200, 210, 230, 0.8) !important;
-    font-size: 0.85rem !important;
-    font-weight: 500 !important;
-    padding: 8px 24px !important;
-    letter-spacing: 0.5px !important;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
-    text-transform: uppercase !important;
-}
-
-.stButton > button:hover {
-    background: rgba(0, 245, 212, 0.12) !important;
-    border-color: rgba(0, 245, 212, 0.4) !important;
-    color: #00f5d4 !important;
-    box-shadow: 0 0 25px rgba(0, 245, 212, 0.1) !important;
-    transform: translateY(-2px) !important;
-}
-
-.stButton > button:active {
-    transform: translateY(0) !important;
-}
-
-/* ═══════════════════════════════════════════════
-   SPINNER
-   ═══════════════════════════════════════════════ */
-.stSpinner > div {
-    border-top-color: #00f5d4 !important;
-}
-
-[data-testid="stSpinnerContainer"] {
-    color: rgba(200, 210, 230, 0.6) !important;
-}
-
-/* ═══════════════════════════════════════════════
-   SCROLLBAR
-   ═══════════════════════════════════════════════ */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.2); }
-::-webkit-scrollbar-thumb { background: rgba(0, 245, 212, 0.2); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(0, 245, 212, 0.4); }
-
-/* ═══════════════════════════════════════════════
-   SIDEBAR
-   ═══════════════════════════════════════════════ */
-[data-testid="stSidebar"] {
-    background: rgba(15, 12, 41, 0.95) !important;
-    backdrop-filter: blur(20px) !important;
-}
-
-/* ═══════════════════════════════════════════════
-   HIDE STREAMLIT DEFAULTS
-   ═══════════════════════════════════════════════ */
-#MainMenu {visibility: hidden;}
-footer {visibility: hidden;}
-header {visibility: hidden;}
-
-[data-testid="stAppViewContainer"] {
-    background: transparent !important;
-    position: relative !important;
-    z-index: 1 !important;
-}
-
-/* ═══════════════════════════════════════════════
-   WELCOME CARD
-   ═══════════════════════════════════════════════ */
-.welcome-card {
-    background: rgba(15, 12, 41, 0.4);
-    backdrop-filter: blur(20px);
-    border: 1px solid rgba(0, 245, 212, 0.15);
-    border-radius: 8px;
-    padding: 2.5rem 2rem 1.5rem 2rem;
-    text-align: center;
-    margin: 2rem auto;
-    max-width: 550px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4), inset 0 0 20px rgba(0, 245, 212, 0.05);
-}
-
-.welcome-card h2 {
-    font-family: 'Space Grotesk', sans-serif !important;
-    font-size: 1.2rem;
-    color: #00f5d4;
-    margin-bottom: 0.8rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 2px;
-}
-
-.welcome-card p {
-    color: rgba(200, 210, 230, 0.6);
-    font-size: 0.9rem;
-    font-family: 'Inter', sans-serif !important;
-    line-height: 1.6;
-    margin: 0;
-}
-
-/* ═══════════════════════════════════════════════
-   TEXT INPUT — TERMINAL STYLE (for company name)
-   ═══════════════════════════════════════════════ */
-.stTextInput > div > div > input {
-    background: rgba(0, 245, 212, 0.04) !important;
-    border: 1px solid rgba(0, 245, 212, 0.2) !important;
-    border-radius: 8px !important;
-    color: #00f5d4 !important;
-    font-family: 'Space Grotesk', sans-serif !important;
-    font-size: 0.95rem !important;
-    padding: 12px 16px !important;
-    text-align: center !important;
-}
-
-.stTextInput > div > div > input::placeholder {
-    color: rgba(200, 210, 230, 0.35) !important;
-}
-
-.stTextInput > div > div > input:focus {
-    border-color: rgba(0, 245, 212, 0.5) !important;
-    box-shadow: 0 0 20px rgba(0, 245, 212, 0.1) !important;
-    outline: none !important;
-}
-
-.stTextInput label {
-    color: rgba(200, 210, 230, 0.5) !important;
-    font-size: 0.8rem !important;
-    letter-spacing: 1px !important;
-    text-transform: uppercase !important;
-}
-
-/* ═══════════════════════════════════════════════
-   RESPONSIVE
-   ═══════════════════════════════════════════════ */
-@media (max-width: 768px) {
-    .stApp h1 { font-size: 1.8rem !important; }
-    .welcome-card { margin: 1rem; padding: 1.5rem 1.2rem; }
-}
-
-/* ═══════════════════════════════════════════════
-   KILL RED FOCUS OUTLINE
-   ═══════════════════════════════════════════════ */
+/* ── Kill red focus outlines ── */
 [data-testid="stChatInput"] > div:focus-within,
 [data-testid="stChatInputContainer"] > div:focus-within {
     outline: none !important;
@@ -830,41 +542,73 @@ header {visibility: hidden;}
     border: none !important;
 }
 
-[data-testid="stChatInput"] [data-baseweb="textarea"] {
-    outline: none !important;
-    box-shadow: none !important;
-}
-
+[data-testid="stChatInput"] [data-baseweb="textarea"],
 [data-testid="stChatInput"] [data-baseweb="base-input"] {
     outline: none !important;
     box-shadow: none !important;
-    border-color: rgba(0, 245, 212, 0.3) !important;
     background-color: transparent !important;
 }
 
 [data-testid="stChatInput"] [data-baseweb="base-input"]:focus-within {
-    border-color: rgba(0, 245, 212, 0.6) !important;
-    box-shadow: 0 0 15px rgba(0, 245, 212, 0.1) !important;
-}
-
-*:focus, *:active, *:focus-visible {
-    outline: none !important;
-}
-
-div[data-baseweb] [aria-invalid] {
+    border-color: rgba(0, 245, 212, 0.4) !important;
     box-shadow: none !important;
 }
 
-/* ═══════════════════════════════════════════════
-   BOTTOM DOCK — TRANSLUCENT FROSTED BAR
-   ═══════════════════════════════════════════════ */
+*:focus, *:active, *:focus-visible { outline: none !important; }
+div[data-baseweb] [aria-invalid] { box-shadow: none !important; }
+
+/* ── Buttons — clean pill ── */
+.stButton > button {
+    background: rgba(255,255,255,0.04) !important;
+    border: 1px solid rgba(255,255,255,0.1) !important;
+    border-radius: 8px !important;
+    color: #d1d5db !important;
+    font-size: 0.84rem !important;
+    font-weight: 500 !important;
+    padding: 8px 20px !important;
+    transition: all 0.15s ease !important;
+}
+
+.stButton > button:hover {
+    background: rgba(0, 245, 212, 0.08) !important;
+    border-color: rgba(0, 245, 212, 0.3) !important;
+    color: #00f5d4 !important;
+}
+
+/* ── Text input ── */
+.stTextInput > div > div > input {
+    background: #161b22 !important;
+    border: 1px solid rgba(255,255,255,0.1) !important;
+    border-radius: 8px !important;
+    color: #e5e7eb !important;
+    font-family: 'Space Grotesk', sans-serif !important;
+    font-size: 0.93rem !important;
+    padding: 10px 14px !important;
+    text-align: center !important;
+}
+
+.stTextInput > div > div > input::placeholder {
+    color: #4b5563 !important;
+}
+
+.stTextInput > div > div > input:focus {
+    border-color: rgba(0, 245, 212, 0.4) !important;
+    box-shadow: 0 0 0 1px rgba(0, 245, 212, 0.1) !important;
+    outline: none !important;
+}
+
+.stTextInput label {
+    color: #6b7280 !important;
+    font-size: 0.78rem !important;
+    letter-spacing: 1px !important;
+    text-transform: uppercase !important;
+}
+
+/* ── Bottom dock ── */
 [data-testid="stBottom"] {
-    z-index: 10 !important;
-    background: rgba(15, 12, 41, 0.6) !important;
-    background-color: rgba(15, 12, 41, 0.6) !important;
-    backdrop-filter: blur(24px) !important;
-    -webkit-backdrop-filter: blur(24px) !important;
-    border-top: 1px solid rgba(0, 245, 212, 0.15) !important;
+    background: #0f1117 !important;
+    background-color: #0f1117 !important;
+    border-top: 1px solid rgba(255,255,255,0.06) !important;
 }
 
 [data-testid="stBottom"] > div {
@@ -872,39 +616,23 @@ div[data-baseweb] [aria-invalid] {
     background-color: transparent !important;
 }
 
-/* ═══════════════════════════════════════════════
-   FLOATING RESET BUTTON (PRIMARY TAG METHOD)
-   ═══════════════════════════════════════════════ */
-button[kind="primary"] {
-    position: fixed !important;
-    bottom: 28px !important;
-    left: 20px !important;
-    z-index: 99999 !important;
-    width: auto !important;
-    padding: 4px 16px !important;
-    background: rgba(15, 12, 41, 0.85) !important;
-    backdrop-filter: blur(12px) !important;
-    -webkit-backdrop-filter: blur(12px) !important;
-    border: 1px solid rgba(0, 245, 212, 0.4) !important;
-    border-radius: 50px !important;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 10px rgba(0, 245, 212, 0.1) !important;
-    color: rgba(200, 210, 230, 0.8) !important;
-}
+/* ── Spinner ── */
+.stSpinner > div { border-top-color: #00f5d4 !important; }
+[data-testid="stSpinnerContainer"] { color: #6b7280 !important; }
 
-button[kind="primary"]:hover {
-    background: rgba(0, 245, 212, 0.15) !important;
-    border-color: #00f5d4 !important;
-    color: #00f5d4 !important;
-}
-/* ═══════════════════════════════════════════════
-   FORCE MOBILE TABLE SCROLLING
-   ═══════════════════════════════════════════════ */
-/* Target the main container holding Markdown tables */
-.stMarkdown div {
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+
+/* ── Tables ── */
+.stDataFrame, .stTable {
+    max-width: 100% !important;
     overflow-x: auto !important;
+    display: block !important;
 }
 
-/* Force table cells to not wrap, forcing the scrollbar */
 table {
     width: 100% !important;
     max-width: 100% !important;
@@ -913,58 +641,66 @@ table {
     white-space: nowrap !important;
 }
 
+.stMarkdown div {
+    overflow-x: auto !important;
+}
+
+[data-testid="stChatMessage"] {
+    overflow-x: hidden !important;
+}
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+    .stApp h1 { font-size: 1.5rem !important; }
+}
 </style>
 """, unsafe_allow_html=True)
 
-# ──────────────────────────────────────────────
+
+# ══════════════════════════════════════════════
+# SIDEBAR
+# ══════════════════════════════════════════════
+with st.sidebar:
+    st.markdown("# 📈 AlphaConsensus")
+    st.markdown("Multi-framework investment analysis powered by Graham, Greenblatt, Dorsey, and momentum scoring.")
+
+    st.markdown("---")
+
+    if st.button("🔄 New Chat", use_container_width=True):
+        st.session_state.messages = []
+        st.session_state.chat_history = []
+        st.rerun()
+
+    st.markdown("### How it works")
+    st.markdown(
+        "Ask about any stock by name or ticker. "
+        "The engine pulls live data from Yahoo Finance, "
+        "scores it against four investment frameworks, "
+        "and grounds its reasoning in classic investment books."
+    )
+
+    st.markdown("### Frameworks")
+    st.markdown(
+        "**Graham** — Deep value, margin of safety\n\n"
+        "**Greenblatt** — Magic formula, capital efficiency\n\n"
+        "**Dorsey** — Economic moats, financial health\n\n"
+        "**Trajectory** — Revenue & earnings momentum"
+    )
+
+    st.markdown("---")
+    st.markdown(
+        "<p style='color: #4b5563; font-size: 0.75rem; text-align: center;'>"
+        "Not financial advice. For educational and informational purposes only."
+        "</p>",
+        unsafe_allow_html=True,
+    )
+
+
+# ══════════════════════════════════════════════
 # HEADER
-# ──────────────────────────────────────────────
-st.markdown("""
-<style>
-@keyframes pulseGlow { 0% { filter: drop-shadow(0 0 10px rgba(0, 245, 212, 0.4)); transform: scale(1); } 50% { filter: drop-shadow(0 0 25px rgba(0, 245, 212, 0.8)) drop-shadow(0 0 15px rgba(155, 93, 229, 0.6)); transform: scale(1.02); } 100% { filter: drop-shadow(0 0 10px rgba(0, 245, 212, 0.4)); transform: scale(1); } }
-@keyframes floatNode { 0% { transform: translateY(0px); } 50% { transform: translateY(-3px); } 100% { transform: translateY(0px); } }
-.quant-logo { animation: pulseGlow 4s ease-in-out infinite; }
-.trend-node { animation: floatNode 3s ease-in-out infinite; }
-</style>
-<div style="display: flex; align-items: center; gap: 24px; margin-bottom: -10px;">
-    <svg class="quant-logo" width="68" height="68" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-            <linearGradient id="hexGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#00f5d4" stop-opacity="0.9"/>
-                <stop offset="50%" stop-color="#7bf1a8" stop-opacity="0.4"/>
-                <stop offset="100%" stop-color="#9b5de5" stop-opacity="0.9"/>
-            </linearGradient>
-            <linearGradient id="lineGrad" x1="0%" y1="100%" x2="100%" y2="0%">
-                <stop offset="0%" stop-color="#f15bb5" />
-                <stop offset="50%" stop-color="#fee440" />
-                <stop offset="100%" stop-color="#00f5d4" />
-            </linearGradient>
-        </defs>
-        <polygon points="50,5 88,27 88,73 50,95 12,73 12,27" stroke="url(#hexGrad)" stroke-width="3" fill="rgba(20, 25, 45, 0.6)" />
-        <polygon points="50,12 82,31 82,69 50,88 18,69 18,31" stroke="rgba(0, 245, 212, 0.15)" stroke-width="1" fill="none" />
-        <circle cx="50" cy="50" r="28" stroke="rgba(255,255,255,0.08)" stroke-width="1" stroke-dasharray="4 4" />
-        <line x1="50" y1="15" x2="50" y2="85" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
-        <line x1="15" y1="50" x2="85" y2="50" stroke="rgba(255,255,255,0.08)" stroke-width="1" />
-        <path d="M 22 68 L 42 45 L 58 55 L 82 25" stroke="url(#lineGrad)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" />
-        <circle cx="22" cy="68" r="4" fill="#f15bb5" class="trend-node" style="animation-delay: 0s;" />
-        <circle cx="42" cy="45" r="4" fill="#fee440" class="trend-node" style="animation-delay: 0.5s;" />
-        <circle cx="58" cy="55" r="4" fill="#7bf1a8" class="trend-node" style="animation-delay: 1s;" />
-        <circle cx="82" cy="25" r="6" fill="#00f5d4" style="filter: drop-shadow(0 0 8px #00f5d4);" />
-        <polygon points="82,15 90,25 74,25" fill="#00f5d4" transform="rotate(45 82 25)" />
-    </svg>
-    <h1>AlphaConsensus Terminal</h1>
-</div>
-""", unsafe_allow_html=True)
-
-st.caption("Quantitative Multi-Agent Investment Committee. Operating on Graham, Greenblatt, and Dorsey frameworks.")
-
-# ──────────────────────────────────────────────
-# FLOATING RESET BUTTON
-# ──────────────────────────────────────────────
-if st.button("🔄 Reset", type="primary"):
-    st.session_state.messages = []
-    st.session_state.chat_history = []
-    st.rerun()
+# ══════════════════════════════════════════════
+st.markdown("# AlphaConsensus Terminal")
+st.caption("Quantitative investment analysis — Graham, Greenblatt, Dorsey, and Trajectory frameworks.")
 
 
 # ──────────────────────────────────────────────
@@ -1034,45 +770,39 @@ def show_stock_chart(ticker: str) -> dict:
         import yfinance as yf
         import streamlit as st
         import altair as alt
-        
+
         resolved = _resolve_ticker(ticker)
         resolved_upper = str(resolved).strip().upper()
-        
-        # 1. Fetch data
+
         data_feed = yf.Ticker(resolved_upper).history(period="2y")
         if data_feed.empty and not resolved_upper.endswith((".NS", ".BSE")):
             data_feed = yf.Ticker(f"{resolved_upper}.NS").history(period="2y")
             if not data_feed.empty:
                 resolved_upper = f"{resolved_upper}.NS"
-        
+
         if not data_feed.empty:
-            # 2. Slice and reset index to move Date to a column
             df = data_feed.tail(275).reset_index()
-            
-            # Ensure price is numeric
             df["Close"] = pd.to_numeric(df["Close"])
-            
-            # Define min/max for the Y-axis to zoom in and prevent "flat-line" visual
+
             y_min = float(df["Close"].min()) * 0.98
             y_max = float(df["Close"].max()) * 1.02
-            
+
             st.write(f"### 📈 13-Month Trend: {resolved_upper}")
-            
-            # 3. Force Altair to zoom into the actual price range
+
             chart = alt.Chart(df).mark_line(color="#00f5d4").encode(
                 x=alt.X('Date:T', title='Date'),
                 y=alt.Y('Close:Q', title='Price', scale=alt.Scale(domain=[y_min, y_max])),
                 tooltip=['Date', 'Close']
             ).properties(height=400)
-            
+
             st.altair_chart(chart, use_container_width=True)
-            
+
             return {"success": f"Chart successfully rendered for {resolved_upper}."}
         else:
             return {"error": "Failed to fetch chart data."}
-            
+
     except Exception as e:
-        st.error(f"🚨 Chart Error: {str(e)}")
+        st.error(f"Chart Error: {str(e)}")
         return {"error": str(e)}
 
 
@@ -1641,9 +1371,9 @@ def find_investments(market: str) -> dict:
     """
     universe_data = _fetch_universe_data()
 
-    tier_4 = []  # Perfect consensus: 4/4
-    tier_3 = []  # Strong consensus: 3/4
-    tier_2 = []  # Moderate consensus: 2/4
+    tier_4 = []
+    tier_3 = []
+    tier_2 = []
 
     screened_count = 0
 
@@ -1665,12 +1395,10 @@ def find_investments(market: str) -> dict:
         ni_g = m.get("ni_growth")
         debt_g = m.get("debt_growth")
 
-        # Score each framework
         graham = bool(pe and pb and pe <= 15 and pb <= 1.5)
         greenblatt = bool(roe and ey and roe > 0.15 and ey > 5)
         dorsey = bool(roe and de is not None and roe > 0.15 and de < 50)
 
-        # Trajectory: growth positive AND debt under control
         growth_ok = (rev_g is not None and rev_g > 0) or (ni_g is not None and ni_g > 0)
         debt_ok = (debt_g is not None and debt_g < 0) or (de is not None and de < 50)
         trajectory = bool(growth_ok and debt_ok)
@@ -1710,13 +1438,10 @@ def find_investments(market: str) -> dict:
             else:
                 tier_2.append(entry)
 
-    # ──────────────────────────────────────────────
-    # CROSS-SECTIONAL RANK-SUM ENGINE
-    # ──────────────────────────────────────────────
     def apply_rank_sum(tier_list):
         if not tier_list:
             return tier_list
-            
+
         tier_list.sort(key=lambda x: x["pe"] if isinstance(x["pe"], (int, float)) else 9999)
         for i, item in enumerate(tier_list): item["value_rank"] = i + 1
 
@@ -1758,9 +1483,6 @@ def find_investments(market: str) -> dict:
     }
 
 
-# ──────────────────────────────────────────────
-# TOOLS REGISTRY
-# ──────────────────────────────────────────────
 # ──────────────────────────────────────────────
 # TOOLS REGISTRY
 # ──────────────────────────────────────────────
@@ -1963,29 +1685,24 @@ def sanitize_history(history):
     """Filters out malformed messages missing a role."""
     clean = []
     for msg in history:
-        # Check if msg is a dict (standard) or a types.Content object (SDK format)
         if isinstance(msg, dict):
             if msg.get("role") in ["user", "model"]:
                 clean.append(msg)
         else:
-            # If it's an SDK object, ensure it has a role
             if hasattr(msg, 'role') and msg.role in ["user", "model"]:
                 clean.append(msg)
     return clean
 
 
 def agent_turn(user_message):
-    # 1. Initialize client inside the function to avoid scope errors
     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-    
-    # 2. Clean the history from session state
+
     raw_history = st.session_state.get("chat_history", [])
     history = sanitize_history(raw_history)
 
     last_error = None
     for model_name in FREE_MODELS:
         try:
-            # 3. Create chat here
             chat = client.chats.create(
                 model=model_name,
                 config=types.GenerateContentConfig(
@@ -1997,7 +1714,6 @@ def agent_turn(user_message):
 
             response = chat.send_message(user_message)
 
-            # Tool execution loop
             while response.function_calls:
                 function_responses = []
                 for fc in response.function_calls:
@@ -2010,7 +1726,6 @@ def agent_turn(user_message):
                     )
                 response = chat.send_message(function_responses)
 
-            # 4. Sync updated history back to session state
             st.session_state.chat_history = chat.get_history()
             return response.text, model_name
 
@@ -2023,9 +1738,9 @@ def agent_turn(user_message):
     raise Exception(f"All models rate-limited. Last error: {last_error}")
 
 
-# ──────────────────────────────────────────────
+# ══════════════════════════════════════════════
 # CHAT UI
-# ──────────────────────────────────────────────
+# ══════════════════════════════════════════════
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -2035,52 +1750,44 @@ if "chat_history" not in st.session_state:
 USER_AVATAR = "👤"
 AGENT_AVATAR = "📈"
 
-# ── Welcome card with interactive presets (shown when chat is empty) ──
+# ── Welcome screen (shown when chat is empty) ──
 if not st.session_state.messages:
-    st.markdown("""
-    <div class="welcome-card">
-        <h2>SYSTEM INITIALIZED</h2>
-        <p>AlphaConsensus engine online. Enter a company name below to begin multi-factor analysis.</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("")
+    st.markdown(
+        "<p style='color: #9ca3af; font-size: 0.9rem; margin-bottom: 1.5rem;'>"
+        "Enter a company name or ticker to analyze, or scan the market below."
+        "</p>",
+        unsafe_allow_html=True,
+    )
 
     welcome_company = st.text_input(
-        "TARGET COMPANY",
-        placeholder="Enter company name or ticker — e.g., TCS, Reliance, Apple, AAPL",
+        "COMPANY OR TICKER",
+        placeholder="e.g. TCS, Reliance, Apple, AAPL",
         key="welcome_company",
     )
 
     if welcome_company:
-        for i in range(0, len(PRESET_PROMPTS), 2):
-            cols = st.columns(2)
-            for j in range(2):
+        cols_per_row = 3
+        for i in range(0, len(STOCK_PRESETS), cols_per_row):
+            cols = st.columns(cols_per_row)
+            for j in range(cols_per_row):
                 idx = i + j
-                if idx < len(PRESET_PROMPTS):
-                    label, template = PRESET_PROMPTS[idx]
+                if idx < len(STOCK_PRESETS):
+                    label, template = STOCK_PRESETS[idx]
                     with cols[j]:
                         if st.button(label, key=f"preset_{idx}", use_container_width=True):
-                            # Use company name if template has placeholder, otherwise send as-is
-                            if "{company}" in template:
-                                prompt_text = template.format(company=welcome_company)
-                            else:
-                                prompt_text = template
+                            prompt_text = template.format(company=welcome_company)
                             st.session_state.pending_prompt = prompt_text
                             st.rerun()
-    else:
-        # Show screener buttons even without a company name
-        st.markdown("")
-        st.caption("Or scan the market without a specific company:")
-        screener_presets = [p for p in PRESET_PROMPTS if "{company}" not in p[1]]
-        for i in range(0, len(screener_presets), 2):
-            cols = st.columns(2)
-            for j in range(2):
-                idx = i + j
-                if idx < len(screener_presets):
-                    label, template = screener_presets[idx]
-                    with cols[j]:
-                        if st.button(label, key=f"screener_{idx}", use_container_width=True):
-                            st.session_state.pending_prompt = template
-                            st.rerun()
+
+    st.markdown("")
+    st.caption("Market screeners")
+    scr_cols = st.columns(3)
+    for i, (label, template) in enumerate(SCREENER_PRESETS):
+        with scr_cols[i]:
+            if st.button(label, key=f"screener_{i}", use_container_width=True):
+                st.session_state.pending_prompt = template
+                st.rerun()
 
 # ── Display past messages ──
 for msg in st.session_state.messages:
@@ -2088,20 +1795,10 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"], avatar=avatar):
         st.markdown(msg["content"])
         if msg.get("model"):
-            st.caption(f"⚡ Powered by `{msg['model']}`")
-
-# ── Bottom reset button (shown when there are messages) ──
-if st.session_state.messages:
-    st.write("")
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        if st.button("🔄 Clear & Reset Terminal", key="bottom_reset", use_container_width=True):
-            st.session_state.messages = []
-            st.session_state.chat_history = []
-            st.rerun()
+            st.caption(f"⚡ {msg['model']}")
 
 # ── Handle new input ──
-prompt = st.chat_input("Ask about a stock, investing principles, or anything...")
+prompt = st.chat_input("Ask about any stock, or type a question...")
 
 if not prompt and "pending_prompt" in st.session_state:
     prompt = st.session_state.pop("pending_prompt")
@@ -2113,11 +1810,11 @@ if prompt:
         st.markdown(prompt)
 
     with st.chat_message("assistant", avatar=AGENT_AVATAR):
-        with st.spinner("Executing multi-factor analysis..."):
+        with st.spinner("Analyzing..."):
             try:
                 answer, model_used = agent_turn(prompt)
                 st.markdown(answer)
-                st.caption(f"⚡ Powered by `{model_used}`")
+                st.caption(f"⚡ {model_used}")
                 st.session_state.messages.append({
                     "role": "assistant",
                     "content": answer,
@@ -2127,12 +1824,12 @@ if prompt:
             except Exception as e:
                 error_msg = str(e)
                 if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg or "All models rate-limited" in error_msg:
-                    st.warning("⚠️ **AlphaConsensus Engine Offline (API Limit).** Engaging deterministic fallback routing...")
+                    st.warning("API limit reached. Using fallback system...")
                     fallback_answer = fallback_router(prompt)
                     st.markdown(fallback_answer)
                     st.session_state.messages.append({
                         "role": "assistant",
-                        "content": f"*(Deterministic Fallback Engaged)*\n\n{fallback_answer}",
+                        "content": f"*(Fallback)*\n\n{fallback_answer}",
                     })
                 else:
-                    st.error(f"🛑 **System Error:** Unable to process request.\n\n`{error_msg[:100]}...`")
+                    st.error(f"Error: {error_msg[:150]}")
