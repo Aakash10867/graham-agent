@@ -272,6 +272,10 @@ st.set_page_config(
     layout="centered",
 )
 
+for _key in ["sb_access_token", "sb_refresh_token", "sb_user_email", "sb_user_id"]:
+    if _key not in st.session_state:
+        st.session_state[_key] = None
+
 # ══════════════════════════════════════════════
 # PRESET PROMPTS — reduced to essentials
 # ══════════════════════════════════════════════
@@ -1946,10 +1950,6 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
-
-for _key in ["sb_access_token", "sb_refresh_token", "sb_user_email", "sb_user_id"]:
-    if _key not in st.session_state:
-        st.session_state[_key] = None
 
 
 
