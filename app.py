@@ -21,6 +21,74 @@ os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
 import datetime
 import streamlit as st
+
+
+# ══════════════════════════════════════════════
+# CUSTOM GEMINI SIDEBAR TOGGLE (JAVASCRIPT INJECTION)
+# ══════════════════════════════════════════════
+components.html("""
+<script>
+const doc = window.parent.document;
+
+// Only create the button if it doesn't already exist
+if (!doc.getElementById("custom-gemini-btn")) {
+    const btn = doc.createElement("button");
+    btn.id = "custom-gemini-btn";
+    
+    // Gemini-style Sidebar Icon (Raw SVG, immune to font breaking)
+    btn.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#d1d5db" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>`;
+    
+    // Style the button perfectly
+    Object.assign(btn.style, {
+        position: "fixed",
+        top: "14px",
+        left: "14px",
+        width: "42px",
+        height: "42px",
+        backgroundColor: "#1e1f20",
+        border: "1px solid rgba(255, 255, 255, 0.1)",
+        borderRadius: "12px",
+        cursor: "pointer",
+        zIndex: "9999999", // Sits above the open sidebar
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        transition: "all 0.2s ease",
+        padding: "0"
+    });
+
+    // Hover effects
+    btn.onmouseover = () => {
+        btn.style.backgroundColor = "#2a2b2f";
+        btn.style.borderColor = "rgba(0, 245, 212, 0.4)";
+        btn.querySelector("svg").style.stroke = "#00f5d4";
+    };
+    btn.onmouseout = () => {
+        btn.style.backgroundColor = "#1e1f20";
+        btn.style.borderColor = "rgba(255, 255, 255, 0.1)";
+        btn.querySelector("svg").style.stroke = "#d1d5db";
+    };
+
+    // The Remote Control Logic
+    btn.onclick = () => {
+        const sidebar = doc.querySelector('[data-testid="stSidebar"]');
+        
+        if (sidebar && sidebar.getBoundingClientRect().width > 0) {
+            // Sidebar is OPEN -> Find native close button and click it
+            const closeBtn = doc.querySelector('[data-testid="stSidebar"] button[kind="header"]');
+            if (closeBtn) closeBtn.click();
+        } else {
+            // Sidebar is CLOSED -> Find native expand button and click it
+            const expandBtn = doc.querySelector('[data-testid="collapsedControl"]');
+            if (expandBtn) expandBtn.click();
+        }
+    };
+
+    doc.body.appendChild(btn);
+}
+</script>
+""", height=0, width=0)
+
 from google import genai
 from google.genai import types
 import chromadb
@@ -410,71 +478,24 @@ st.markdown("""
     background-color: #0f1117 !important;
 }
 
-/* 1. Apply Inter font ONLY to actual text elements to perfectly protect all icons */
-.stApp p, .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6, 
-.stApp li, .stApp label, .stApp input, .stApp textarea, .stApp td, .stApp th {
+.stApp * {
     font-family: 'Inter', sans-serif !important;
-}
-
-/* 2. Bulletproof the Streamlit sidebar toggles with the Material Font */
-[data-testid="collapsedControl"],
-[data-testid="collapsedControl"] *,
-[data-testid="stSidebar"] button[kind="header"],
-[data-testid="stSidebar"] button[kind="header"] * {
-    font-family: 'Material Symbols Rounded', 'Material Icons', sans-serif !important;
 }
 
 [data-testid="stAppViewContainer"] {
     background: transparent !important;
 }
 
-/* ── 1. KILL STREAMLIT'S HOVER-TO-HIDE LOGIC ── */
-/* Force the header and its wrappers to stay at opacity 1 permanently */
+/* ── Hide ALL Native Streamlit Clutter ── */
+/* This makes the native top-bar completely invisible but leaves it clickable for our JS */
 header[data-testid="stHeader"],
-header[data-testid="stHeader"] > div,
-header[data-testid="stHeader"] > div > div {
-    background: transparent !important;
-    opacity: 1 !important;
-    visibility: visible !important;
-    z-index: 99999 !important;
-}
-
-/* ── 2. Kill the right-side toolbar (Deploy, Menu) ── */
-[data-testid="stToolbar"] {
-    display: none !important;
-}
-
-/* ── 3. Gemini-Style Floating Sidebar Toggle ── */
-[data-testid="collapsedControl"] {
-    position: fixed !important;
-    top: 14px !important;
-    left: 14px !important;
-    background-color: #1e1f20 !important;
-    border: 1px solid rgba(255, 255, 255, 0.1) !important;
-    border-radius: 12px !important;
-    width: 42px !important;
-    height: 42px !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    z-index: 999999 !important;
-    opacity: 1 !important;
-    visibility: visible !important;
-    transition: background-color 0.2s ease, border-color 0.2s ease !important;
-}
-
-[data-testid="collapsedControl"]:hover {
-    background-color: #2a2b2f !important;
-    border-color: rgba(255, 255, 255, 0.2) !important;
-}
-
-/* Ensure the icon renders properly and isn't hidden */
-[data-testid="collapsedControl"] svg {
-    width: 22px !important;
-    height: 22px !important;
-    fill: #d1d5db !important;
-    color: #d1d5db !important;
-    display: block !important;
+[data-testid="stToolbar"],
+[data-testid="collapsedControl"],
+[data-testid="stSidebar"] button[kind="header"] {
+    opacity: 0 !important;
+    pointer-events: none !important;
+    position: absolute !important;
+    z-index: -100 !important;
 }
 
 /* ── Sidebar ── */
