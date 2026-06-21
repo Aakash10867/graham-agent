@@ -1243,13 +1243,26 @@ def find_investments(market: str) -> dict:
     Args:
         market: Which market to screen. Use 'india' or 'all' (both return Indian stocks).
     """
-    try:
-        import os
-        csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "universe_scored.csv")
-        df = pd.read_csv(csv_path)
-    except FileNotFoundError:
-        return {"error": "universe_scored.csv not found. Run universe_updater.py first."}
+    import os
+    from pathlib import Path
 
+    # Try multiple paths
+    paths_to_try = [
+        "universe_scored.csv",
+        Path(__file__).parent / "universe_scored.csv",
+        os.path.join(os.getcwd(), "universe_scored.csv"),
+    ]
+
+    df = None
+    for p in paths_to_try:
+        if os.path.exists(p):
+            df = pd.read_csv(p)
+            break
+
+    if df is None:
+        return {
+            "error": f"CSV not found. CWD: {os.getcwd()}, Files: {os.listdir('.')}, Script dir: {Path(__file__).parent}, Script dir files: {os.listdir(Path(__file__).parent)}"
+        }
     tier_4 = df[df["score"] == 4].copy()
     tier_3 = df[df["score"] == 3].copy()
     tier_2 = df[df["score"] == 2].copy()
