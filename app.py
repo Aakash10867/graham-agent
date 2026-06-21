@@ -626,27 +626,17 @@ div[data-baseweb] [aria-invalid] { box-shadow: none !important; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
 
-/* ── Tables ── */
+/* ── Tables — scoped to actual tables only ── */
 .stDataFrame, .stTable {
     max-width: 100% !important;
     overflow-x: auto !important;
-    display: block !important;
 }
 
-table {
-    width: 100% !important;
-    max-width: 100% !important;
+[data-testid="stChatMessage"] table {
     display: block !important;
     overflow-x: auto !important;
     white-space: nowrap !important;
-}
-
-.stMarkdown div {
-    overflow-x: auto !important;
-}
-
-[data-testid="stChatMessage"] {
-    overflow-x: hidden !important;
+    max-width: 100% !important;
 }
 
 /* ── Responsive ── */
