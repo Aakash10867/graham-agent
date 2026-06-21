@@ -16,6 +16,7 @@ sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 import os
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
+from supabase import create_client
 import datetime
 import streamlit as st
 from google import genai
@@ -40,6 +41,27 @@ FREE_MODELS = [
     "gemini-2.5-pro",
     "gemini-3.1-pro-preview",
 ]
+
+def get_supabase():
+    client = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+    if st.session_state.get("sb_access_token"):
+        try:
+            resp = client.auth.set_session(
+                st.session_state.sb_access_token,
+                st.session_state.sb_refresh_token
+            )
+            # Update tokens in case set_session refreshed them
+            st.session_state.sb_access_token = resp.session.access_token
+            st.session_state.sb_refresh_token = resp.session.refresh_token
+        except Exception:
+            # Refresh token expired — force re-login
+            st.session_state.sb_access_token = None
+            st.session_state.sb_refresh_token = None
+            st.session_state.sb_user_email = None
+            st.session_state.sb_user_id = None
+    return client
+
+
 
 # ──────────────────────────────────────────────
 # TICKER ALIAS MAP
@@ -536,6 +558,68 @@ div[data-baseweb] [aria-invalid] { box-shadow: none !important; }
 # SIDEBAR
 # ══════════════════════════════════════════════
 with st.sidebar:
+    # ── Auth ──
+    if st.session_state.sb_user_email is None:
+        auth_mode = st.radio(
+            "Account", ["Login", "Sign Up"],
+            horizontal=True, label_visibility="collapsed"
+        )
+        auth_email = st.text_input("Email", key="auth_email_input")
+        auth_password = st.text_input("Password", type="password", key="auth_password_input")
+
+        if auth_mode == "Login":
+            if st.button("Log In", use_container_width=True):
+                if not auth_email or not auth_password:
+                    st.warning("Enter email and password.")
+                else:
+                    try:
+                        sb = get_supabase()
+                        resp = sb.auth.sign_in_with_password({
+                            "email": auth_email,
+                            "password": auth_password
+                        })
+                        st.session_state.sb_access_token = resp.session.access_token
+                        st.session_state.sb_refresh_token = resp.session.refresh_token
+                        st.session_state.sb_user_email = resp.user.email
+                        st.session_state.sb_user_id = str(resp.user.id)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Login failed: {e}")
+        else:
+            if st.button("Sign Up", use_container_width=True):
+                if not auth_email or not auth_password:
+                    st.warning("Enter email and password.")
+                elif len(auth_password) < 6:
+                    st.warning("Password must be at least 6 characters.")
+                else:
+                    try:
+                        sb = get_supabase()
+                        resp = sb.auth.sign_up({
+                            "email": auth_email,
+                            "password": auth_password
+                        })
+                        st.session_state.sb_access_token = resp.session.access_token
+                        st.session_state.sb_refresh_token = resp.session.refresh_token
+                        st.session_state.sb_user_email = resp.user.email
+                        st.session_state.sb_user_id = str(resp.user.id)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Sign up failed: {e}")
+    else:
+        st.caption(f"Logged in as {st.session_state.sb_user_email}")
+        if st.button("Log Out", use_container_width=True):
+            try:
+                sb = get_supabase()
+                sb.auth.sign_out()
+            except Exception:
+                pass
+            st.session_state.sb_access_token = None
+            st.session_state.sb_refresh_token = None
+            st.session_state.sb_user_email = None
+            st.session_state.sb_user_id = None
+            st.rerun()
+
+    st.divider()
     st.markdown("Multi-framework investment analysis powered by Graham, Greenblatt, Dorsey, and momentum scoring.")
 
     st.markdown("---")
@@ -1862,6 +1946,12 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
+
+for _key in ["sb_access_token", "sb_refresh_token", "sb_user_email", "sb_user_id"]:
+    if _key not in st.session_state:
+        st.session_state[_key] = None
+
+
 
 USER_AVATAR = "👤"
 AGENT_AVATAR = "logo.svg"
