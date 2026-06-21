@@ -273,6 +273,8 @@ SCREENER_PRESETS = [
      "Find the best Indian stocks to invest in right now. Show me which stocks pass all 4 frameworks and which pass 3 out of 4 and which pass 2 out of 4, with upto top 10 from each tier. Explain why each tier is a good investment using the book philosophies."),
     ("💎 Find Hidden Gems",
      "Find hidden gem stocks — small and mid cap Indian companies outside the Nifty 50 that pass at least 3 out of 4 frameworks. Show top 10 with key metrics. Explain why each is a good investment using book philosophies."),
+    ("💼 Build SIP Portfolio",
+     "I want to build a SIP portfolio. Help me pick the right stocks based on my goals and investment amount."),
 ]
 
 # ══════════════════════════════════════════════
@@ -1280,6 +1282,148 @@ def find_investments(market: str) -> dict:
     tier_3 = df[df["score"] == 3].copy()
     tier_2 = df[df["score"] == 2].copy()
 
+    def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, review_freq: str) -> dict:
+    """Filter the pre-scored universe to 30-50 SIP-suitable candidates based on investor profile.
+    The LLM then selects the final 5-8 stocks using book wisdom and qualitative judgment.
+
+    Use this when the user wants to build a SIP portfolio. First collect the 4 inputs
+    through natural conversation, then call this tool.
+
+    Args:
+        sip_amount: Monthly SIP amount in INR (e.g. 5000, 25000, 50000)
+        time_horizon: Investment duration. Must be one of:
+                      short  - 1 to 3 years
+                      medium - 3 to 7 years
+                      long   - 7+ years
+        investor_type: Risk profile derived from goal question. Must be one of:
+                       defensive    - wants to beat FD returns with safety
+                       balanced     - wants to build wealth steadily over time
+                       enterprising - wants maximum growth, patient through volatility
+        review_freq: How often the investor wants to monitor. Must be one of:
+                     passive  - set it and forget for years
+                     moderate - review every few months
+                     active   - likes staying informed and adjusting
+    """
+    df = universe_df.copy()
+
+    # ── Base quality filter (all profiles) ──
+    df = df[df["years_of_data"] >= 2]
+    df = df[pd.notna(df["pe"]) & pd.notna(df["roe_pct"]) & pd.notna(df["de"])]
+    df = df[df["pe"] > 0]  # Exclude negative P/E (loss-making)
+
+    # ── Profile-specific filtering ──
+    if investor_type == "defensive":
+        # Graham-focused: strict value, prefer dividends
+        df = df[df["score"] >= 3]
+        df = df[df["graham_pass"] == True]
+        # Prefer dividend payers but don't exclude non-payers if pool is small
+        div_payers = df[pd.notna(df["dividend_yield_pct"]) & (df["dividend_yield_pct"] > 0)]
+        if len(div_payers) >= 15:
+            df = div_payers
+        target_count = 30
+
+    elif investor_type == "balanced":
+        # Quality + value balance
+        df = df[df["score"] >= 2]
+        # Prefer stocks passing at least Greenblatt or Dorsey (quality signal)
+        quality = df[(df["greenblatt_pass"] == True) | (df["dorsey_pass"] == True)]
+        if len(quality) >= 20:
+            df = quality
+        target_count = 40
+
+    elif investor_type == "enterprising":
+        # Growth-tilted: Greenblatt + Trajectory preferred
+        df = df[df["score"] >= 2]
+        # Prefer stocks with positive trajectory
+        growers = df[df["trajectory_pass"] == True]
+        if len(growers) >= 20:
+            df = growers
+        target_count = 50
+
+    else:
+        df = df[df["score"] >= 2]
+        target_count = 40
+
+    # ── Time horizon adjustments ──
+    if time_horizon == "short":
+        # Short horizon: prefer lower volatility, higher score
+        df = df[df["score"] >= 3] if len(df[df["score"] >= 3]) >= 10 else df
+        # Prefer larger, established companies
+        large = df[pd.notna(df["market_cap"]) & (df["market_cap"] > 1e10)]
+        if len(large) >= 10:
+            df = large
+
+    elif time_horizon == "long":
+        # Long horizon: can include smaller companies with growth
+        pass  # No additional filtering, broader pool is fine
+
+    # ── Sort by composite score (value + quality + growth) ──
+    df = df.copy()
+    df["_sort_pe"] = df["pe"].apply(lambda x: x if pd.notna(x) else 9999)
+    df["_sort_roe"] = df["roe_pct"].apply(lambda x: -x if pd.notna(x) else 9999)
+    df["_sort_rev"] = df["rev_growth"].apply(lambda x: -x if pd.notna(x) else 9999)
+    df["_sort_score"] = -df["score"]
+    df = df.sort_values(["_sort_score", "_sort_pe", "_sort_roe", "_sort_rev"])
+
+    # ── Trim to target count ──
+    df = df.head(target_count)
+
+    # ── Build output ──
+    candidates = []
+    for _, row in df.iterrows():
+        candidate = {
+            "ticker": row["ticker"],
+            "name": row.get("name", "N/A") if pd.notna(row.get("name")) else "N/A",
+            "sector": row.get("sector", "N/A") if pd.notna(row.get("sector")) else "N/A",
+            "price": round(row["price"], 2) if pd.notna(row.get("price")) else "N/A",
+            "market_cap": row.get("market_cap", "N/A"),
+            "pe": round(row["pe"], 2) if pd.notna(row.get("pe")) else "N/A",
+            "pb": round(row["pb"], 2) if pd.notna(row.get("pb")) else "N/A",
+            "roe_pct": round(row["roe_pct"], 2) if pd.notna(row.get("roe_pct")) else "N/A",
+            "de": round(row["de"], 2) if pd.notna(row.get("de")) else "N/A",
+            "earnings_yield": round(row["earnings_yield"], 2) if pd.notna(row.get("earnings_yield")) else "N/A",
+            "dividend_yield_pct": round(row["dividend_yield_pct"], 2) if pd.notna(row.get("dividend_yield_pct")) else "N/A",
+            "rev_growth": round(row["rev_growth"], 2) if pd.notna(row.get("rev_growth")) else "N/A",
+            "ni_growth": round(row["ni_growth"], 2) if pd.notna(row.get("ni_growth")) else "N/A",
+            "debt_growth": round(row["debt_growth"], 2) if pd.notna(row.get("debt_growth")) else "N/A",
+            "years_of_data": int(row["years_of_data"]) if pd.notna(row.get("years_of_data")) else 0,
+            "score": int(row["score"]),
+            "graham_pass": bool(row.get("graham_pass")),
+            "greenblatt_pass": bool(row.get("greenblatt_pass")),
+            "dorsey_pass": bool(row.get("dorsey_pass")),
+            "trajectory_pass": bool(row.get("trajectory_pass")),
+            # Historical trends for qualitative LLM assessment
+            "roe_y0": round(row["roe_y0"], 2) if pd.notna(row.get("roe_y0")) else None,
+            "roe_y1": round(row["roe_y1"], 2) if pd.notna(row.get("roe_y1")) else None,
+            "roe_y2": round(row["roe_y2"], 2) if pd.notna(row.get("roe_y2")) else None,
+            "roe_y3": round(row["roe_y3"], 2) if pd.notna(row.get("roe_y3")) else None,
+            "revenue_y0": row.get("revenue_y0") if pd.notna(row.get("revenue_y0")) else None,
+            "revenue_y1": row.get("revenue_y1") if pd.notna(row.get("revenue_y1")) else None,
+        }
+        candidates.append(candidate)
+
+    return {
+        "investor_profile": {
+            "sip_amount_inr": sip_amount,
+            "time_horizon": time_horizon,
+            "investor_type": investor_type,
+            "review_frequency": review_freq,
+        },
+        "candidates_count": len(candidates),
+        "candidates": candidates,
+        "selection_instruction": (
+            f"You have {len(candidates)} pre-filtered candidates. "
+            f"Select 5-8 stocks for this {investor_type} investor with a {time_horizon}-term horizon. "
+            f"Use search_book to pull Graham/Greenblatt/Dorsey wisdom relevant to this profile. "
+            f"Apply qualitative moat assessment (Dorsey) — check ROE trends to see if moat is stable or eroding. "
+            f"Enforce max 2 stocks per sector for diversification. "
+            f"Allocate the monthly SIP of INR {sip_amount} across selected stocks. "
+            f"For each pick, explain WHY it fits this investor using book philosophy. "
+            f"Output the final portfolio as a clean table with: ticker, name, sector, allocation_pct, sip_amount_inr, score, and a one-line thesis."
+        ),
+    }
+    
+
     # Rank-sum sorting within each tier (value + quality + momentum)
     def apply_rank_sort(tier_df):
         if tier_df.empty:
@@ -1419,6 +1563,7 @@ TOOLS = [
     show_stock_chart,
     get_csv_financial_data,
     get_macro_context,
+    get_sip_candidates,
 ]
 
 tool_functions = {
@@ -1437,6 +1582,7 @@ tool_functions = {
     "show_stock_chart": show_stock_chart,
     "get_csv_financial_data": get_csv_financial_data,
     "get_macro_context": get_macro_context,
+    "get_sip_candidates": get_sip_candidates,
 }
 
 
@@ -1514,6 +1660,23 @@ You have 11 tools available. Pick the right combination for each question — yo
 13. show_stock_chart — Renders a visual 13-month line chart of a stock's closing price directly in the UI. Use this whenever the user asks for a chart, graph, or visual trajectory.
 14. get_csv_financial_data — Reads the pre-scored universe database for a specific ticker to get proprietary framework scores (Graham, Greenblatt, Dorsey, Trajectory pass/fail flags).
 15. get_macro_context — Gets the sector and 5-day performance of the broader market (Nifty 50) to gauge macro momentum versus asset momentum.
+16. get_sip_candidates — Build a SIP portfolio. Collects investor profile (sip_amount, time_horizon, investor_type, review_freq) and returns 30-50 pre-filtered candidates. You then select 5-8 using book wisdom and qualitative judgment. Use when the user wants to start a SIP, build a portfolio, or asks where to invest monthly.
+
+SIP PORTFOLIO PROTOCOL:
+When the user wants to build a SIP portfolio, collect these 4 inputs through natural conversation (NOT all at once):
+1. "How much do you want to invest monthly?" → sip_amount (integer in INR)
+2. "How long do you plan to keep investing?" → time_horizon: short (1-3yr) / medium (3-7yr) / long (7+yr)
+3. "What's your goal with this SIP?" → investor_type: defensive ("beat FD/savings with safety") / balanced ("build wealth steadily") / enterprising ("grow fast, patient through ups and downs")
+4. "How often do you want to think about your investments?" → review_freq: passive ("set and forget") / moderate ("check every few months") / active ("stay informed")
+
+IMPORTANT: Frame question 3 around GOALS, never around LOSSES. Do NOT say "what if your portfolio drops 30%". Do NOT use the word "risk" in the question. People feel losses 2x more than gains — framing around loss pushes everyone toward conservative answers.
+
+After collecting all 4, call get_sip_candidates with the parameters. Then:
+1. Call search_book to get relevant investment philosophy for this investor type
+2. From the candidates, select 5-8 stocks applying qualitative moat judgment and sector diversification (max 2 per sector)
+3. Present the portfolio as a table with allocation percentages
+4. Explain each pick using book philosophy
+5. Remind the user this is educational, not personalized financial advice
 
 TOOL SELECTION RULES:
 - For a comprehensive stock analysis: call get_stock_data + get_historical_trends + get_financial_statements (income) + calculate_graham_value + search_book.
