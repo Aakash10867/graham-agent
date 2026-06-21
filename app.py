@@ -1604,18 +1604,20 @@ def intercept_and_rewrite_query(user_query: str) -> str:
     DO NOT ANSWER THE QUESTION. ONLY OUTPUT THE DIRECTIVE.
     """
     try:
-        # Use a highly efficient model for routing latency
         for model_name in FREE_MODELS:
             try:
                 response = client.models.generate_content(
                     model=model_name,
                     contents=router_prompt,
                 )
-                break
+                return f"SYSTEM DIRECTIVE (Translated Intent): {response.text}"
             except Exception as inner_e:
                 if "429" in str(inner_e) or "RESOURCE_EXHAUSTED" in str(inner_e):
                     continue
                 raise inner_e
+        return user_query
+    except Exception:
+        return user_query
 
 
 def sanitize_history(history):
