@@ -1261,9 +1261,9 @@ def find_investments(market: str) -> dict:
             break
 
     if df is None:
-        return {
-            "error": f"CSV not found. CWD: {os.getcwd()}, Files: {os.listdir('.')}, Script dir: {Path(__file__).parent}, Script dir files: {os.listdir(Path(__file__).parent)}"
-        }
+        debug = f"CWD: {os.getcwd()} | Files: {[f for f in os.listdir('.') if f.endswith('.csv')]} | Script dir: {Path(__file__).parent} | Script files: {[f for f in os.listdir(Path(__file__).parent) if f.endswith('.csv')]}"
+        st.error(f"CSV NOT FOUND: {debug}")
+        return {"error": debug}
     tier_4 = df[df["score"] == 4].copy()
     tier_3 = df[df["score"] == 3].copy()
     tier_2 = df[df["score"] == 2].copy()
