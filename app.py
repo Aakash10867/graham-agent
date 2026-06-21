@@ -656,10 +656,18 @@ with st.sidebar:
 
     st.markdown("---")
 
+    st.text_input(
+        "TARGET COMPANY",
+        placeholder="e.g. TCS, Reliance, Apple",
+        key="target_company",
+    )
+
     if st.button("🔄 New Chat", use_container_width=True):
         st.session_state.messages = []
         st.session_state.chat_history = []
         st.rerun()
+
+    st.markdown("---")
 
     st.markdown("### How it works")
     st.markdown(
@@ -1740,44 +1748,16 @@ if "chat_history" not in st.session_state:
 USER_AVATAR = "👤"
 AGENT_AVATAR = "📈"
 
-# ── Welcome screen (shown when chat is empty) ──
+# ── Welcome text (shown only when chat is empty) ──
 if not st.session_state.messages:
     st.markdown("")
     st.markdown(
-        "<p style='color: #9ca3af; font-size: 0.9rem; margin-bottom: 1.5rem;'>"
-        "Enter a company name or ticker to analyze, or scan the market below."
+        "<p style='color: #9ca3af; font-size: 0.9rem;'>"
+        "Enter a company name in the sidebar, then pick an analysis below — "
+        "or scan the market with the screeners. You can also type anything in the chat."
         "</p>",
         unsafe_allow_html=True,
     )
-
-    welcome_company = st.text_input(
-        "COMPANY OR TICKER",
-        placeholder="e.g. TCS, Reliance, Apple, AAPL",
-        key="welcome_company",
-    )
-
-    if welcome_company:
-        cols_per_row = 3
-        for i in range(0, len(STOCK_PRESETS), cols_per_row):
-            cols = st.columns(cols_per_row)
-            for j in range(cols_per_row):
-                idx = i + j
-                if idx < len(STOCK_PRESETS):
-                    label, template = STOCK_PRESETS[idx]
-                    with cols[j]:
-                        if st.button(label, key=f"preset_{idx}", use_container_width=True):
-                            prompt_text = template.format(company=welcome_company)
-                            st.session_state.pending_prompt = prompt_text
-                            st.rerun()
-
-    st.markdown("")
-    st.caption("Market screeners")
-    scr_cols = st.columns(3)
-    for i, (label, template) in enumerate(SCREENER_PRESETS):
-        with scr_cols[i]:
-            if st.button(label, key=f"screener_{i}", use_container_width=True):
-                st.session_state.pending_prompt = template
-                st.rerun()
 
 # ── Display past messages ──
 for msg in st.session_state.messages:
@@ -1786,6 +1766,33 @@ for msg in st.session_state.messages:
         st.markdown(msg["content"])
         if msg.get("model"):
             st.caption(f"⚡ {msg['model']}")
+
+# ── Preset buttons (ALWAYS visible at bottom, after messages) ──
+target = st.session_state.get("target_company", "").strip()
+
+if target:
+    st.markdown("")
+    st.caption(f"Quick analysis for **{target}**")
+    cols_per_row = 3
+    for i in range(0, len(STOCK_PRESETS), cols_per_row):
+        cols = st.columns(cols_per_row)
+        for j in range(cols_per_row):
+            idx = i + j
+            if idx < len(STOCK_PRESETS):
+                label, template = STOCK_PRESETS[idx]
+                with cols[j]:
+                    if st.button(label, key=f"preset_{idx}", use_container_width=True):
+                        st.session_state.pending_prompt = template.format(company=target)
+                        st.rerun()
+
+st.markdown("")
+st.caption("Market screeners")
+scr_cols = st.columns(3)
+for i, (label, template) in enumerate(SCREENER_PRESETS):
+    with scr_cols[i]:
+        if st.button(label, key=f"screener_{i}", use_container_width=True):
+            st.session_state.pending_prompt = template
+            st.rerun()
 
 # ── Handle new input ──
 prompt = st.chat_input("Ask about any stock, or type a question...")
