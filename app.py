@@ -6,6 +6,15 @@ Operating on Graham, Greenblatt, Dorsey, and Trajectory frameworks.
 
 Streamlit web app with Gemini LLM, ChromaDB RAG, and yfinance tools.
 """
+# ══════════════════════════════════════════════
+# PAGE CONFIG
+# ══════════════════════════════════════════════
+st.set_page_config(
+    page_title="AlphaConsensus Terminal",
+    page_icon="📈",
+    layout="centered",
+    initial_sidebar_state="expanded"
+)
 
 # --- SQLITE PATCH FOR STREAMLIT CLOUD ---
 __import__('pysqlite3')
@@ -356,15 +365,6 @@ def _fetch_universe_data():
     return results
 
 
-# ══════════════════════════════════════════════
-# PAGE CONFIG
-# ══════════════════════════════════════════════
-st.set_page_config(
-    page_title="AlphaConsensus Terminal",
-    page_icon="📈",
-    layout="centered",
-    initial_sidebar_state="expanded"
-)
 
 # ══════════════════════════════════════════════
 # PRESET PROMPTS — reduced to essentials
