@@ -43,15 +43,14 @@ st.set_page_config(
 )
 
 # ══════════════════════════════════════════════
-# CUSTOM GEMINI SIDEBAR TOGGLE (JAVASCRIPT INJECTION)
+# CUSTOM GEMINI SIDEBAR TOGGLE (BULLETPROOF JS)
 # ══════════════════════════════════════════════
 components.html("""
 <script>
 const doc = window.parent.document;
 
-// Only create the button if it doesn't already exist
 if (!doc.getElementById("custom-gemini-btn")) {
-    const btn = doc.createElement("button");
+    const btn = doc.createElement("div");
     btn.id = "custom-gemini-btn";
     
     // Gemini-style Sidebar Icon
@@ -59,21 +58,11 @@ if (!doc.getElementById("custom-gemini-btn")) {
     
     // Style the button perfectly
     Object.assign(btn.style, {
-        position: "fixed",
-        top: "14px",
-        left: "14px",
-        width: "42px",
-        height: "42px",
-        backgroundColor: "#1e1f20",
-        border: "1px solid rgba(255, 255, 255, 0.1)",
-        borderRadius: "12px",
-        cursor: "pointer",
-        zIndex: "9999999",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        transition: "all 0.2s ease",
-        padding: "0"
+        position: "fixed", top: "14px", left: "14px", width: "42px", height: "42px",
+        backgroundColor: "#1e1f20", border: "1px solid rgba(255, 255, 255, 0.1)",
+        borderRadius: "12px", cursor: "pointer", zIndex: "9999999",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        transition: "all 0.2s ease", padding: "0"
     });
 
     // Hover effects
@@ -88,27 +77,19 @@ if (!doc.getElementById("custom-gemini-btn")) {
         btn.querySelector("svg").style.stroke = "#d1d5db";
     };
 
-    // Upgraded React-Friendly Remote Control Logic
+    // The Bulletproof Click Logic
     btn.onclick = () => {
-        const sidebar = doc.querySelector('[data-testid="stSidebar"]');
-        
-        // Create a true mouse event that React will recognize
-        const reactClick = new MouseEvent('click', {
-            view: window.parent,
-            bubbles: true,
-            cancelable: true
-        });
-        
-        if (sidebar && sidebar.getBoundingClientRect().width > 0) {
-            // Sidebar is OPEN -> Find native close button
-            // Streamlit sometimes changes "kind", so we target it safely
-            const closeBtn = doc.querySelector('[data-testid="stSidebar"] button[kind="header"]') 
-                          || doc.querySelector('[data-testid="stSidebar"] button[kind="headerNoPadding"]');
-            if (closeBtn) closeBtn.dispatchEvent(reactClick);
+        // Look for the "Open" button first
+        const expandBtn = doc.querySelector('[data-testid="collapsedControl"]');
+        if (expandBtn) {
+            expandBtn.click();
         } else {
-            // Sidebar is CLOSED -> Find native expand button
-            const expandBtn = doc.querySelector('[data-testid="collapsedControl"]');
-            if (expandBtn) expandBtn.dispatchEvent(reactClick);
+            // If "Open" isn't there, the sidebar must be open. Find the first button inside the sidebar (which is always the Close 'X' button).
+            const sidebar = doc.querySelector('[data-testid="stSidebar"]');
+            if (sidebar) {
+                const closeBtn = sidebar.querySelector('button');
+                if (closeBtn) closeBtn.click();
+            }
         }
     };
 
