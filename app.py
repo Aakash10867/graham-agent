@@ -7,7 +7,6 @@ Operating on Graham, Greenblatt, Dorsey, and Trajectory frameworks.
 Streamlit web app with Gemini LLM, ChromaDB RAG, and yfinance tools.
 """
 
-
 # --- SQLITE PATCH FOR STREAMLIT CLOUD ---
 __import__('pysqlite3')
 import sys
@@ -17,11 +16,31 @@ sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 import os
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
-
-
 import datetime
 import streamlit as st
+import streamlit.components.v1 as components  # <--- THIS PREVENTS THE NAME ERROR
 
+from google import genai
+from google.genai import types
+import chromadb
+import pymupdf
+import yfinance as yf
+import json
+import re
+import requests
+import pandas as pd
+import numpy as np
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# ══════════════════════════════════════════════
+# PAGE CONFIG (MUST BE THE FIRST STREAMLIT COMMAND)
+# ══════════════════════════════════════════════
+st.set_page_config(
+    page_title="AlphaConsensus Terminal",
+    page_icon="📈",
+    layout="centered",
+    initial_sidebar_state="expanded"
+)
 
 # ══════════════════════════════════════════════
 # CUSTOM GEMINI SIDEBAR TOGGLE (JAVASCRIPT INJECTION)
@@ -88,29 +107,6 @@ if (!doc.getElementById("custom-gemini-btn")) {
 }
 </script>
 """, height=0, width=0)
-
-from google import genai
-from google.genai import types
-import chromadb
-import pymupdf
-import yfinance as yf
-import json
-import re
-import requests
-import pandas as pd
-import numpy as np
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
-
-# ══════════════════════════════════════════════
-# PAGE CONFIG
-# ══════════════════════════════════════════════
-st.set_page_config(
-    page_title="AlphaConsensus Terminal",
-    page_icon="📈",
-    layout="centered",
-    initial_sidebar_state="expanded"
-)
 
 # ──────────────────────────────────────────────
 # FREE MODEL FALLBACK LIST
