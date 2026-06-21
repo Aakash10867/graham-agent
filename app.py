@@ -534,7 +534,6 @@ div[data-baseweb] [aria-invalid] { box-shadow: none !important; }
 # SIDEBAR
 # ══════════════════════════════════════════════
 with st.sidebar:
-    st.logo("logo.svg", icon_image="logo.svg")
     st.markdown("Multi-framework investment analysis powered by Graham, Greenblatt, Dorsey, and momentum scoring.")
 
     st.markdown("---")
