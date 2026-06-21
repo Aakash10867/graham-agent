@@ -640,11 +640,29 @@ def load_books():
 
 collection = load_books()
 
-@st.cache_data
-def load_universe():
-    return pd.read_csv("universe_scored.csv")
+import os
+import pandas as pd
+import streamlit as st
 
-universe_df = load_universe()
+# Anchor the path absolutely relative to this file
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CSV_PATH = os.path.join(BASE_DIR, "universe_scored.csv")
+
+@st.cache_data(show_spinner=False)
+def load_universe(file_path: str):
+    """
+    Passing the file_path as an argument allows Streamlit to hash the 
+    file metadata. If the CSV is updated, the cache invalidates automatically.
+    """
+    if not os.path.exists(file_path):
+        # Fallback empty dataframe to prevent fatal app crashes if file is missing
+        st.error(f"Critical System Error: {file_path} not found.")
+        return pd.DataFrame()
+        
+    return pd.read_csv(file_path)
+
+# Initialize the global dataframe safely
+universe_df = load_universe(CSV_PATH)
 
 
 # ──────────────────────────────────────────────
