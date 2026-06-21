@@ -1922,10 +1922,12 @@ with chat_area:
         with st.chat_message("assistant", avatar=AGENT_AVATAR):
             with st.spinner("Routing & Analyzing..."):
                 try:
-                    # 1. INTERCEPT & REWRITE
-                    rewritten_directive = intercept_and_rewrite_query(prompt)
+                    # Only intercept the first message; follow-ups go direct
+                    if len(st.session_state.messages) <= 1:
+                        rewritten_directive = intercept_and_rewrite_query(prompt)
+                    else:
+                        rewritten_directive = prompt
                     
-                    # 2. EXECUTE (Pass the directive, not the layman prompt)
                     answer, model_used = agent_turn(rewritten_directive)
                     
                     # 3. RENDER
