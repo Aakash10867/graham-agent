@@ -1,26 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="20 20 220 200">
-  <!-- 
-    The Consensus 'C' 
-    A crisp, institutional silver orbit establishing the foundation.
-  -->
-  <path d="M 150, 40 A 85,85 0 1,0 150, 210" 
-        fill="none" stroke="#9ca3af" stroke-width="12" stroke-linecap="round"/>
 
-  <!-- 
-    The Alpha 'A' Core 
-    A rigid, warm Amber structure representing fundamental intrinsic value.
-  -->
-  <path d="M 128, 30 L 50, 216 M 128, 30 L 206, 216" 
-        fill="none" stroke="#F59E0B" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="30 30 195 205">
+  <!-- Background removed for native transparency -->
+  
+  <!-- The Consensus 'C' (Silver Pop) -->
+  <path d="M 160,70 C 80,40 40,110 50,180 C 60,220 120,230 160,190" 
+        fill="none" stroke="#F3F4F6" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- The Alpha 'A' Core (Amber Warmth) -->
+  <path d="M 60,200 C 90,130 110,60 135,60 C 150,60 170,110 180,160" 
+        fill="none" stroke="#F59E0B" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
 
-  <!-- 
-    The Alpha Trajectory Arrow 
-    Neon Teal breaking through the 'A', acting as the crossbar and the growth vector.
-  -->
-  <path d="M 30, 160 C 80, 180 140, 150 180, 90 C 200, 60 215, 45 230, 30" 
-        fill="none" stroke="#00f5d4" stroke-width="16" stroke-linecap="round"/>
-        
-  <!-- Arrow Head -->
-  <path d="M 190, 30 L 230, 30 L 230, 70" 
+  <!-- The Alpha Flow & Portfolio Trajectory (Neon Teal) -->
+  <path d="M 60,150 C 120,150 140,80 210,70" 
         fill="none" stroke="#00f5d4" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- The Value Node -->
+  <circle cx="210" cy="70" r="12" fill="#e5e7eb" stroke="#0f1117" stroke-width="4"/>
 </svg>
