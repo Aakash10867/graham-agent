@@ -483,13 +483,48 @@ header[data-testid="stHeader"], .stAppHeader {
     color: #00f5d4 !important;
 }
 
+/* ── 3. HIJACK THE "CLOSE SIDEBAR" BUTTON (Inside the sidebar) ── */
+/* Make it match the Open button perfectly */
+[data-testid="stSidebar"] button[kind="header"], 
+[data-testid="stSidebar"] button[kind="headerNoPadding"] {
+    background-color: #1e1f20 !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: 12px !important;
+    width: 42px !important;
+    height: 42px !important;
+    margin-top: 16px !important;
+    margin-left: 16px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    transition: all 0.2s ease !important;
+}
 
+[data-testid="stSidebar"] button[kind="header"]:hover,
+[data-testid="stSidebar"] button[kind="headerNoPadding"]:hover {
+    background-color: #2a2b2f !important;
+    border-color: rgba(0, 245, 212, 0.4) !important;
+}
 
+/* Style the icon inside the Close button */
+[data-testid="stSidebar"] button[kind="header"] svg,
+[data-testid="stSidebar"] button[kind="headerNoPadding"] svg {
+    fill: #d1d5db !important;
+    color: #d1d5db !important;
+    width: 22px !important;
+    height: 22px !important;
+}
 
+/* ── Remaining UI Styles (Sidebar, Inputs, Chat) ── */
+[data-testid="stSidebar"] {
+    background-color: #161b22 !important;
+    border-right: 1px solid rgba(255,255,255,0.06) !important;
+}
 
-
-
-
+[data-testid="stSidebar"] [data-testid="stMarkdown"] p { color: #9ca3af !important; font-size: 0.85rem !important; }
+[data-testid="stSidebar"] h1 { font-family: 'Space Grotesk', sans-serif !important; color: #00f5d4 !important; font-size: 1.3rem !important; font-weight: 700 !important; letter-spacing: 1px !important; }
+[data-testid="stSidebar"] h3 { font-family: 'Space Grotesk', sans-serif !important; color: #e5e7eb !important; font-size: 0.85rem !important; font-weight: 600 !important; text-transform: uppercase !important; letter-spacing: 1.5px !important; margin-top: 1.5rem !important; }
+[data-testid="stSidebar"] hr { border-color: rgba(255,255,255,0.06) !important; }
 .stApp h1 { font-family: 'Space Grotesk', sans-serif !important; font-weight: 700 !important; font-size: 2rem !important; color: #00f5d4 !important; padding-bottom: 2px; }
 .stApp .stCaption, .stApp [data-testid="stCaptionContainer"] p { color: #6b7280 !important; font-size: 0.88rem !important; }
 
@@ -534,29 +569,52 @@ div[data-baseweb] [aria-invalid] { box-shadow: none !important; }
 </style>
 """, unsafe_allow_html=True)
 
+# ══════════════════════════════════════════════
+# SIDEBAR
+# ══════════════════════════════════════════════
+with st.sidebar:
+    st.text_input(
+        "TARGET COMPANY",
+        placeholder="e.g. TCS, Reliance, Apple",
+        key="target_company",
+    )
+
+    if st.button("🔄 New Chat", use_container_width=True):
+        st.session_state.messages = []
+        st.session_state.chat_history = []
+        st.rerun()
+
+    st.markdown("---")
+    st.markdown("### How it works")
+    st.markdown(
+        "Ask about any stock by name or ticker. "
+        "The engine pulls live data from Yahoo Finance, "
+        "scores it against four investment frameworks, "
+        "and grounds its reasoning in classic investment books."
+    )
+
+    st.markdown("### Frameworks")
+    st.markdown(
+        "**Graham** — Deep value, margin of safety\n\n"
+        "**Greenblatt** — Magic formula, capital efficiency\n\n"
+        "**Dorsey** — Economic moats, financial health\n\n"
+        "**Trajectory** — Revenue & earnings momentum"
+    )
+
+    st.markdown("---")
+    st.markdown(
+        "<p style='color: #4b5563; font-size: 0.75rem; text-align: center;'>"
+        "Not financial advice. For educational and informational purposes only."
+        "</p>",
+        unsafe_allow_html=True,
+    )
+
 
 # ══════════════════════════════════════════════
-# UNIFIED TERMINAL CONTROL
+# HEADER
 # ══════════════════════════════════════════════
-if "active_ticker" not in st.session_state:
-    st.session_state.active_ticker = None
-
-# Input Command Line (Used for Ticker/Context setting)
-cmd = st.text_input("COMMAND", placeholder="Type a ticker (e.g. RELIANCE.NS) and press Enter...", key="cmd_bar")
-
-if cmd:
-    st.session_state.active_ticker = _resolve_ticker(cmd)
-    st.rerun()
-
-# Workspace Control Bar
-if st.session_state.active_ticker:
-    st.success(f"**ACTIVE CONTEXT:** {st.session_state.active_ticker}")
-    cols = st.columns(len(STOCK_PRESETS))
-    for i, (label, template) in enumerate(STOCK_PRESETS):
-        if cols[i].button(label):
-            # Instead of triggering agent_turn directly, append to messages
-            st.session_state.messages.append({"role": "user", "content": template.format(company=st.session_state.active_ticker)})
-            st.rerun()
+st.markdown("# AlphaConsensus Terminal")
+st.caption("Quantitative investment analysis — Graham, Greenblatt, Dorsey, and Trajectory frameworks.")
 
 
 # ──────────────────────────────────────────────
