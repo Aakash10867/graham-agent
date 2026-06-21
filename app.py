@@ -472,22 +472,23 @@ st.markdown("""
     background: transparent !important;
 }
 
-/* ── Hide ALL Native Streamlit Clutter Safely ── */
-/* We make them 0x0 pixels and invisible, but DO NOT disable pointer-events so JS can click them */
-header[data-testid="stHeader"],
-[data-testid="stToolbar"],
+/* ── Safely Hide Native Streamlit Clutter ── */
+/* We make them invisible but leave them completely functional for the JS to click */
+header[data-testid="stHeader"] {
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+[data-testid="stToolbar"] {
+    display: none !important;
+}
+
 [data-testid="collapsedControl"],
 [data-testid="stSidebar"] button[kind="header"],
 [data-testid="stSidebar"] button[kind="headerNoPadding"] {
     opacity: 0 !important;
-    position: absolute !important;
-    width: 0px !important;
-    height: 0px !important;
-    overflow: hidden !important;
-    z-index: -100 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    /* pointer-events: none is strictly REMOVED */
+    color: transparent !important;
+    background: transparent !important;
 }
 
 /* ── Sidebar ── */
