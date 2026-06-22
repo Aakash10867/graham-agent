@@ -248,20 +248,43 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None, 
 
     # ── Investment Analysis ──
     if narrative:
-        from reportlab.platypus import PageBreak
+        from reportlab.platypus import PageBreak, HRFlowable
         story.append(PageBreak())
         story.append(Paragraph("Investment Analysis", heading_style))
         story.append(Spacer(1, 2*mm))
+
+        section_style = ParagraphStyle("SectionHead", parent=body_style,
+                                        fontName="Helvetica-Bold", fontSize=12,
+                                        textColor=brand_blue, spaceBefore=10, spaceAfter=4)
+        stock_style = ParagraphStyle("StockHead", parent=body_style,
+                                      fontName="Helvetica-Bold", fontSize=10,
+                                      textColor=dark_text, spaceBefore=8, spaceAfter=2)
+        label_style = ParagraphStyle("LabelLine", parent=body_style, fontSize=9.5,
+                                      textColor=dark_text, leading=13, leftIndent=8)
+
         for line in narrative.split("\n"):
             line = line.strip()
             if not line:
                 story.append(Spacer(1, 2*mm))
-            elif line.isupper() or line.endswith(":"):
-                bold_style = ParagraphStyle("BoldLine", parent=body_style, fontName="Helvetica-Bold",
-                                             fontSize=11, spaceBefore=6, spaceAfter=2)
-                story.append(Paragraph(line, bold_style))
+                continue
+
+            safe_line = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+            # Numbered section headers like "1. PORTFOLIO THESIS"
+            if line.isupper() and len(line) > 3 and not line.startswith("Selection") and not line.startswith("Strength") and not line.startswith("Risk"):
+                story.append(HRFlowable(width="40%", thickness=0.5, color=brand_blue, spaceAfter=4, spaceBefore=6))
+                story.append(Paragraph(safe_line, section_style))
+            # Stock name headers (ALL CAPS with sector in parens)
+            elif line.isupper() and "(" in line:
+                story.append(Paragraph(safe_line, stock_style))
+            # Labeled lines: Selection:, Strength:, Risk:
+            elif line.startswith("Selection:") or line.startswith("Strength:") or line.startswith("Risk:"):
+                label, _, rest = line.partition(":")
+                rest = rest.strip().replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                story.append(Paragraph(f"<b>{label}:</b> {rest}", label_style))
             else:
-                story.append(Paragraph(line.replace("&", "&amp;"), body_style))
+                story.append(Paragraph(safe_line, body_style))
+
         story.append(Spacer(1, 6*mm))
 
     # ── Disclaimer ──
@@ -406,7 +429,17 @@ Write a professional investment analysis with these sections:
    - Alignment with the stated investor type and time horizon
    - One specific improvement recommendation grounded in the books
 
-Be direct. No filler. Use Rs. for currency. Do not use markdown formatting — plain text only, use line breaks for structure."""
+Be direct. No filler. Use Rs. for currency.
+
+FORMAT RULES (follow exactly):
+- Section headers: write them in ALL CAPS on their own line (e.g., PORTFOLIO THESIS)
+- Stock names: write as "STOCK NAME (Sector)" in ALL CAPS on their own line
+- Under each stock, write exactly three labeled lines:
+  Selection: why it was picked
+  Strength: key advantage with book reference
+  Risk: key danger with book reference
+- Leave a blank line between sections
+- No markdown, no bullets, no asterisks, no dashes"""
 
     try:
         for model_name in FREE_MODELS:
@@ -3598,26 +3631,36 @@ elif st.session_state.sb_view_mode == "portfolios":
                 except Exception:
                     pass  # Fail silently if history table doesn't exist yet
 
-                # ── PDF Export ──
-                try:
-                    hold_for_pdf = sb.table("holdings").select("*").eq("portfolio_id", port["id"]).execute().data or []
-                    hist_for_pdf = sb.table("portfolio_history").select("*").eq("portfolio_id", port["id"]).order("date").execute().data or []
-                    alerts_for_pdf = sb.table("portfolio_alerts").select("*").eq("portfolio_id", port["id"]).eq("is_read", False).execute().data or []
+                # ── PDF Export (two-step: generate then download) ──
+                report_key = f"report_ready_{port['id']}"
 
-                    chart_buf = generate_portfolio_chart(hist_for_pdf)
-                    narrative = generate_portfolio_narrative(port, hold_for_pdf, collection)
-                    pdf_bytes = generate_portfolio_pdf(port, hold_for_pdf, hist_for_pdf, alerts_for_pdf, chart_buf, narrative)
-                    safe_name = re.sub(r'[^a-zA-Z0-9]', '_', port.get("name", "portfolio"))
+                if st.session_state.get(report_key):
                     st.download_button(
-                        label="📄 Export Report",
-                        data=pdf_bytes,
-                        file_name=f"DeepMoat_{safe_name}_{datetime.date.today().isoformat()}.pdf",
+                        label="⬇️ Download Report",
+                        data=st.session_state[report_key],
+                        file_name=f"DeepMoat_{re.sub(r'[^a-zA-Z0-9]', '_', port.get('name', 'portfolio'))}_{datetime.date.today().isoformat()}.pdf",
                         mime="application/pdf",
-                        key=f"pdf_export_{port['id']}",
+                        key=f"pdf_download_{port['id']}",
                         use_container_width=True,
                     )
-                except Exception as e:
-                    st.caption(f"PDF export unavailable: {e}")
+                    if st.button("✕ Clear", key=f"pdf_clear_{port['id']}"):
+                        del st.session_state[report_key]
+                        st.rerun()
+                else:
+                    if st.button("📄 Generate Report", key=f"pdf_gen_{port['id']}", use_container_width=True):
+                        with st.spinner("Building report — analyzing holdings against book principles..."):
+                            try:
+                                hold_for_pdf = sb.table("holdings").select("*").eq("portfolio_id", port["id"]).execute().data or []
+                                hist_for_pdf = sb.table("portfolio_history").select("*").eq("portfolio_id", port["id"]).order("date").execute().data or []
+                                alerts_for_pdf = sb.table("portfolio_alerts").select("*").eq("portfolio_id", port["id"]).eq("is_read", False).execute().data or []
+
+                                chart_buf = generate_portfolio_chart(hist_for_pdf)
+                                narrative = generate_portfolio_narrative(port, hold_for_pdf, collection)
+                                pdf_bytes = generate_portfolio_pdf(port, hold_for_pdf, hist_for_pdf, alerts_for_pdf, chart_buf, narrative)
+                                st.session_state[report_key] = pdf_bytes
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Report generation failed: {e}")
 
                 today = datetime.date.today()
                 _auto_key = f"auto_trigger_review_{port['id']}"
