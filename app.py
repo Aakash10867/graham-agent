@@ -2473,106 +2473,106 @@ if st.session_state.sb_view_mode == "chat":
                             })
                         else:
                             st.error(f"Error: {error_msg[:150]}")
-                        else:
-                            # ══════════════════════════════════════════════
-                            # PORTFOLIO DASHBOARD
-                            # ══════════════════════════════════════════════
-                            st.markdown("### 📁 My Portfolios")
-                        
-                            sb = get_supabase()
+else:
+    # ══════════════════════════════════════════════
+    # PORTFOLIO DASHBOARD
+    # ══════════════════════════════════════════════
+    st.markdown("### 📁 My Portfolios")
+
+    sb = get_supabase()
+    try:
+        port_resp = sb.table("portfolios").select("*").eq(
+            "user_id", st.session_state.sb_user_id
+        ).order("created_at", desc=True).execute()
+        portfolios = port_resp.data
+    except Exception as e:
+        st.error(f"Failed to load portfolios: {e}")
+        portfolios = []
+
+    if not portfolios:
+        st.info("No saved portfolios yet. Use the SIP Portfolio builder to create one!")
+    else:
+        for port in portfolios:
+            with st.expander(f"📊 {port['name']}", expanded=False):
+                st.caption(
+                    f"Created: {port['created_at'][:10]} · "
+                    f"{port.get('investor_type', '—')} · "
+                    f"₹{port.get('sip_amount', 0):,}/mo · "
+                    f"{port.get('time_horizon', '—')} horizon · "
+                    f"Next review: {port.get('next_review_date', '—')}"
+                )
+
+                # Fetch holdings
+                try:
+                    hold_resp = sb.table("holdings").select("*").eq(
+                        "portfolio_id", port["id"]
+                    ).execute()
+                    holdings = hold_resp.data
+                except Exception:
+                    holdings = []
+
+                if holdings:
+                    hold_df = pd.DataFrame(holdings)
+                    display_cols = {
+                        "name": "Stock",
+                        "ticker": "Ticker",
+                        "sector": "Sector",
+                        "shares": "Shares",
+                        "price_at_entry": "Entry Price",
+                        "sip_amount_inr": "Invested",
+                        "allocation_pct": "Alloc %",
+                        "score_at_entry": "Score",
+                    }
+                    available = {k: v for k, v in display_cols.items() if k in hold_df.columns}
+                    st.dataframe(
+                        hold_df[list(available.keys())].rename(columns=available),
+                        hide_index=True,
+                        use_container_width=True,
+                    )
+                else:
+                    st.caption("No holdings found.")
+
+                # Rename & Delete
+                col_r, col_d = st.columns([3, 1])
+                with col_r:
+                    new_name = st.text_input(
+                        "Rename", value=port["name"],
+                        key=f"rename_{port['id']}",
+                        label_visibility="collapsed"
+                    )
+                    if new_name != port["name"]:
+                        if st.button("Save Name", key=f"save_name_{port['id']}"):
                             try:
-                                port_resp = sb.table("portfolios").select("*").eq(
-                                    "user_id", st.session_state.sb_user_id
-                                ).order("created_at", desc=True).execute()
-                                portfolios = port_resp.data
+                                sb.table("portfolios").update(
+                                    {"name": new_name}
+                                ).eq("id", port["id"]).execute()
+                                st.success("Renamed!")
+                                st.rerun()
                             except Exception as e:
-                                st.error(f"Failed to load portfolios: {e}")
-                                portfolios = []
-                        
-                            if not portfolios:
-                                st.info("No saved portfolios yet. Use the SIP Portfolio builder to create one!")
-                            else:
-                                for port in portfolios:
-                                    with st.expander(f"📊 {port['name']}", expanded=False):
-                                        st.caption(
-                                            f"Created: {port['created_at'][:10]} · "
-                                            f"{port.get('investor_type', '—')} · "
-                                            f"₹{port.get('sip_amount', 0):,}/mo · "
-                                            f"{port.get('time_horizon', '—')} horizon · "
-                                            f"Next review: {port.get('next_review_date', '—')}"
-                                        )
-                        
-                                        # Fetch holdings
-                                        try:
-                                            hold_resp = sb.table("holdings").select("*").eq(
-                                                "portfolio_id", port["id"]
-                                            ).execute()
-                                            holdings = hold_resp.data
-                                        except Exception:
-                                            holdings = []
-                        
-                                        if holdings:
-                                            hold_df = pd.DataFrame(holdings)
-                                            display_cols = {
-                                                "name": "Stock",
-                                                "ticker": "Ticker",
-                                                "sector": "Sector",
-                                                "shares": "Shares",
-                                                "price_at_entry": "Entry Price",
-                                                "sip_amount_inr": "Invested",
-                                                "allocation_pct": "Alloc %",
-                                                "score_at_entry": "Score",
-                                            }
-                                            available = {k: v for k, v in display_cols.items() if k in hold_df.columns}
-                                            st.dataframe(
-                                                hold_df[list(available.keys())].rename(columns=available),
-                                                hide_index=True,
-                                                use_container_width=True,
-                                            )
-                                        else:
-                                            st.caption("No holdings found.")
-                        
-                                        # Rename & Delete
-                                        col_r, col_d = st.columns([3, 1])
-                                        with col_r:
-                                            new_name = st.text_input(
-                                                "Rename", value=port["name"],
-                                                key=f"rename_{port['id']}",
-                                                label_visibility="collapsed"
-                                            )
-                                            if new_name != port["name"]:
-                                                if st.button("Save Name", key=f"save_name_{port['id']}"):
-                                                    try:
-                                                        sb.table("portfolios").update(
-                                                            {"name": new_name}
-                                                        ).eq("id", port["id"]).execute()
-                                                        st.success("Renamed!")
-                                                        st.rerun()
-                                                    except Exception as e:
-                                                        st.error(f"Rename failed: {e}")
-                        
-                                        with col_d:
-                                            if st.button("🗑️ Delete", key=f"delete_{port['id']}", type="secondary"):
-                                                st.session_state[f"confirm_delete_{port['id']}"] = True
-                        
-                                        if st.session_state.get(f"confirm_delete_{port['id']}"):
-                                            st.warning("Are you sure? This cannot be undone.")
-                                            c1, c2 = st.columns(2)
-                                            with c1:
-                                                if st.button("Yes, delete", key=f"confirm_yes_{port['id']}"):
-                                                    try:
-                                                        sb.table("holdings").delete().eq(
-                                                            "portfolio_id", port["id"]
-                                                        ).execute()
-                                                        sb.table("portfolios").delete().eq(
-                                                            "id", port["id"]
-                                                        ).execute()
-                                                        st.session_state.pop(f"confirm_delete_{port['id']}", None)
-                                                        st.success("Deleted.")
-                                                        st.rerun()
-                                                    except Exception as e:
-                                                        st.error(f"Delete failed: {e}")
-                                            with c2:
-                                                if st.button("Cancel", key=f"confirm_no_{port['id']}"):
-                                                    st.session_state.pop(f"confirm_delete_{port['id']}", None)
-                                                    st.rerun()
+                                st.error(f"Rename failed: {e}")
+
+                with col_d:
+                    if st.button("🗑️ Delete", key=f"delete_{port['id']}", type="secondary"):
+                        st.session_state[f"confirm_delete_{port['id']}"] = True
+
+                if st.session_state.get(f"confirm_delete_{port['id']}"):
+                    st.warning("Are you sure? This cannot be undone.")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        if st.button("Yes, delete", key=f"confirm_yes_{port['id']}"):
+                            try:
+                                sb.table("holdings").delete().eq(
+                                    "portfolio_id", port["id"]
+                                ).execute()
+                                sb.table("portfolios").delete().eq(
+                                    "id", port["id"]
+                                ).execute()
+                                st.session_state.pop(f"confirm_delete_{port['id']}", None)
+                                st.success("Deleted.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Delete failed: {e}")
+                    with c2:
+                        if st.button("Cancel", key=f"confirm_no_{port['id']}"):
+                            st.session_state.pop(f"confirm_delete_{port['id']}", None)
+                            st.rerun()
