@@ -2336,12 +2336,10 @@ USER_AVATAR = "👤"
 AGENT_AVATAR = "logo.svg"
 
 if st.session_state.sb_view_mode == "chat":
-    # ── Reserve a container for all chat content (renders ABOVE buttons) ──
     chat_area = st.container()
-    
-    # ── Preset buttons (ALWAYS below all messages) ──
+
     target = st.session_state.get("target_company", "").strip()
-    
+
     if target:
         st.markdown("")
         st.caption(f"Quick analysis for **{target}**")
@@ -2356,7 +2354,7 @@ if st.session_state.sb_view_mode == "chat":
                         if st.button(label, key=f"preset_{idx}", use_container_width=True):
                             st.session_state.pending_prompt = template.format(company=target)
                             st.rerun()
-    
+
     st.markdown("")
     st.caption("Market screeners")
     scr_cols = st.columns(3)
@@ -2365,37 +2363,30 @@ if st.session_state.sb_view_mode == "chat":
             if st.button(label, key=f"screener_{i}", use_container_width=True):
                 st.session_state.pending_prompt = template
                 st.rerun()
-    
-    # ── Chat input (pinned to bottom by Streamlit) ──
+
     prompt = st.chat_input("Ask about any stock, or type a question...")
-    
+
     if not prompt and "pending_prompt" in st.session_state:
         prompt = st.session_state.pop("pending_prompt")
-    
-    # ── All chat content renders inside the container (above buttons) ──
+
     with chat_area:
-        # Ephemeral Hero State (shown only when chat is empty)
-        # Terminal Ready State (shown only when chat is empty)
         if not st.session_state.messages:
             st.markdown("")
             st.info("Choose a company in the sidebar then select a framework below, or find best stocks by clicking below buttons.")
-    
-        # Display past messages
+
         for msg in st.session_state.messages:
             avatar = USER_AVATAR if msg["role"] == "user" else AGENT_AVATAR
             with st.chat_message(msg["role"], avatar=avatar):
                 st.markdown(msg["content"])
                 if msg.get("model"):
                     st.caption(f"⚡ {msg['model']}")
-    
-        # ── Save Portfolio Button ──
+
         if st.session_state.get("pending_portfolio"):
             portfolio = st.session_state.pending_portfolio
-    
+
             if st.session_state.sb_user_id is None:
                 st.info("💡 Log in to save this portfolio to your account.")
             else:
-                # Show portfolio summary from structured data
                 st.markdown("### 📋 Your SIP Portfolio")
                 preview_data = []
                 for s in portfolio["stocks"]:
@@ -2411,10 +2402,8 @@ if st.session_state.sb_view_mode == "chat":
                 if st.button("💾 Save Portfolio", use_container_width=True):
                     try:
                         sb = get_supabase()
-    
                         review_days = portfolio.get("review_days", 90)
                         next_review = (datetime.date.today() + datetime.timedelta(days=review_days)).isoformat()
-    
                         port_resp = sb.table("portfolios").insert({
                             "user_id": st.session_state.sb_user_id,
                             "name": portfolio["name"],
@@ -2424,9 +2413,7 @@ if st.session_state.sb_view_mode == "chat":
                             "review_freq": str(review_days),
                             "next_review_date": next_review,
                         }).execute()
-    
                         portfolio_id = port_resp.data[0]["id"]
-    
                         stocks_for_alloc = []
                         for stock in portfolio["stocks"]:
                             ticker = stock["ticker"]
@@ -2435,68 +2422,43 @@ if st.session_state.sb_view_mode == "chat":
                                 price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
                             except Exception:
                                 price = 0
-    
                             row = universe_df[universe_df["ticker"] == ticker]
                             pe = float(row["pe"].iloc[0]) if len(row) and pd.notna(row["pe"].iloc[0]) else None
                             roe = float(row["roe_y0"].iloc[0]) if len(row) and "roe_y0" in row.columns and pd.notna(row["roe_y0"].iloc[0]) else None
                             score = int(row["score"].iloc[0]) if len(row) and pd.notna(row["score"].iloc[0]) else None
                             sector = stock.get("sector", "") or (str(row["sector"].iloc[0]) if len(row) and "sector" in row.columns and pd.notna(row["sector"].iloc[0]) else "")
-    
                             stocks_for_alloc.append({
-                                "ticker": ticker,
-                                "name": stock.get("name", ""),
-                                "sector": sector,
-                                "allocation_pct": stock.get("allocation_pct", 0),
-                                "price": price,
-                                "pe": pe,
-                                "roe": roe,
-                                "score": score,
+                                "ticker": ticker, "name": stock.get("name", ""), "sector": sector,
+                                "allocation_pct": stock.get("allocation_pct", 0), "price": price,
+                                "pe": pe, "roe": roe, "score": score,
                             })
-    
                         allocated, unallocated = allocate_shares(stocks_for_alloc, portfolio["sip_amount"])
-    
                         for s in allocated:
                             sb.table("holdings").insert({
-                                "portfolio_id": portfolio_id,
-                                "ticker": s["ticker"],
-                                "name": s["name"],
-                                "sector": s["sector"],
-                                "allocation_pct": s["allocation_pct"],
-                                "shares": s["shares"],
-                                "sip_amount_inr": s["actual_amount"],
-                                "price_at_entry": s["price"],
-                                "pe_at_entry": s["pe"],
-                                "roe_at_entry": s["roe"],
-                                "score_at_entry": s["score"],
+                                "portfolio_id": portfolio_id, "ticker": s["ticker"], "name": s["name"],
+                                "sector": s["sector"], "allocation_pct": s["allocation_pct"], "shares": s["shares"],
+                                "sip_amount_inr": s["actual_amount"], "price_at_entry": s["price"],
+                                "pe_at_entry": s["pe"], "roe_at_entry": s["roe"], "score_at_entry": s["score"],
                             }).execute()
-    
                         st.success(f"Portfolio saved! Invested ₹{portfolio['sip_amount'] - unallocated:,.0f} of ₹{portfolio['sip_amount']:,}.")
                         if unallocated > 0:
                             st.info(f"₹{unallocated:,.0f} unallocated (not enough for another share of any holding).")
-    
-                        # Show actual share breakdown
                         breakdown_data = []
                         for s in allocated:
                             breakdown_data.append({
-                                "Stock": s["name"] or s["ticker"],
-                                "Price": f"₹{s['price']:,.2f}",
-                                "Shares": s["shares"],
-                                "Invested": f"₹{s['actual_amount']:,.0f}",
+                                "Stock": s["name"] or s["ticker"], "Price": f"₹{s['price']:,.2f}",
+                                "Shares": s["shares"], "Invested": f"₹{s['actual_amount']:,.0f}",
                                 "Target": f"₹{portfolio['sip_amount'] * s['allocation_pct'] / 100:,.0f}",
                             })
                         st.dataframe(pd.DataFrame(breakdown_data), hide_index=True, use_container_width=True)
                         st.session_state.pending_portfolio = None
-    
                     except Exception as e:
                         st.error(f"Save failed: {e}")
-    
-        # Handle new input (renders inside container = above buttons)
+
         if prompt:
             st.session_state.messages.append({"role": "user", "content": prompt})
-
             with st.chat_message("user", avatar=USER_AVATAR):
                 st.markdown(prompt)
-
             with st.chat_message("assistant", avatar=AGENT_AVATAR):
                 response_placeholder = st.empty()
                 answer = None
@@ -2507,65 +2469,33 @@ if st.session_state.sb_view_mode == "chat":
                             rewritten_directive = intercept_and_rewrite_query(prompt)
                         else:
                             rewritten_directive = prompt
-
                         answer, model_used = agent_turn(rewritten_directive)
-
                     except Exception as e:
                         error_msg = str(e)
                         if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg or "All models rate-limited" in error_msg:
                             st.warning("API limit reached. Using fallback system...")
                             fallback_answer = fallback_router(prompt)
                             response_placeholder.markdown(fallback_answer)
-                            st.session_state.messages.append({
-                                "role": "assistant",
-                                "content": f"*(Fallback)*\n\n{fallback_answer}",
-                            })
+                            st.session_state.messages.append({"role": "assistant", "content": f"*(Fallback)*\n\n{fallback_answer}"})
                         else:
                             st.error(f"Error: {error_msg[:150]}")
                             if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
                                 st.session_state.messages.pop()
                             st.session_state.pending_retry = prompt
-
                 if answer:
                     response_placeholder.markdown(answer)
                     st.caption(f"⚡ {model_used} | Routed via Interceptor")
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": answer,
-                        "model": model_used,
-                    })
+                    st.session_state.messages.append({"role": "assistant", "content": answer, "model": model_used})
                     if st.session_state.get("pending_portfolio"):
                         st.rerun()
 
-                if answer:
-                    response_placeholder.markdown(answer)
-                    st.caption(f"⚡ {model_used} | Routed via Interceptor")
-
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": answer,
-                        "model": model_used,
-                    })
-                    if st.session_state.get("pending_portfolio"):
-                        st.rerun()
-
-        # ── Retry button ──
         if st.session_state.get("pending_retry"):
             if st.button("🔄 Retry last query", use_container_width=True):
                 st.session_state.pending_prompt = st.session_state.pop("pending_retry")
                 st.rerun()
-                            # Remove the failed user message so history stays clean
-                            if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
-                                st.session_state.messages.pop()
-                            st.session_state.pending_retry = prompt
-
 
 else:
-    # ══════════════════════════════════════════════
-    # PORTFOLIO DASHBOARD
-    # ══════════════════════════════════════════════
     st.markdown("### 📁 My Portfolios")
-
     sb = get_supabase()
     try:
         port_resp = sb.table("portfolios").select("*").eq(
@@ -2590,12 +2520,8 @@ else:
                     f"Review: every {port.get('review_freq', '90')} days · "
                     f"Next: {port.get('next_review_date', '—')}"
                 )
-
-                # Fetch holdings
                 try:
-                    hold_resp = sb.table("holdings").select("*").eq(
-                        "portfolio_id", port["id"]
-                    ).execute()
+                    hold_resp = sb.table("holdings").select("*").eq("portfolio_id", port["id"]).execute()
                     holdings = hold_resp.data
                 except Exception:
                     holdings = []
@@ -2603,25 +2529,15 @@ else:
                 if holdings:
                     hold_df = pd.DataFrame(holdings)
                     display_cols = {
-                        "name": "Stock",
-                        "ticker": "Ticker",
-                        "sector": "Sector",
-                        "shares": "Shares",
-                        "price_at_entry": "Entry Price",
-                        "sip_amount_inr": "Invested",
-                        "allocation_pct": "Alloc %",
-                        "score_at_entry": "Score",
+                        "name": "Stock", "ticker": "Ticker", "sector": "Sector", "shares": "Shares",
+                        "price_at_entry": "Entry Price", "sip_amount_inr": "Invested",
+                        "allocation_pct": "Alloc %", "score_at_entry": "Score",
                     }
                     available = {k: v for k, v in display_cols.items() if k in hold_df.columns}
-                    st.dataframe(
-                        hold_df[list(available.keys())].rename(columns=available),
-                        hide_index=True,
-                        use_container_width=True,
-                    )
+                    st.dataframe(hold_df[list(available.keys())].rename(columns=available), hide_index=True, use_container_width=True)
                 else:
                     st.caption("No holdings found.")
 
-                # ── Review Section ──
                 today = datetime.date.today()
                 review_date = None
                 if port.get("next_review_date"):
@@ -2632,7 +2548,6 @@ else:
 
                 if review_date and holdings:
                     days_until = (review_date - today).days
-
                     if days_until > 7:
                         st.caption(f"📅 Next review in {days_until} days ({review_date.isoformat()})")
                     else:
@@ -2648,27 +2563,22 @@ else:
                                 review_rows = []
                                 total_entry = 0
                                 total_current = 0
-
                                 for h in holdings:
                                     ticker = h["ticker"]
                                     entry_price = h.get("price_at_entry") or 0
                                     entry_score = h.get("score_at_entry") or 0
                                     shares = h.get("shares") or 0
-
                                     try:
                                         cinfo = yf.Ticker(ticker).info
                                         now_price = cinfo.get("currentPrice") or cinfo.get("regularMarketPrice") or 0
                                     except Exception:
                                         now_price = 0
-
                                     urow = universe_df[universe_df["ticker"] == ticker]
                                     now_score = int(urow["score"].iloc[0]) if len(urow) and pd.notna(urow["score"].iloc[0]) else 0
-
                                     pnl = (now_price - entry_price) * shares if entry_price > 0 else 0
                                     ret = ((now_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
                                     total_entry += entry_price * shares
                                     total_current += now_price * shares
-
                                     sc = now_score - entry_score
                                     if now_score <= 1 and entry_score >= 3:
                                         action = f"🔴 SELL ALL ({shares})"
@@ -2686,35 +2596,23 @@ else:
                                     else:
                                         action = "🟢 BUY MORE"
                                         reason = "Score improved. Consider adding."
-
                                     review_rows.append({
-                                        "Stock": h.get("name") or ticker,
-                                        "Shares": shares,
-                                        "Entry": f"₹{entry_price:,.2f}",
-                                        "Now": f"₹{now_price:,.2f}",
-                                        "P&L": f"₹{pnl:,.0f}",
-                                        "Return": f"{ret:+.1f}%",
-                                        "Score": f"{entry_score}→{now_score}",
-                                        "Action": action,
-                                        "_reason": reason,
+                                        "Stock": h.get("name") or ticker, "Shares": shares,
+                                        "Entry": f"₹{entry_price:,.2f}", "Now": f"₹{now_price:,.2f}",
+                                        "P&L": f"₹{pnl:,.0f}", "Return": f"{ret:+.1f}%",
+                                        "Score": f"{entry_score}→{now_score}", "Action": action, "_reason": reason,
                                     })
-
                                 st.session_state[f"review_data_{port['id']}"] = {
-                                    "rows": review_rows,
-                                    "total_entry": total_entry,
-                                    "total_current": total_current,
-                                    "holdings": holdings,
+                                    "rows": review_rows, "total_entry": total_entry,
+                                    "total_current": total_current, "holdings": holdings,
                                 }
-
                                 try:
                                     next_days = int(port.get("review_freq", 90))
                                 except (ValueError, TypeError):
                                     next_days = 90
                                 new_review = (today + datetime.timedelta(days=next_days)).isoformat()
                                 try:
-                                    sb.table("portfolios").update(
-                                        {"next_review_date": new_review}
-                                    ).eq("id", port["id"]).execute()
+                                    sb.table("portfolios").update({"next_review_date": new_review}).eq("id", port["id"]).execute()
                                 except Exception:
                                     pass
 
@@ -2724,35 +2622,28 @@ else:
                     total_entry = review_state["total_entry"]
                     total_current = review_state["total_current"]
                     rev_holdings = review_state["holdings"]
-
                     port_pnl = total_current - total_entry
                     port_ret = (port_pnl / total_entry * 100) if total_entry > 0 else 0
-
                     m1, m2, m3 = st.columns(3)
                     m1.metric("Invested", f"₹{total_entry:,.0f}")
                     m2.metric("Current Value", f"₹{total_current:,.0f}")
                     m3.metric("Total Return", f"{port_ret:+.1f}%", delta=f"₹{port_pnl:,.0f}")
-
                     display_df = pd.DataFrame(review_rows).drop(columns=["_reason"])
                     st.dataframe(display_df, hide_index=True, use_container_width=True)
-
                     for r in review_rows:
                         if "SELL" in r["Action"]:
                             st.error(f"**{r['Stock']}** — {r['Action']}: {r['_reason']} (Score {r['Score']})")
                         elif "BUY" in r["Action"]:
                             st.success(f"**{r['Stock']}** — {r['_reason']} (Score {r['Score']})")
 
-                    action_stocks = [(i, r) for i, r in enumerate(review_rows)
-                                     if "SELL" in r["Action"] or "BUY" in r["Action"]]
+                    action_stocks = [(i, r) for i, r in enumerate(review_rows) if "SELL" in r["Action"] or "BUY" in r["Action"]]
                     sell_stocks = [(i, r) for i, r in enumerate(review_rows) if "SELL" in r["Action"]]
 
                     if action_stocks:
                         st.markdown("---")
                         st.caption("Update what you actually did at your broker:")
-
                         for idx, r in action_stocks:
                             h = rev_holdings[idx]
-
                             if "SELL" in r["Action"]:
                                 if "SELL ALL" in r["Action"]:
                                     default_sell = h.get("shares") or 0
@@ -2763,37 +2654,23 @@ else:
                                         default_sell = 0
                                 st.number_input(
                                     f"🔴 {r['Stock']} — shares sold (of {h.get('shares', 0)})",
-                                    min_value=0, max_value=h.get("shares") or 0,
-                                    value=default_sell,
+                                    min_value=0, max_value=h.get("shares") or 0, value=default_sell,
                                     key=f"sold_{port['id']}_{h['id']}"
                                 )
-
                             elif "BUY" in r["Action"]:
                                 c1, c2 = st.columns(2)
                                 with c1:
-                                    st.number_input(
-                                        f"🟢 {r['Stock']} — shares bought",
-                                        min_value=0, value=0,
-                                        key=f"add_qty_{port['id']}_{h['id']}"
-                                    )
+                                    st.number_input(f"🟢 {r['Stock']} — shares bought", min_value=0, value=0, key=f"add_qty_{port['id']}_{h['id']}")
                                 with c2:
-                                    st.number_input(
-                                        f"🟢 {r['Stock']} — price paid (₹)",
-                                        min_value=0.0, value=0.0, format="%.2f",
-                                        key=f"add_price_{port['id']}_{h['id']}"
-                                    )
+                                    st.number_input(f"🟢 {r['Stock']} — price paid (₹)", min_value=0.0, value=0.0, format="%.2f", key=f"add_price_{port['id']}_{h['id']}")
 
-                        # ── Replacement candidates if sells exist ──
                         if sell_stocks:
-                            # Calculate freed capital
                             freed = 0
                             for idx, r in sell_stocks:
                                 h = rev_holdings[idx]
                                 sell_qty = st.session_state.get(f"sold_{port['id']}_{h['id']}", 0)
                                 price = float(r["Now"].replace("₹", "").replace(",", ""))
                                 freed += sell_qty * price
-
-                            # Get remaining portfolio sectors (after sells)
                             remaining_sectors = []
                             for i, h in enumerate(rev_holdings):
                                 is_sell = any(si == i for si, _ in sell_stocks)
@@ -2803,50 +2680,32 @@ else:
                                     sold_qty = st.session_state.get(f"sold_{port['id']}_{h['id']}", 0)
                                     if (h.get("shares") or 0) - sold_qty > 0:
                                         remaining_sectors.append(h.get("sector", ""))
-
                             all_tickers = [h["ticker"] for h in rev_holdings]
                             candidates = find_replacement_candidates(
-                                port.get("investor_type", "balanced"),
-                                port.get("time_horizon", "medium"),
-                                all_tickers,
-                                remaining_sectors
+                                port.get("investor_type", "balanced"), port.get("time_horizon", "medium"),
+                                all_tickers, remaining_sectors
                             )
-
                             if candidates:
                                 st.markdown("---")
                                 st.markdown(f"**Replacement candidates** (≈₹{freed:,.0f} freed from sells)")
-
                                 cand_df = pd.DataFrame(candidates)
                                 cand_display = cand_df[["name", "ticker", "sector", "price", "score", "pe", "roe_pct"]].rename(columns={
                                     "name": "Stock", "ticker": "Ticker", "sector": "Sector",
                                     "price": "Price", "score": "Score", "pe": "P/E", "roe_pct": "ROE %"
                                 })
                                 st.dataframe(cand_display, hide_index=True, use_container_width=True)
-
                                 for c in candidates:
                                     col_sel, col_qty, col_px = st.columns([1, 2, 2])
                                     with col_sel:
-                                        st.checkbox(
-                                            c["name"][:15],
-                                            key=f"repl_sel_{port['id']}_{c['ticker']}",
-                                            value=False
-                                        )
+                                        st.checkbox(c["name"][:15], key=f"repl_sel_{port['id']}_{c['ticker']}", value=False)
                                     with col_qty:
-                                        st.number_input(
-                                            f"Shares", min_value=0, value=0,
-                                            key=f"repl_qty_{port['id']}_{c['ticker']}"
-                                        )
+                                        st.number_input(f"Shares", min_value=0, value=0, key=f"repl_qty_{port['id']}_{c['ticker']}")
                                     with col_px:
-                                        st.number_input(
-                                            f"Price (₹)", min_value=0.0,
-                                            value=float(c["price"]), format="%.2f",
-                                            key=f"repl_px_{port['id']}_{c['ticker']}"
-                                        )
+                                        st.number_input(f"Price (₹)", min_value=0.0, value=float(c["price"]), format="%.2f", key=f"repl_px_{port['id']}_{c['ticker']}")
 
                         if st.button("✅ Portfolio Updated", key=f"apply_{port['id']}", use_container_width=True):
                             for i, r in enumerate(review_rows):
                                 h = rev_holdings[i]
-
                                 if "SELL" in r["Action"]:
                                     sold = st.session_state.get(f"sold_{port['id']}_{h['id']}", 0)
                                     if sold > 0:
@@ -2856,11 +2715,7 @@ else:
                                             sb.table("holdings").delete().eq("id", h["id"]).execute()
                                         else:
                                             new_invested = new_shares * (h.get("price_at_entry") or 0)
-                                            sb.table("holdings").update({
-                                                "shares": new_shares,
-                                                "sip_amount_inr": round(new_invested, 2),
-                                            }).eq("id", h["id"]).execute()
-
+                                            sb.table("holdings").update({"shares": new_shares, "sip_amount_inr": round(new_invested, 2)}).eq("id", h["id"]).execute()
                                 elif "BUY" in r["Action"]:
                                     new_qty = st.session_state.get(f"add_qty_{port['id']}_{h['id']}", 0)
                                     buy_price = st.session_state.get(f"add_price_{port['id']}_{h['id']}", 0.0)
@@ -2869,39 +2724,23 @@ else:
                                         old_price = h.get("price_at_entry") or 0
                                         total_shares = old_shares + new_qty
                                         avg_price = ((old_shares * old_price) + (new_qty * buy_price)) / total_shares
-                                        sb.table("holdings").update({
-                                            "shares": total_shares,
-                                            "price_at_entry": round(avg_price, 2),
-                                            "sip_amount_inr": round(total_shares * avg_price, 2),
-                                        }).eq("id", h["id"]).execute()
-
-                            # Insert replacement stocks
+                                        sb.table("holdings").update({"shares": total_shares, "price_at_entry": round(avg_price, 2), "sip_amount_inr": round(total_shares * avg_price, 2)}).eq("id", h["id"]).execute()
                             if sell_stocks:
                                 for c in candidates:
                                     selected = st.session_state.get(f"repl_sel_{port['id']}_{c['ticker']}", False)
                                     qty = st.session_state.get(f"repl_qty_{port['id']}_{c['ticker']}", 0)
                                     px = st.session_state.get(f"repl_px_{port['id']}_{c['ticker']}", 0.0)
-
                                     if selected and qty > 0 and px > 0:
                                         urow = universe_df[universe_df["ticker"] == c["ticker"]]
-                                        score = int(urow["score"].iloc[0]) if len(urow) and pd.notna(urow["score"].iloc[0]) else None
-                                        pe = float(urow["pe"].iloc[0]) if len(urow) and pd.notna(urow["pe"].iloc[0]) else None
-                                        roe = float(urow["roe_y0"].iloc[0]) if len(urow) and "roe_y0" in urow.columns and pd.notna(urow["roe_y0"].iloc[0]) else None
-
+                                        sc_val = int(urow["score"].iloc[0]) if len(urow) and pd.notna(urow["score"].iloc[0]) else None
+                                        pe_val = float(urow["pe"].iloc[0]) if len(urow) and pd.notna(urow["pe"].iloc[0]) else None
+                                        roe_val = float(urow["roe_y0"].iloc[0]) if len(urow) and "roe_y0" in urow.columns and pd.notna(urow["roe_y0"].iloc[0]) else None
                                         sb.table("holdings").insert({
-                                            "portfolio_id": port["id"],
-                                            "ticker": c["ticker"],
-                                            "name": c["name"],
-                                            "sector": c["sector"],
-                                            "allocation_pct": 0,
-                                            "shares": qty,
-                                            "sip_amount_inr": round(qty * px, 2),
-                                            "price_at_entry": round(px, 2),
-                                            "pe_at_entry": pe,
-                                            "roe_at_entry": roe,
-                                            "score_at_entry": score,
+                                            "portfolio_id": port["id"], "ticker": c["ticker"], "name": c["name"],
+                                            "sector": c["sector"], "allocation_pct": 0, "shares": qty,
+                                            "sip_amount_inr": round(qty * px, 2), "price_at_entry": round(px, 2),
+                                            "pe_at_entry": pe_val, "roe_at_entry": roe_val, "score_at_entry": sc_val,
                                         }).execute()
-
                             st.session_state.pop(f"review_data_{port['id']}", None)
                             st.success("Portfolio updated.")
                             st.rerun()
@@ -2910,25 +2749,17 @@ else:
                         st.session_state.pop(f"review_data_{port['id']}", None)
                         st.rerun()
 
-                # Rename & Delete
                 col_r, col_d = st.columns([3, 1])
                 with col_r:
-                    new_name = st.text_input(
-                        "Rename", value=port["name"],
-                        key=f"rename_{port['id']}",
-                        label_visibility="collapsed"
-                    )
+                    new_name = st.text_input("Rename", value=port["name"], key=f"rename_{port['id']}", label_visibility="collapsed")
                     if new_name != port["name"]:
                         if st.button("Save Name", key=f"save_name_{port['id']}"):
                             try:
-                                sb.table("portfolios").update(
-                                    {"name": new_name}
-                                ).eq("id", port["id"]).execute()
+                                sb.table("portfolios").update({"name": new_name}).eq("id", port["id"]).execute()
                                 st.success("Renamed!")
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Rename failed: {e}")
-
                 with col_d:
                     if st.button("🗑️ Delete", key=f"delete_{port['id']}", type="secondary"):
                         st.session_state[f"confirm_delete_{port['id']}"] = True
@@ -2939,12 +2770,8 @@ else:
                     with c1:
                         if st.button("Yes, delete", key=f"confirm_yes_{port['id']}"):
                             try:
-                                sb.table("holdings").delete().eq(
-                                    "portfolio_id", port["id"]
-                                ).execute()
-                                sb.table("portfolios").delete().eq(
-                                    "id", port["id"]
-                                ).execute()
+                                sb.table("holdings").delete().eq("portfolio_id", port["id"]).execute()
+                                sb.table("portfolios").delete().eq("id", port["id"]).execute()
                                 st.session_state.pop(f"confirm_delete_{port['id']}", None)
                                 st.success("Deleted.")
                                 st.rerun()
