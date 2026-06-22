@@ -2557,7 +2557,12 @@ def intercept_and_rewrite_query(user_query: str) -> str:
     DO NOT ANSWER THE QUESTION. ONLY OUTPUT THE DIRECTIVE.
     """
     try:
-        for model_name in FREE_MODELS:
+        last_good = st.session_state.get("last_working_model")
+        if last_good and last_good in FREE_MODELS:
+            models_to_try = [last_good] + [m for m in FREE_MODELS if m != last_good]
+        else:
+            models_to_try = FREE_MODELS
+        for model_name in models_to_try:
             try:
                 response = client.models.generate_content(
                     model=model_name,
@@ -2593,7 +2598,13 @@ def agent_turn(user_message):
     history = sanitize_history(raw_history)
 
     last_error = None
-    for model_name in FREE_MODELS:
+    # Prioritize the model that worked last turn
+    last_good = st.session_state.get("last_working_model")
+    if last_good and last_good in FREE_MODELS:
+        models_to_try = [last_good] + [m for m in FREE_MODELS if m != last_good]
+    else:
+        models_to_try = FREE_MODELS
+    for model_name in models_to_try:
         try:
             # --- PHASE 1: ANALYST DRAFTS THESIS ---
             analyst_chat = client.chats.create(
@@ -2683,10 +2694,12 @@ def agent_turn(user_message):
                 st.session_state.chat_history = analyst_chat.get_history()
                 
                 # Append an internal note to the UI so the user sees the system working
+                st.session_state.last_working_model = model_name
                 return f"*(Internal Audit Triggered: Adjusted thesis based on earnings quality)*\n\n{final_response.text}", model_name
             else:
                 # Auditor approved
                 st.session_state.chat_history = analyst_chat.get_history()
+                st.session_state.last_working_model = model_name
                 return draft_text, model_name
 
         except Exception as e:
