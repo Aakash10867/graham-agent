@@ -210,7 +210,21 @@ def build_review_context(holdings, port):
         score_change = now_score - entry_score
         market_relative = round(stock_return - nifty_return, 2) if nifty_return is not None else None
         roe_declining = len(roe_trend) >= 3 and roe_trend[0] < roe_trend[-1]
-        has_red_flags = any("RED FLAG" in f for f in quality_flags) if isinstance(quality_flags, list) else False
+        live_red = any("RED FLAG" in f for f in quality_flags) if isinstance(quality_flags, list) else False
+        
+        # CSV quality_pass is deterministic — computed monthly, doesn't shift between calls
+        csv_red = False
+        if len(urow) and "quality_pass" in urow.columns:
+            qp_val = urow["quality_pass"].iloc[0]
+            if pd.notna(qp_val) and qp_val == False:
+                csv_red = True
+                if not live_red:
+                    quality_flags.append(
+                        "RED FLAG: Monthly pre-screen flagged quality failure "
+                        "(live check returned clean — yfinance data inconsistency)."
+                    )
+        
+        has_red_flags = live_red or csv_red
 
         # Pattern-specific book query
         if has_red_flags:
@@ -3400,6 +3414,18 @@ elif st.session_state.sb_view_mode == "portfolios":
 
                     display_df = pd.DataFrame(review_rows).drop(columns=[c for c in review_rows[0] if c.startswith("_")])
                     st.dataframe(display_df, hide_index=True, use_container_width=True)
+
+                    # Per-stock reasoning with book grounding
+                    # Raw quality data — so yfinance inconsistencies are visible
+                    enriched_data = review_state.get("enriched", [])
+                    for r in review_rows:
+                        matching = next((h for h in enriched_data if h.get("ticker") == r["_ticker"]), None)
+                        if matching:
+                            with st.expander(f"🔬 {r['Stock']} — Raw Quality Check"):
+                                st.caption(f"Flags: {matching.get('quality_flags', 'N/A')}")
+                                st.caption(f"Cash conversion: {matching.get('cash_conversion', 'N/A')}")
+                                st.caption(f"has_red_flags: {matching.get('has_red_flags', False)}")
+                                st.caption(f"ROE trend: {matching.get('roe_trend', [])}")
 
                     # Per-stock reasoning with book grounding
                     for r in review_rows:
