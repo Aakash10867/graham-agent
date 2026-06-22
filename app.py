@@ -88,7 +88,7 @@ def allocate_shares(stocks, sip_amount):
 
     return result, round(remaining, 2)
 
-def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None):
+def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None, chart_buf=None, narrative=None):
     """Generate a professional PDF report for a portfolio."""
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
@@ -211,6 +211,15 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None):
             ))
             story.append(Spacer(1, 4*mm))
 
+    # ── Growth Chart ──
+    if chart_buf:
+        from reportlab.platypus import Image as RLImage
+        story.append(Paragraph("Growth vs Market", heading_style))
+        chart_buf.seek(0)
+        chart_img = RLImage(chart_buf, width=160*mm, height=70*mm)
+        story.append(chart_img)
+        story.append(Spacer(1, 4*mm))
+
     # ── Performance vs Nifty ──
     if history_data and len(history_data) >= 2:
         story.append(Paragraph("Performance", heading_style))
@@ -237,6 +246,24 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None):
             story.append(Paragraph(f"[{icon}] {a['headline']}", body_style))
         story.append(Spacer(1, 4*mm))
 
+    # ── Investment Analysis ──
+    if narrative:
+        from reportlab.platypus import PageBreak
+        story.append(PageBreak())
+        story.append(Paragraph("Investment Analysis", heading_style))
+        story.append(Spacer(1, 2*mm))
+        for line in narrative.split("\n"):
+            line = line.strip()
+            if not line:
+                story.append(Spacer(1, 2*mm))
+            elif line.isupper() or line.endswith(":"):
+                bold_style = ParagraphStyle("BoldLine", parent=body_style, fontName="Helvetica-Bold",
+                                             fontSize=11, spaceBefore=6, spaceAfter=2)
+                story.append(Paragraph(line, bold_style))
+            else:
+                story.append(Paragraph(line.replace("&", "&amp;"), body_style))
+        story.append(Spacer(1, 6*mm))
+
     # ── Disclaimer ──
     story.append(Spacer(1, 10*mm))
     story.append(Paragraph(
@@ -249,6 +276,153 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None):
     doc.build(story)
     buffer.seek(0)
     return buffer.getvalue()
+
+def generate_portfolio_chart(history_data):
+    """Render portfolio growth chart as PNG bytes for PDF embedding."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    import matplotlib.dates as mdates
+    import io
+
+    if not history_data or len(history_data) < 2:
+        return None
+
+    df = pd.DataFrame(history_data)
+    df["date"] = pd.to_datetime(df["date"])
+
+    # Normalize to % return from day 1
+    port_base = df["total_value"].iloc[0]
+    df["portfolio_pct"] = ((df["total_value"] / port_base) - 1) * 100 if port_base > 0 else 0
+
+    has_nifty = "nifty_value" in df.columns and df["nifty_value"].notna().sum() >= 2
+    if has_nifty:
+        nifty_base = df["nifty_value"].dropna().iloc[0]
+        df["nifty_pct"] = ((df["nifty_value"] / nifty_base) - 1) * 100 if nifty_base > 0 else 0
+
+    fig, ax = plt.subplots(figsize=(6.5, 2.8), dpi=150)
+
+    ax.plot(df["date"], df["portfolio_pct"], color="#1D4ED8", linewidth=2, label="Portfolio")
+    if has_nifty:
+        ax.plot(df["date"], df["nifty_pct"], color="#9CA3AF", linewidth=1.5, linestyle="--", label="Nifty 50")
+
+    ax.set_ylabel("Return %", fontsize=9, color="#374151")
+    ax.tick_params(labelsize=8, colors="#6B7280")
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
+    ax.axhline(y=0, color="#E5E7EB", linewidth=0.8)
+    ax.legend(fontsize=8, loc="upper left", framealpha=0.9)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color("#E5E7EB")
+    ax.spines["bottom"].set_color("#E5E7EB")
+    ax.set_facecolor("white")
+    fig.patch.set_facecolor("white")
+
+    plt.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
+def generate_portfolio_narrative(portfolio, holdings, collection):
+    """Generate LLM-written investment thesis using book RAG."""
+    client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+
+    # ── Gather book passages for each holding ──
+    stock_contexts = []
+    for h in holdings:
+        sector = h.get("sector", "unknown")
+        name = h.get("name", h.get("ticker", ""))
+        query = f"{sector} stock investment analysis valuation"
+
+        try:
+            passages = collection.query(query_texts=[query], n_results=3)
+            book_text = "\n".join(passages["documents"][0][:2])  # top 2 passages
+        except Exception:
+            book_text = ""
+
+        stock_contexts.append({
+            "name": name,
+            "ticker": h.get("ticker"),
+            "sector": sector,
+            "entry_price": h.get("price_at_entry"),
+            "shares": h.get("shares"),
+            "allocation_pct": h.get("allocation_pct"),
+            "invested": h.get("sip_amount_inr"),
+            "score": h.get("score_at_entry"),
+            "book_passages": book_text,
+        })
+
+    # ── Portfolio-level book passages ──
+    portfolio_type = portfolio.get("investor_type", "balanced")
+    try:
+        port_passages = collection.query(
+            query_texts=[f"{portfolio_type} investor portfolio construction diversification sector allocation"],
+            n_results=3
+        )
+        portfolio_book_text = "\n".join(port_passages["documents"][0][:2])
+    except Exception:
+        portfolio_book_text = ""
+
+    # ── Sector distribution ──
+    from collections import Counter
+    sector_dist = Counter(h.get("sector", "Unknown") for h in holdings)
+    sector_summary = ", ".join(f"{s}: {c} stocks" for s, c in sector_dist.most_common())
+
+    # ── Build prompt ──
+    stocks_block = ""
+    for s in stock_contexts:
+        stocks_block += f"""
+--- {s['name']} ({s['ticker']}) ---
+Sector: {s['sector']} | Entry: Rs.{s['entry_price']} | Shares: {s['shares']} | Allocation: {s['allocation_pct']}% | Score: {s['score']}/4
+Relevant book passages:
+{s['book_passages'][:800]}
+"""
+
+    prompt = f"""You are DeepMoat's Chief Investment Analyst writing a portfolio report.
+Portfolio: {portfolio.get('name')} | Type: {portfolio_type} | Horizon: {portfolio.get('time_horizon')} | SIP: Rs.{portfolio.get('sip_amount', 0):,}/month
+Sector distribution: {sector_summary}
+
+HOLDINGS:
+{stocks_block}
+
+PORTFOLIO-LEVEL BOOK CONTEXT:
+{portfolio_book_text[:800]}
+
+Write a professional investment analysis with these sections:
+
+1. PORTFOLIO THESIS (2-3 sentences: what this portfolio is designed to do)
+
+2. STOCK-BY-STOCK ANALYSIS (for each stock):
+   - Why it was selected (connect to its score and the investment frameworks)
+   - Key strength (grounded in book principles — cite which book/concept)
+   - Key risk (be honest about what could go wrong — cite relevant book warnings)
+
+3. PORTFOLIO-LEVEL ASSESSMENT:
+   - Sector concentration risk (is it too concentrated? what do the books say?)
+   - Diversification quality
+   - Alignment with the stated investor type and time horizon
+   - One specific improvement recommendation grounded in the books
+
+Be direct. No filler. Use Rs. for currency. Do not use markdown formatting — plain text only, use line breaks for structure."""
+
+    try:
+        for model_name in FREE_MODELS:
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                )
+                return response.text
+            except Exception as e:
+                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                    continue
+                raise e
+        return "Analysis unavailable — all models rate-limited."
+    except Exception as e:
+        return f"Analysis unavailable: {e}"
 
 
 def find_replacement_candidates(investor_type, time_horizon, exclude_tickers, current_sectors):
@@ -3430,7 +3604,9 @@ elif st.session_state.sb_view_mode == "portfolios":
                     hist_for_pdf = sb.table("portfolio_history").select("*").eq("portfolio_id", port["id"]).order("date").execute().data or []
                     alerts_for_pdf = sb.table("portfolio_alerts").select("*").eq("portfolio_id", port["id"]).eq("is_read", False).execute().data or []
 
-                    pdf_bytes = generate_portfolio_pdf(port, hold_for_pdf, hist_for_pdf, alerts_for_pdf)
+                    chart_buf = generate_portfolio_chart(hist_for_pdf)
+                    narrative = generate_portfolio_narrative(port, hold_for_pdf, collection)
+                    pdf_bytes = generate_portfolio_pdf(port, hold_for_pdf, hist_for_pdf, alerts_for_pdf, chart_buf, narrative)
                     safe_name = re.sub(r'[^a-zA-Z0-9]', '_', port.get("name", "portfolio"))
                     st.download_button(
                         label="📄 Export Report",
