@@ -594,23 +594,6 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@700;900&family=Inter:wght@400;500;600&display=swap');
 
-/* ── Fix 1: Nuke the dark chat container ── */
-[data-testid="stChatInput"] {
-    background-color: #FFFFFF !important;
-    border: 1px solid #D1D5DB !important;
-    border-radius: 4px !important;
-    box-shadow: 2px 2px 0px rgba(0,0,0,0.05) !important;
-}
-
-[data-testid="stChatInput"] > div {
-    background-color: transparent !important;
-}
-
-/* Ensure the send arrow icon is visible */
-[data-testid="stChatInput"] button svg {
-    fill: #FFFFFF !important;
-}
-
 
 /* ── Base ── */
 .stApp {
