@@ -88,6 +88,167 @@ def allocate_shares(stocks, sip_amount):
 
     return result, round(remaining, 2)
 
+def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None):
+    """Generate a professional PDF report for a portfolio."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    import io
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=20*mm, bottomMargin=20*mm)
+    styles = getSampleStyleSheet()
+    story = []
+
+    # Custom styles
+    brand_blue = colors.HexColor("#1D4ED8")
+    light_gray = colors.HexColor("#F3F4F6")
+    dark_text = colors.HexColor("#111827")
+
+    title_style = ParagraphStyle("PDFTitle", parent=styles["Title"], fontSize=22,
+                                  textColor=brand_blue, spaceAfter=4)
+    heading_style = ParagraphStyle("PDFHeading", parent=styles["Heading2"], fontSize=13,
+                                    textColor=brand_blue, spaceBefore=14, spaceAfter=6)
+    body_style = ParagraphStyle("PDFBody", parent=styles["Normal"], fontSize=10,
+                                 textColor=dark_text, leading=14)
+    small_style = ParagraphStyle("PDFSmall", parent=styles["Normal"], fontSize=8,
+                                  textColor=colors.HexColor("#6B7280"), leading=10)
+
+    # ── Header ──
+    story.append(Paragraph("DeepMoat", title_style))
+    story.append(Paragraph("Portfolio Report", body_style))
+    story.append(Spacer(1, 4*mm))
+
+    today_str = datetime.date.today().strftime("%B %d, %Y")
+    story.append(Paragraph(f"Generated: {today_str}", small_style))
+    story.append(Spacer(1, 6*mm))
+
+    # ── Portfolio Summary ──
+    story.append(Paragraph("Portfolio Summary", heading_style))
+
+    sip = portfolio.get("sip_amount", 0)
+    current_val = portfolio.get("current_value", 0)
+    return_pct = portfolio.get("current_return_pct", 0)
+
+    summary_data = [
+        ["Name", portfolio.get("name", "—")],
+        ["Investor Type", portfolio.get("investor_type", "—")],
+        ["Time Horizon", portfolio.get("time_horizon", "—")],
+        ["Monthly SIP", f"Rs. {sip:,.0f}"],
+        ["Current Value", f"Rs. {current_val:,.2f}"],
+        ["Return", f"{return_pct:+.2f}%"],
+        ["Review Frequency", f"Every {portfolio.get('review_freq', 90)} days"],
+        ["Next Review", portfolio.get("next_review_date", "—")],
+    ]
+
+    summary_table = Table(summary_data, colWidths=[45*mm, 110*mm])
+    summary_table.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTNAME", (1, 0), (1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 0), (-1, -1), 10),
+        ("TEXTCOLOR", (0, 0), (0, -1), brand_blue),
+        ("TEXTCOLOR", (1, 0), (1, -1), dark_text),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("LINEBELOW", (0, -1), (-1, -1), 0.5, colors.HexColor("#E5E7EB")),
+    ]))
+    story.append(summary_table)
+    story.append(Spacer(1, 6*mm))
+
+    # ── Holdings Table ──
+    if holdings:
+        story.append(Paragraph("Holdings", heading_style))
+
+        header = ["Stock", "Ticker", "Shares", "Entry Price", "Invested", "Alloc %"]
+        rows = [header]
+        total_invested = 0
+
+        for h in holdings:
+            invested = h.get("sip_amount_inr", 0)
+            total_invested += invested
+            rows.append([
+                h.get("name", "—"),
+                h.get("ticker", "—"),
+                str(h.get("shares", 0)),
+                f"Rs. {h.get('price_at_entry', 0):,.2f}",
+                f"Rs. {invested:,.0f}",
+                f"{h.get('allocation_pct', 0)}%",
+            ])
+
+        rows.append(["", "", "", "", f"Rs. {total_invested:,.0f}", ""])
+
+        col_widths = [40*mm, 28*mm, 18*mm, 28*mm, 28*mm, 18*mm]
+        holdings_table = Table(rows, colWidths=col_widths)
+        holdings_table.setStyle(TableStyle([
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("BACKGROUND", (0, 0), (-1, 0), brand_blue),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("TEXTCOLOR", (0, 1), (-1, -1), dark_text),
+            ("ALIGN", (2, 0), (-1, -1), "RIGHT"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -2), [colors.white, light_gray]),
+            ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+            ("LINEABOVE", (0, -1), (-1, -1), 1, brand_blue),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#E5E7EB")),
+        ]))
+        story.append(holdings_table)
+        story.append(Spacer(1, 4*mm))
+
+        # P&L note
+        if current_val > 0 and total_invested > 0:
+            pnl = current_val - total_invested
+            pnl_str = f"Rs. {pnl:+,.2f}"
+            story.append(Paragraph(
+                f"Total Invested: Rs. {total_invested:,.0f} | "
+                f"Current Value: Rs. {current_val:,.2f} | "
+                f"P&amp;L: {pnl_str} ({return_pct:+.2f}%)", body_style
+            ))
+            story.append(Spacer(1, 4*mm))
+
+    # ── Performance vs Nifty ──
+    if history_data and len(history_data) >= 2:
+        story.append(Paragraph("Performance", heading_style))
+        first = history_data[0]
+        last = history_data[-1]
+        port_growth = ((last["total_value"] - first["total_value"]) / first["total_value"]) * 100 if first["total_value"] > 0 else 0
+        days = (datetime.date.fromisoformat(str(last["date"])) - datetime.date.fromisoformat(str(first["date"]))).days
+
+        perf_text = f"Portfolio grew {port_growth:+.1f}% over {days} days."
+
+        if first.get("nifty_value") and last.get("nifty_value"):
+            nifty_growth = ((last["nifty_value"] - first["nifty_value"]) / first["nifty_value"]) * 100
+            alpha = port_growth - nifty_growth
+            perf_text += f" Nifty 50: {nifty_growth:+.1f}%. Alpha: {alpha:+.1f}%."
+
+        story.append(Paragraph(perf_text, body_style))
+        story.append(Spacer(1, 4*mm))
+
+    # ── Active Alerts ──
+    if alerts:
+        story.append(Paragraph("Active Alerts", heading_style))
+        for a in alerts:
+            icon = {"danger": "DANGER", "opportunity": "OPPORTUNITY", "review_due": "REVIEW DUE"}.get(a["alert_type"], "ALERT")
+            story.append(Paragraph(f"[{icon}] {a['headline']}", body_style))
+        story.append(Spacer(1, 4*mm))
+
+    # ── Disclaimer ──
+    story.append(Spacer(1, 10*mm))
+    story.append(Paragraph(
+        "This report is auto-generated by DeepMoat for informational purposes only. "
+        "It does not constitute financial advice. Past performance does not guarantee future results. "
+        "Consult a qualified financial advisor before making investment decisions.",
+        small_style
+    ))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
 def find_replacement_candidates(investor_type, time_horizon, exclude_tickers, current_sectors):
     """Find replacement stocks when review flags sells."""
     df = universe_df.copy()
@@ -3260,6 +3421,25 @@ elif st.session_state.sb_view_mode == "portfolios":
                         st.caption("📈 Growth chart available after 2+ days of tracking.")
                 except Exception:
                     pass  # Fail silently if history table doesn't exist yet
+
+                # ── PDF Export ──
+                try:
+                    hold_for_pdf = sb.table("holdings").select("*").eq("portfolio_id", port["id"]).execute().data or []
+                    hist_for_pdf = sb.table("portfolio_history").select("*").eq("portfolio_id", port["id"]).order("date").execute().data or []
+                    alerts_for_pdf = sb.table("portfolio_alerts").select("*").eq("portfolio_id", port["id"]).eq("is_read", False).execute().data or []
+
+                    pdf_bytes = generate_portfolio_pdf(port, hold_for_pdf, hist_for_pdf, alerts_for_pdf)
+                    safe_name = re.sub(r'[^a-zA-Z0-9]', '_', port.get("name", "portfolio"))
+                    st.download_button(
+                        label="📄 Export Report",
+                        data=pdf_bytes,
+                        file_name=f"DeepMoat_{safe_name}_{datetime.date.today().isoformat()}.pdf",
+                        mime="application/pdf",
+                        key=f"pdf_export_{port['id']}",
+                        use_container_width=True,
+                    )
+                except Exception as e:
+                    st.caption(f"PDF export unavailable: {e}")
 
                 today = datetime.date.today()
                 _auto_key = f"auto_trigger_review_{port['id']}"
