@@ -723,6 +723,22 @@ div[data-testid="stAlert"] > div {
     border-bottom: 1px solid #E5E7EB !important;
 }
 
+/* ── Fix 10: Force Symmetric Rounded Corners on DataFrames ── */
+[data-testid="stDataFrame"] {
+    border-radius: 6px !important;
+    overflow: hidden !important; /* This acts like a cookie-cutter, clipping sharp inner corners */
+    border: 1px solid #E5E7EB !important;
+}
+
+[data-testid="stDataFrame"] > div {
+    border-radius: 6px !important;
+}
+
+/* Ensure the header row doesn't break the top-right curve */
+[data-testid="stDataFrame"] [data-baseweb="table"] {
+    border-radius: 6px !important;
+}
+
 
 /* ── Base ── */
 .stApp {
