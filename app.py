@@ -2414,7 +2414,6 @@ with chat_area:
                         })
                     st.dataframe(pd.DataFrame(breakdown_data), hide_index=True, use_container_width=True)
                     st.session_state.pending_portfolio = None
-                    st.rerun()
 
                 except Exception as e:
                     st.error(f"Save failed: {e}")
