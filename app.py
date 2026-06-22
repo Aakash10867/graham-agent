@@ -2153,8 +2153,11 @@ def agent_turn(user_message):
             )
 
             analyst_response = analyst_chat.send_message(user_message)
+            all_text_parts = []
 
             while analyst_response.function_calls:
+                if analyst_response.text:
+                    all_text_parts.append(analyst_response.text)
                 function_responses = []
                 for fc in analyst_response.function_calls:
                     if fc.name in tool_functions:
@@ -2166,7 +2169,9 @@ def agent_turn(user_message):
                     )
                 analyst_response = analyst_chat.send_message(function_responses)
 
-            draft_text = analyst_response.text
+            if analyst_response.text:
+                all_text_parts.append(analyst_response.text)
+            draft_text = "\n\n".join(all_text_parts)
 
             # --- PHASE 2: AUDITOR REVIEWS DRAFT (with independent data) ---
             # Extract tickers mentioned in draft and run quality checks
