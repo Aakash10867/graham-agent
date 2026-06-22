@@ -785,6 +785,7 @@ div[data-testid="stAlert"] > div {
 .stApp h1 {
     font-size: 2.2rem !important;
     padding-bottom: 2px;
+    text-transform: none !important;
 }
 
 [data-testid="stSidebar"] h3 {
