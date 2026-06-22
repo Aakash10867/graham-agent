@@ -3446,19 +3446,9 @@ elif st.session_state.sb_view_mode == "portfolios":
                     display_df = pd.DataFrame(review_rows).drop(columns=[c for c in review_rows[0] if c.startswith("_")])
                     st.dataframe(display_df, hide_index=True, use_container_width=True)
 
-                    # Per-stock reasoning with book grounding
-                    # Raw quality data — so yfinance inconsistencies are visible
-                    enriched_data = review_state.get("enriched", [])
-                    for r in review_rows:
-                        matching = next((h for h in enriched_data if h.get("ticker") == r["_ticker"]), None)
-                        if matching:
-                            with st.expander(f"🔬 {r['Stock']} — Raw Quality Check"):
-                                st.caption(f"Flags: {matching.get('quality_flags', 'N/A')}")
-                                st.caption(f"Cash conversion: {matching.get('cash_conversion', 'N/A')}")
-                                st.caption(f"has_red_flags: {matching.get('has_red_flags', False)}")
-                                st.caption(f"ROE trend: {matching.get('roe_trend', [])}")
 
-                    # Per-stock reasoning with book grounding
+                    # Per-stock reasoning with quality data
+                    enriched_data = review_state.get("enriched", [])
                     for r in review_rows:
                         if "SELL" in r["Action"]:
                             st.error(f"**{r['Stock']}** — {r['Action']}\n\n{r['_reasoning']}")
@@ -3466,6 +3456,13 @@ elif st.session_state.sb_view_mode == "portfolios":
                             st.success(f"**{r['Stock']}** — {r['Action']}\n\n{r['_reasoning']}")
                         else:
                             st.info(f"**{r['Stock']}** — {r['Action']}\n\n{r['_reasoning']}")
+                        matching = next((h for h in enriched_data if h.get("ticker") == r["_ticker"]), None)
+                        if matching:
+                            with st.expander(f"Quality Data: {r['Stock']}"):
+                                st.caption(f"Flags: {matching.get('quality_flags', 'N/A')}")
+                                st.caption(f"Cash conversion: {matching.get('cash_conversion', 'N/A')}")
+                                st.caption(f"has_red_flags: {matching.get('has_red_flags', False)}")
+                                st.caption(f"ROE trend: {matching.get('roe_trend', [])}")
                     # ── Update form — ALL holdings ──
                     sell_stocks = [(i, r) for i, r in enumerate(review_rows) if "SELL" in r["Action"]]
 
@@ -3560,14 +3557,29 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 "price": "Price", "score": "Score", "pe": "P/E", "roe_pct": "ROE %"
                             })
                             st.dataframe(cand_display, hide_index=True, use_container_width=True)
+                            st.caption("Shares pre-filled from freed capital. Set to 0 to skip a stock.")
+                            per_slot = freed / len(candidates) if candidates else 0
                             for c in candidates:
-                                col_sel, col_qty, col_px = st.columns([1, 2, 2])
-                                with col_sel:
-                                    st.checkbox(c["name"][:15], key=f"repl_sel_{port['id']}_{c['ticker']}", value=False)
+                                suggested = max(1, int(per_slot // c["price"])) if c["price"] > 0 else 0
+                                col_name, col_qty, col_px = st.columns([2, 1, 1])
+                                with col_name:
+                                    st.markdown(f"**{c['name'][:20]}** ({c['ticker']})")
                                 with col_qty:
-                                    st.number_input(f"Shares", min_value=0, value=0, key=f"repl_qty_{port['id']}_{c['ticker']}")
+                                    st.number_input("Shares", min_value=0, value=suggested, key=f"repl_qty_{port['id']}_{c['ticker']}")
                                 with col_px:
-                                    st.number_input(f"Price (₹)", min_value=0.0, value=float(c["price"]), format="%.2f", key=f"repl_px_{port['id']}_{c['ticker']}")
+                                    st.number_input("Price (₹)", min_value=0.0, value=float(c["price"]), format="%.2f", key=f"repl_px_{port['id']}_{c['ticker']}")
+                            # ── Budget tracker ──
+                            spent = 0
+                            for c in candidates:
+                                rq = st.session_state.get(f"repl_qty_{port['id']}_{c['ticker']}", 0)
+                                rp = st.session_state.get(f"repl_px_{port['id']}_{c['ticker']}", 0.0)
+                                if rq > 0:
+                                    spent += rq * rp
+                            remaining = freed - spent
+                            if remaining >= 0:
+                                st.caption(f"💰 ₹{freed:,.0f} freed — ₹{spent:,.0f} allocated = ₹{remaining:,.0f} remaining")
+                            else:
+                                st.warning(f"Over-allocated by ₹{abs(remaining):,.0f}. Freed: ₹{freed:,.0f}, Allocated: ₹{spent:,.0f}")
 
                     # ── Single update button ──
                     if st.button("✅ Portfolio Updated", key=f"apply_{port['id']}", use_container_width=True):
@@ -3606,10 +3618,9 @@ elif st.session_state.sb_view_mode == "portfolios":
                                         }).eq("id", h_id).execute()
                         if sell_stocks and candidates:
                             for c in candidates:
-                                selected = st.session_state.get(f"repl_sel_{port['id']}_{c['ticker']}", False)
                                 qty = st.session_state.get(f"repl_qty_{port['id']}_{c['ticker']}", 0)
                                 px = st.session_state.get(f"repl_px_{port['id']}_{c['ticker']}", 0.0)
-                                if selected and qty > 0 and px > 0:
+                                if qty > 0 and px > 0:
                                     urow = universe_df[universe_df["ticker"] == c["ticker"]]
                                     sc_val = int(urow["score"].iloc[0]) if len(urow) and pd.notna(urow["score"].iloc[0]) else None
                                     pe_val = float(urow["pe"].iloc[0]) if len(urow) and pd.notna(urow["pe"].iloc[0]) else None
