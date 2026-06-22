@@ -289,10 +289,12 @@ def generate_review_recommendations(enriched_holdings, investor_type, time_horiz
         f"2. MOAT EROSION: If ROE declined for 3+ years AND stock underperformed market, recommend SELL HALF. Cite Dorsey.\n"
         f"3. MARKET EFFECT: If stock dropped BUT Nifty also dropped similarly (within 5%), recommend HOLD. "
         f"Cite Graham on Mr. Market. The business hasn't changed.\n"
-        f"4. THESIS INTACT: If score stable or improved AND no red flags AND cash conversion > 0.5, "
+        f"4. NO THESIS: If current score = 0 (no framework passes), recommend SELL ALL regardless of "
+        f"other signals. A score of 0 means no investment thesis exists.\n"
+        f"5. THESIS INTACT: If score >= 1 AND score stable or improved AND no red flags AND cash conversion > 0.5, "
         f"recommend HOLD or BUY MORE. Cite the relevant framework.\n"
-        f"5. OVERVALUATION: If stock gained >30% and score dropped, recommend HOLD but note reduced margin of safety.\n"
-        f"6. INVESTOR PROFILE: "
+        f"6. OVERVALUATION: If stock gained >30% and score dropped, recommend HOLD but note reduced margin of safety.\n"
+        f"7. INVESTOR PROFILE: "
         f"{'Be conservative. Prefer HOLD over BUY MORE, SELL sooner on red flags.' if investor_type == 'defensive' else 'Balance risk and reward.' if investor_type == 'balanced' else 'Tolerate volatility. HOLD through short-term drops if moat is intact.'}\n\n"
         f"{holdings_text}\n\n"
         f"Respond ONLY with a JSON array (no markdown, no backticks, no preamble). Each element:\n"
@@ -3353,6 +3355,35 @@ elif st.session_state.sb_view_mode == "portfolios":
                                             f"are inflated by non-recurring items. Forced SELL."
                                         )
                                         confidence = "high"
+
+                                    # ── DETERMINISTIC BELOW-THRESHOLD OVERRIDE ──
+                                    # Score 0 = no thesis. Score 1 without Graham = below buy threshold.
+                                    # Both warrant exit. Score 1 WITH Graham = deep value exception, hold.
+                                    if h["now_score"] == 0 and "SELL" not in action:
+                                        action = f"🔴 SELL ALL ({h['shares']})"
+                                        sell_qty = h["shares"]
+                                        reasoning = (
+                                            f"Score is 0/4 — all frameworks fail. "
+                                            f"No investment thesis exists. Redeploy capital."
+                                        )
+                                        confidence = "high"
+                                    elif h["now_score"] == 1 and "SELL" not in action:
+                                        # Check if the lone pass is Graham (deep value exception)
+                                        urow_check = universe_df[universe_df["ticker"] == h["ticker"]]
+                                        graham_alive = (
+                                            len(urow_check) > 0 
+                                            and "graham_pass" in urow_check.columns 
+                                            and urow_check["graham_pass"].iloc[0] == True
+                                        )
+                                        if not graham_alive:
+                                            action = f"🔴 SELL ALL ({h['shares']})"
+                                            sell_qty = h["shares"]
+                                            reasoning = (
+                                                f"Score dropped to 1/4 without Graham pass — "
+                                                f"below the 2/4 buy threshold and no deep value "
+                                                f"exception applies. Thesis has eroded."
+                                            )
+                                            confidence = "high"
 
                                     
                                     mkt_note = ""
