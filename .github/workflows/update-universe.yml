@@ -29,10 +29,10 @@ jobs:
         run: python universe_updater.py
 
       - name: Run Daily Portfolio Tracker
+        run: python portfolio_tracker.py
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        run: python portfolio_tracker.py
 
       - name: Commit updated CSV
         run: |
