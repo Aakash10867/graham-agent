@@ -2673,14 +2673,60 @@ else:
         for port in portfolios:
             with st.container(border=True):
                 st.markdown(f"**{port['name']}**")
-                st.caption(
-                    f"Created: {port['created_at'][:10]} · "
-                    f"{port.get('investor_type', '—')} · "
-                    f"₹{port.get('sip_amount', 0):,}/mo · "
-                    f"{port.get('time_horizon', '—')} horizon · "
-                    f"Review: every {port.get('review_freq', '90')} days · "
-                    f"Next: {port.get('next_review_date', '—')}"
-                )
+                
+                # Check if this specific portfolio is in "SIP edit mode"
+                is_editing_sip = st.session_state.get(f"edit_sip_{port['id']}", False)
+
+                if is_editing_sip:
+                    # Edit Mode UI
+                    col1, col2, col3 = st.columns([3, 1, 1])
+                    with col1:
+                        new_sip = st.number_input(
+                            "New SIP Amount (₹)", 
+                            value=int(port.get('sip_amount', 0)), 
+                            step=1000, 
+                            key=f"new_sip_input_{port['id']}", 
+                            label_visibility="collapsed"
+                        )
+                    with col2:
+                        if st.button("💾 Save", key=f"save_sip_{port['id']}", use_container_width=True):
+                            try:
+                                sb.table("portfolios").update({"sip_amount": new_sip}).eq("id", port["id"]).execute()
+                                st.session_state[f"edit_sip_{port['id']}"] = False
+                                st.success("Updated!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Failed: {e}")
+                    with col3:
+                        if st.button("❌", key=f"cancel_sip_{port['id']}", use_container_width=True):
+                            st.session_state[f"edit_sip_{port['id']}"] = False
+                            st.rerun()
+                    
+                    # Show the rest of the caption without the SIP amount while editing
+                    st.caption(
+                        f"Created: {port['created_at'][:10]} · "
+                        f"{port.get('investor_type', '—')} · "
+                        f"{port.get('time_horizon', '—')} horizon · "
+                        f"Review: every {port.get('review_freq', '90')} days · "
+                        f"Next: {port.get('next_review_date', '—')}"
+                    )
+                else:
+                    # Normal Mode UI with Edit Button
+                    col_cap, col_btn = st.columns([11, 1])
+                    with col_cap:
+                        st.caption(
+                            f"Created: {port['created_at'][:10]} · "
+                            f"{port.get('investor_type', '—')} · "
+                            f"**₹{port.get('sip_amount', 0):,}/mo** · "
+                            f"{port.get('time_horizon', '—')} horizon · "
+                            f"Review: every {port.get('review_freq', '90')} days · "
+                            f"Next: {port.get('next_review_date', '—')}"
+                        )
+                    with col_btn:
+                        if st.button("✏️", key=f"trigger_edit_sip_{port['id']}", help="Edit SIP Amount"):
+                            st.session_state[f"edit_sip_{port['id']}"] = True
+                            st.rerun()
+
                 try:
                     hold_resp = sb.table("holdings").select("*").eq("portfolio_id", port["id"]).execute()
                     holdings = hold_resp.data
