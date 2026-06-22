@@ -150,6 +150,162 @@ def find_replacement_candidates(investor_type, time_horizon, exclude_tickers, cu
         })
     return candidates
 
+def get_nifty_return(days):
+    """Get Nifty 50 return over a given number of days."""
+    try:
+        nifty = yf.Ticker("^NSEI")
+        hist = nifty.history(period=f"{max(days + 10, 30)}d")
+        if len(hist) < 2:
+            return None
+        end_price = float(hist["Close"].iloc[-1])
+        start_idx = max(0, len(hist) - days)
+        start_price = float(hist["Close"].iloc[start_idx])
+        return round(((end_price - start_price) / start_price) * 100, 2)
+    except Exception:
+        return None
+
+
+def build_review_context(holdings, port):
+    """Gather enriched data per holding: market context, earnings quality, ROE trend, book passage."""
+    today = datetime.date.today()
+    try:
+        created = datetime.date.fromisoformat(str(port["created_at"])[:10])
+        holding_days = (today - created).days
+    except Exception:
+        holding_days = 30
+
+    nifty_return = get_nifty_return(holding_days)
+
+    enriched = []
+    for h in holdings:
+        ticker = h["ticker"]
+        entry_price = h.get("price_at_entry") or 0
+        entry_score = h.get("score_at_entry") or 0
+        shares = h.get("shares") or 0
+
+        try:
+            cinfo = yf.Ticker(ticker).info
+            now_price = cinfo.get("currentPrice") or cinfo.get("regularMarketPrice") or 0
+        except Exception:
+            now_price = 0
+
+        urow = universe_df[universe_df["ticker"] == ticker]
+        now_score = int(urow["score"].iloc[0]) if len(urow) and pd.notna(urow["score"].iloc[0]) else 0
+
+        roe_trend = []
+        for y in ["roe_y0", "roe_y1", "roe_y2", "roe_y3"]:
+            if len(urow) and y in urow.columns and pd.notna(urow[y].iloc[0]):
+                roe_trend.append(round(float(urow[y].iloc[0]), 2))
+
+        quality = get_earnings_quality_metrics(ticker)
+        if "error" not in quality:
+            quality_flags = quality.get("anomaly_flags", ["Unable to check"])
+            cash_conversion = quality.get("cash_conversion_ratio", "N/A")
+        else:
+            quality_flags = ["Unable to check"]
+            cash_conversion = "N/A"
+
+        stock_return = ((now_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+        pnl = (now_price - entry_price) * shares if entry_price > 0 else 0
+        score_change = now_score - entry_score
+        market_relative = round(stock_return - nifty_return, 2) if nifty_return is not None else None
+        roe_declining = len(roe_trend) >= 3 and roe_trend[0] < roe_trend[-1]
+        has_red_flags = any("RED FLAG" in f for f in quality_flags) if isinstance(quality_flags, list) else False
+
+        # Pattern-specific book query
+        if has_red_flags:
+            book_query = "Graham warnings about earnings quality non-recurring income value traps"
+        elif score_change <= -2 and market_relative is not None and market_relative > -5:
+            book_query = "Dorsey signs of eroding economic moat competitive advantage deterioration"
+        elif stock_return < -10 and nifty_return is not None and nifty_return < -5:
+            book_query = "Graham holding through market declines Mr Market temporary price drops"
+        elif roe_declining:
+            book_query = "Dorsey declining return on equity moat erosion when to sell"
+        elif score_change >= 1:
+            book_query = "Graham margin of safety increases buying more undervalued stocks"
+        elif score_change == 0 and stock_return > 20:
+            book_query = "Greenblatt when to take profits selling appreciated stocks"
+        else:
+            book_query = "Graham intelligent investor patience holding quality companies"
+
+        book_result = search_book(book_query)
+        book_passage = ""
+        if "error" not in book_result:
+            passages = book_result["passages"].split("\n\n")
+            book_passage = passages[0][:500] if passages else ""
+
+        enriched.append({
+            "ticker": ticker, "name": h.get("name") or ticker, "sector": h.get("sector", ""),
+            "shares": shares, "entry_price": entry_price, "now_price": now_price,
+            "entry_score": entry_score, "now_score": now_score, "score_change": score_change,
+            "stock_return": round(stock_return, 2), "pnl": round(pnl, 0),
+            "nifty_return": nifty_return, "market_relative": market_relative,
+            "roe_trend": roe_trend, "roe_declining": roe_declining,
+            "quality_flags": quality_flags, "cash_conversion": cash_conversion,
+            "has_red_flags": has_red_flags, "book_query": book_query,
+            "book_passage": book_passage, "holding_days": holding_days,
+            "holding_id": h.get("id"),
+        })
+
+    return enriched
+
+
+def generate_review_recommendations(enriched_holdings, investor_type, time_horizon):
+    """LLM-powered review recommendations grounded in book philosophy."""
+    holdings_text = ""
+    for i, h in enumerate(enriched_holdings):
+        holdings_text += (
+            f"\nStock {i+1}: {h['name']} ({h['ticker']})\n"
+            f"- Shares: {h['shares']}, Entry: INR {h['entry_price']:.2f}, Now: INR {h['now_price']:.2f}\n"
+            f"- Stock return: {h['stock_return']:+.1f}%, Nifty return: {h['nifty_return']}%, Market-relative: {h['market_relative']}%\n"
+            f"- Score: {h['entry_score']} to {h['now_score']} (change: {h['score_change']:+d})\n"
+            f"- ROE trend (recent to oldest): {h['roe_trend']}\n"
+            f"- Earnings quality: {', '.join(h['quality_flags']) if isinstance(h['quality_flags'], list) else h['quality_flags']}\n"
+            f"- Cash conversion ratio: {h['cash_conversion']}\n"
+            f"- Held for: {h['holding_days']} days\n"
+            f"- Relevant book passage: {h['book_passage']}\n"
+        )
+
+    review_prompt = (
+        f"You are the AlphaConsensus Investment Committee reviewing a {investor_type} investor's "
+        f"portfolio with a {time_horizon}-term horizon.\n\n"
+        f"For each stock below, provide a recommendation.\n\n"
+        f"DECISION FRAMEWORK (apply in order):\n"
+        f"1. RED FLAGS OVERRIDE: If earnings quality has RED FLAGS, recommend SELL ALL. Cite Graham on value traps.\n"
+        f"2. MOAT EROSION: If ROE declined for 3+ years AND stock underperformed market, recommend SELL HALF. Cite Dorsey.\n"
+        f"3. MARKET EFFECT: If stock dropped BUT Nifty also dropped similarly (within 5%), recommend HOLD. "
+        f"Cite Graham on Mr. Market. The business hasn't changed.\n"
+        f"4. THESIS INTACT: If score stable or improved AND no red flags AND cash conversion > 0.5, "
+        f"recommend HOLD or BUY MORE. Cite the relevant framework.\n"
+        f"5. OVERVALUATION: If stock gained >30% and score dropped, recommend HOLD but note reduced margin of safety.\n"
+        f"6. INVESTOR PROFILE: "
+        f"{'Be conservative. Prefer HOLD over BUY MORE, SELL sooner on red flags.' if investor_type == 'defensive' else 'Balance risk and reward.' if investor_type == 'balanced' else 'Tolerate volatility. HOLD through short-term drops if moat is intact.'}\n\n"
+        f"{holdings_text}\n\n"
+        f"Respond ONLY with a JSON array (no markdown, no backticks, no preamble). Each element:\n"
+        f'{{"ticker": "TICKER.NS", "action": "HOLD", "sell_qty": 0, "reasoning": "2-3 sentences grounded in Graham/Greenblatt/Dorsey.", "confidence": "high"}}\n'
+        f"action must be one of: SELL ALL, SELL HALF, HOLD, BUY MORE\n"
+        f"sell_qty: number of shares to sell (0 for HOLD/BUY MORE, all shares for SELL ALL, half for SELL HALF)\n"
+    )
+
+    client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+    for model_name in FREE_MODELS:
+        try:
+            response = client.models.generate_content(model=model_name, contents=review_prompt)
+            text = response.text.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+            if text.endswith("```"):
+                text = text[:-3]
+            text = text.strip()
+            if text.startswith("json"):
+                text = text[4:].strip()
+            return json.loads(text)
+        except Exception as e:
+            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                continue
+            break
+    return None
+
 
 
 def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int, time_horizon: str, review_days: int = 90, stocks_json: str = "[]") -> dict:
@@ -2559,53 +2715,101 @@ else:
                             st.error(f"📅 Review overdue by {abs(days_until)} days!")
 
                         if st.button("🔄 Review Portfolio", key=f"review_{port['id']}", use_container_width=True):
-                            with st.spinner("Fetching live prices..."):
-                                review_rows = []
+                            with st.spinner("Analyzing holdings with market context and book philosophy..."):
+                                enriched = build_review_context(holdings, port)
+                                llm_recs = generate_review_recommendations(
+                                    enriched, port.get("investor_type", "balanced"),
+                                    port.get("time_horizon", "medium")
+                                )
+
+                                # Merge LLM recommendations with enriched data
                                 total_entry = 0
                                 total_current = 0
-                                for h in holdings:
-                                    ticker = h["ticker"]
-                                    entry_price = h.get("price_at_entry") or 0
-                                    entry_score = h.get("score_at_entry") or 0
-                                    shares = h.get("shares") or 0
-                                    try:
-                                        cinfo = yf.Ticker(ticker).info
-                                        now_price = cinfo.get("currentPrice") or cinfo.get("regularMarketPrice") or 0
-                                    except Exception:
-                                        now_price = 0
-                                    urow = universe_df[universe_df["ticker"] == ticker]
-                                    now_score = int(urow["score"].iloc[0]) if len(urow) and pd.notna(urow["score"].iloc[0]) else 0
-                                    pnl = (now_price - entry_price) * shares if entry_price > 0 else 0
-                                    ret = ((now_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
-                                    total_entry += entry_price * shares
-                                    total_current += now_price * shares
-                                    sc = now_score - entry_score
-                                    if now_score <= 1 and entry_score >= 3:
-                                        action = f"🔴 SELL ALL ({shares})"
-                                        reason = "Fundamentals collapsed."
-                                    elif sc <= -2:
-                                        sell_n = max(1, shares // 2)
-                                        action = f"🟠 SELL {sell_n} of {shares}"
-                                        reason = "Score dropped sharply. Reduce exposure."
-                                    elif sc <= -1:
-                                        action = "🟡 HOLD (watch)"
-                                        reason = "Slight deterioration. Monitor next review."
-                                    elif sc == 0:
-                                        action = "🟢 HOLD"
-                                        reason = "Fundamentals stable."
+                                review_rows = []
+
+                                for h in enriched:
+                                    total_entry += h["entry_price"] * h["shares"]
+                                    total_current += h["now_price"] * h["shares"]
+
+                                    # Find LLM recommendation for this ticker
+                                    llm_rec = None
+                                    if llm_recs:
+                                        llm_rec = next((r for r in llm_recs if r.get("ticker") == h["ticker"]), None)
+
+                                    if llm_rec:
+                                        raw_action = llm_rec.get("action", "HOLD").upper()
+                                        reasoning = llm_rec.get("reasoning", "")
+                                        confidence = llm_rec.get("confidence", "medium")
+                                        sell_qty = llm_rec.get("sell_qty", 0)
+
+                                        if "SELL ALL" in raw_action:
+                                            action = f"🔴 SELL ALL ({h['shares']})"
+                                            sell_qty = h["shares"]
+                                        elif "SELL HALF" in raw_action:
+                                            sell_qty = max(1, h["shares"] // 2)
+                                            action = f"🟠 SELL {sell_qty} of {h['shares']}"
+                                        elif "BUY" in raw_action:
+                                            action = "🟢 BUY MORE"
+                                            sell_qty = 0
+                                        else:
+                                            action = "🟢 HOLD"
+                                            sell_qty = 0
                                     else:
-                                        action = "🟢 BUY MORE"
-                                        reason = "Score improved. Consider adding."
+                                        # Mechanical fallback
+                                        sc = h["score_change"]
+                                        if h["has_red_flags"]:
+                                            action = f"🔴 SELL ALL ({h['shares']})"
+                                            reasoning = "Earnings quality red flags detected. Graham warns against value traps."
+                                            confidence = "high"
+                                            sell_qty = h["shares"]
+                                        elif sc <= -2:
+                                            sell_qty = max(1, h["shares"] // 2)
+                                            action = f"🟠 SELL {sell_qty} of {h['shares']}"
+                                            reasoning = "Score dropped sharply. Review fundamentals."
+                                            confidence = "medium"
+                                        elif sc <= -1:
+                                            action = "🟡 HOLD (watch)"
+                                            reasoning = "Slight deterioration. Monitor next review."
+                                            confidence = "medium"
+                                            sell_qty = 0
+                                        elif sc == 0:
+                                            action = "🟢 HOLD"
+                                            reasoning = "Fundamentals stable."
+                                            confidence = "high"
+                                            sell_qty = 0
+                                        else:
+                                            action = "🟢 BUY MORE"
+                                            reasoning = "Score improved."
+                                            confidence = "medium"
+                                            sell_qty = 0
+
+                                    mkt_note = ""
+                                    if h["market_relative"] is not None:
+                                        if h["market_relative"] > 5:
+                                            mkt_note = f"Outperformed Nifty by {h['market_relative']:+.1f}%"
+                                        elif h["market_relative"] < -5:
+                                            mkt_note = f"Underperformed Nifty by {h['market_relative']:+.1f}%"
+                                        else:
+                                            mkt_note = f"In line with market ({h['market_relative']:+.1f}% vs Nifty)"
+
                                     review_rows.append({
-                                        "Stock": h.get("name") or ticker, "Shares": shares,
-                                        "Entry": f"₹{entry_price:,.2f}", "Now": f"₹{now_price:,.2f}",
-                                        "P&L": f"₹{pnl:,.0f}", "Return": f"{ret:+.1f}%",
-                                        "Score": f"{entry_score}→{now_score}", "Action": action, "_reason": reason,
+                                        "Stock": h["name"], "Shares": h["shares"],
+                                        "Entry": f"₹{h['entry_price']:,.2f}", "Now": f"₹{h['now_price']:,.2f}",
+                                        "P&L": f"₹{h['pnl']:,.0f}", "Return": f"{h['stock_return']:+.1f}%",
+                                        "Score": f"{h['entry_score']}→{h['now_score']}", "Action": action,
+                                        "_reasoning": reasoning, "_confidence": confidence,
+                                        "_market_note": mkt_note, "_book_passage": h["book_passage"],
+                                        "_sell_qty": sell_qty, "_holding_id": h["holding_id"],
+                                        "_ticker": h["ticker"], "_sector": h["sector"],
+                                        "_entry_price": h["entry_price"], "_now_price": h["now_price"],
                                     })
+
                                 st.session_state[f"review_data_{port['id']}"] = {
                                     "rows": review_rows, "total_entry": total_entry,
                                     "total_current": total_current, "holdings": holdings,
+                                    "enriched": enriched,
                                 }
+
                                 try:
                                     next_days = int(port.get("review_freq", 90))
                                 except (ValueError, TypeError):
@@ -2622,20 +2826,33 @@ else:
                     total_entry = review_state["total_entry"]
                     total_current = review_state["total_current"]
                     rev_holdings = review_state["holdings"]
+
                     port_pnl = total_current - total_entry
                     port_ret = (port_pnl / total_entry * 100) if total_entry > 0 else 0
+
                     m1, m2, m3 = st.columns(3)
                     m1.metric("Invested", f"₹{total_entry:,.0f}")
                     m2.metric("Current Value", f"₹{total_current:,.0f}")
                     m3.metric("Total Return", f"{port_ret:+.1f}%", delta=f"₹{port_pnl:,.0f}")
-                    display_df = pd.DataFrame(review_rows).drop(columns=["_reason"])
+
+                    # Nifty comparison
+                    if review_rows and review_rows[0].get("_market_note"):
+                        nifty_note = review_rows[0]["_market_note"]
+                        st.caption(f"📊 Market context: {nifty_note}")
+
+                    display_df = pd.DataFrame(review_rows).drop(columns=[c for c in review_rows[0] if c.startswith("_")])
                     st.dataframe(display_df, hide_index=True, use_container_width=True)
+
+                    # Per-stock reasoning with book grounding
                     for r in review_rows:
                         if "SELL" in r["Action"]:
-                            st.error(f"**{r['Stock']}** — {r['Action']}: {r['_reason']} (Score {r['Score']})")
+                            st.error(f"**{r['Stock']}** — {r['Action']}\n\n{r['_reasoning']}")
                         elif "BUY" in r["Action"]:
-                            st.success(f"**{r['Stock']}** — {r['_reason']} (Score {r['Score']})")
+                            st.success(f"**{r['Stock']}** — {r['Action']}\n\n{r['_reasoning']}")
+                        else:
+                            st.info(f"**{r['Stock']}** — {r['Action']}\n\n{r['_reasoning']}")
 
+                    # Update form
                     action_stocks = [(i, r) for i, r in enumerate(review_rows) if "SELL" in r["Action"] or "BUY" in r["Action"]]
                     sell_stocks = [(i, r) for i, r in enumerate(review_rows) if "SELL" in r["Action"]]
 
@@ -2643,44 +2860,36 @@ else:
                         st.markdown("---")
                         st.caption("Update what you actually did at your broker:")
                         for idx, r in action_stocks:
-                            h = rev_holdings[idx]
+                            h_id = r["_holding_id"]
                             if "SELL" in r["Action"]:
-                                if "SELL ALL" in r["Action"]:
-                                    default_sell = h.get("shares") or 0
-                                else:
-                                    try:
-                                        default_sell = int(r["Action"].split("SELL")[1].split("of")[0].strip())
-                                    except (ValueError, IndexError):
-                                        default_sell = 0
                                 st.number_input(
-                                    f"🔴 {r['Stock']} — shares sold (of {h.get('shares', 0)})",
-                                    min_value=0, max_value=h.get("shares") or 0, value=default_sell,
-                                    key=f"sold_{port['id']}_{h['id']}"
+                                    f"🔴 {r['Stock']} — shares sold (of {r['Shares']})",
+                                    min_value=0, max_value=r["Shares"], value=r["_sell_qty"],
+                                    key=f"sold_{port['id']}_{h_id}"
                                 )
                             elif "BUY" in r["Action"]:
                                 c1, c2 = st.columns(2)
                                 with c1:
-                                    st.number_input(f"🟢 {r['Stock']} — shares bought", min_value=0, value=0, key=f"add_qty_{port['id']}_{h['id']}")
+                                    st.number_input(f"🟢 {r['Stock']} — shares bought", min_value=0, value=0, key=f"add_qty_{port['id']}_{h_id}")
                                 with c2:
-                                    st.number_input(f"🟢 {r['Stock']} — price paid (₹)", min_value=0.0, value=0.0, format="%.2f", key=f"add_price_{port['id']}_{h['id']}")
+                                    st.number_input(f"🟢 {r['Stock']} — price paid (₹)", min_value=0.0, value=0.0, format="%.2f", key=f"add_price_{port['id']}_{h_id}")
 
                         if sell_stocks:
                             freed = 0
                             for idx, r in sell_stocks:
-                                h = rev_holdings[idx]
-                                sell_qty = st.session_state.get(f"sold_{port['id']}_{h['id']}", 0)
-                                price = float(r["Now"].replace("₹", "").replace(",", ""))
+                                sell_qty = st.session_state.get(f"sold_{port['id']}_{r['_holding_id']}", 0)
+                                price = r["_now_price"]
                                 freed += sell_qty * price
                             remaining_sectors = []
-                            for i, h in enumerate(rev_holdings):
+                            for i, r in enumerate(review_rows):
                                 is_sell = any(si == i for si, _ in sell_stocks)
                                 if not is_sell:
-                                    remaining_sectors.append(h.get("sector", ""))
+                                    remaining_sectors.append(r.get("_sector", ""))
                                 else:
-                                    sold_qty = st.session_state.get(f"sold_{port['id']}_{h['id']}", 0)
-                                    if (h.get("shares") or 0) - sold_qty > 0:
-                                        remaining_sectors.append(h.get("sector", ""))
-                            all_tickers = [h["ticker"] for h in rev_holdings]
+                                    sold_qty = st.session_state.get(f"sold_{port['id']}_{r['_holding_id']}", 0)
+                                    if r["Shares"] - sold_qty > 0:
+                                        remaining_sectors.append(r.get("_sector", ""))
+                            all_tickers = [r["_ticker"] for r in review_rows]
                             candidates = find_replacement_candidates(
                                 port.get("investor_type", "balanced"), port.get("time_horizon", "medium"),
                                 all_tickers, remaining_sectors
@@ -2705,26 +2914,25 @@ else:
 
                         if st.button("✅ Portfolio Updated", key=f"apply_{port['id']}", use_container_width=True):
                             for i, r in enumerate(review_rows):
-                                h = rev_holdings[i]
+                                h_id = r["_holding_id"]
                                 if "SELL" in r["Action"]:
-                                    sold = st.session_state.get(f"sold_{port['id']}_{h['id']}", 0)
+                                    sold = st.session_state.get(f"sold_{port['id']}_{h_id}", 0)
                                     if sold > 0:
-                                        old_shares = h.get("shares") or 0
-                                        new_shares = old_shares - sold
+                                        new_shares = r["Shares"] - sold
                                         if new_shares <= 0:
-                                            sb.table("holdings").delete().eq("id", h["id"]).execute()
+                                            sb.table("holdings").delete().eq("id", h_id).execute()
                                         else:
-                                            new_invested = new_shares * (h.get("price_at_entry") or 0)
-                                            sb.table("holdings").update({"shares": new_shares, "sip_amount_inr": round(new_invested, 2)}).eq("id", h["id"]).execute()
+                                            new_invested = new_shares * r["_entry_price"]
+                                            sb.table("holdings").update({"shares": new_shares, "sip_amount_inr": round(new_invested, 2)}).eq("id", h_id).execute()
                                 elif "BUY" in r["Action"]:
-                                    new_qty = st.session_state.get(f"add_qty_{port['id']}_{h['id']}", 0)
-                                    buy_price = st.session_state.get(f"add_price_{port['id']}_{h['id']}", 0.0)
+                                    new_qty = st.session_state.get(f"add_qty_{port['id']}_{h_id}", 0)
+                                    buy_price = st.session_state.get(f"add_price_{port['id']}_{h_id}", 0.0)
                                     if new_qty > 0 and buy_price > 0:
-                                        old_shares = h.get("shares") or 0
-                                        old_price = h.get("price_at_entry") or 0
+                                        old_shares = r["Shares"]
+                                        old_price = r["_entry_price"]
                                         total_shares = old_shares + new_qty
                                         avg_price = ((old_shares * old_price) + (new_qty * buy_price)) / total_shares
-                                        sb.table("holdings").update({"shares": total_shares, "price_at_entry": round(avg_price, 2), "sip_amount_inr": round(total_shares * avg_price, 2)}).eq("id", h["id"]).execute()
+                                        sb.table("holdings").update({"shares": total_shares, "price_at_entry": round(avg_price, 2), "sip_amount_inr": round(total_shares * avg_price, 2)}).eq("id", h_id).execute()
                             if sell_stocks:
                                 for c in candidates:
                                     selected = st.session_state.get(f"repl_sel_{port['id']}_{c['ticker']}", False)
