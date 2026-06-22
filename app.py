@@ -88,7 +88,7 @@ def allocate_shares(stocks, sip_amount):
 
     return result, round(remaining, 2)
 
-def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int, time_horizon: str, review_frequency: str = "quarterly", stocks_json: str = "[]") -> dict:
+def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int, time_horizon: str, review_days: int = 90, stocks_json: str = "[]") -> dict:
     """Register a finalized SIP portfolio so the user can save it to their account.
     Call this ONLY after you have presented the final portfolio table with all stocks and allocations.
 
@@ -97,7 +97,7 @@ def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int,
         investor_type: The investor profile - defensive, balanced, or enterprising
         sip_amount: Monthly SIP amount in INR
         time_horizon: Investment time horizon from the questionnaire
-        review_frequency: How often to review - monthly, quarterly, semi-annually, annually
+        review_days: Number of days between portfolio reviews. Convert the user preference to days. Monthly=30, Quarterly=90, Semi-annually=180, Annually=365. Any number is valid.
         stocks_json: A JSON string representing a list of stock objects. Each object must have keys: ticker (str), name (str), sector (str), allocation_pct (number). Example: [{"ticker":"TCS.NS","name":"TCS","sector":"Technology","allocation_pct":20}]
     """
     try:
@@ -108,29 +108,15 @@ def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int,
     if not stocks:
         return {"error": "No stocks provided."}
 
-    # Normalize review frequency to canonical value
-    rf = review_frequency.lower().strip()
-    if any(k in rf for k in ["month", "active", "30 day"]):
-        canonical_freq = "monthly"
-    elif any(k in rf for k in ["quarter", "moderate", "3 month", "90 day", "few month"]):
-        canonical_freq = "quarterly"
-    elif any(k in rf for k in ["semi", "6 month", "half year", "180", "twice a year"]):
-        canonical_freq = "semi-annually"
-    elif any(k in rf for k in ["year", "annual", "passive", "forget", "12 month"]):
-        canonical_freq = "annually"
-    else:
-        canonical_freq = "quarterly"
-
     st.session_state.pending_portfolio = {
         "name": portfolio_name,
         "investor_type": investor_type,
         "sip_amount": sip_amount,
         "time_horizon": time_horizon,
-        "review_freq": canonical_freq,
+        "review_days": int(review_days),
         "stocks": stocks
     }
-    return {"status": f"Portfolio '{portfolio_name}' registered with {len(stocks)} stocks. Review frequency: {canonical_freq}. The user can now save it."}
-
+    return {"status": f"Portfolio '{portfolio_name}' registered with {len(stocks)} stocks. Review every {review_days} days. The user can now save it."}
 
 
 # ──────────────────────────────────────────────
@@ -1956,7 +1942,7 @@ You have 11 tools available. Pick the right combination for each question — yo
 14. get_csv_financial_data — Reads the pre-scored universe database for a specific ticker to get proprietary framework scores (Graham, Greenblatt, Dorsey, Trajectory pass/fail flags).
 15. get_macro_context — Gets the sector and 5-day performance of the broader market (Nifty 50) to gauge macro momentum versus asset momentum.
 16. get_sip_candidates — Build a SIP portfolio. Collects investor profile (sip_amount, time_horizon, investor_type, review_freq) and returns 30-50 pre-filtered candidates. You then select 5-8 using book wisdom and qualitative judgment. Use when the user wants to start a SIP, build a portfolio, or asks where to invest monthly.
-17. register_portfolio — After presenting your finalized SIP portfolio to the user, call this to register it for saving. Pass portfolio_name, investor_type, sip_amount, time_horizon, review_frequency, and stocks (a list where each item has ticker, name, sector, allocation_pct). ALWAYS call this after presenting the final SIP portfolio table.
+17. register_portfolio — After presenting your finalized SIP portfolio to the user, call this to register it for saving. Pass portfolio_name, investor_type, sip_amount, time_horizon, review_days (integer number of days between reviews), and stocks_json (a JSON string list where each item has ticker, name, sector, allocation_pct). ALWAYS call this after presenting the final SIP portfolio table.
 
 SIP PORTFOLIO PROTOCOL:
 When the user wants to build a SIP portfolio, you MUST ask exactly ONE question per message. Wait for the answer before asking the next. The sequence is:
@@ -1976,9 +1962,7 @@ After all 4 answers are collected, map them:
 - Goal answer 1 → investor_type="defensive"
 - Goal answer 2 → investor_type="balanced"  
 - Goal answer 3 → investor_type="enterprising"
-- Review answer 1 → review_freq="passive"
-- Review answer 2 → review_freq="moderate"
-- Review answer 3 → review_freq="active"
+- Convert the user's review preference to a number of days (review_days). Use your judgment — "monthly" is 30, "every two weeks" is 14, "quarterly" is 90, "twice a year" is 180, "set and forget" is 365. Any reasonable number is valid; do not constrain to fixed options.
 - Time 1-3yr → time_horizon="short", 3-7yr → "medium", 7+yr → "long"
 
 Then call get_sip_candidates with the mapped parameters.
@@ -2362,12 +2346,8 @@ if st.session_state.sb_view_mode == "chat":
                     try:
                         sb = get_supabase()
     
-                        freq_days = {
-                            "monthly": 30, "quarterly": 90,
-                            "semi-annually": 180, "annually": 365
-                        }
-                        days = freq_days.get(portfolio.get("review_freq", "quarterly"), 90)
-                        next_review = (datetime.date.today() + datetime.timedelta(days=days)).isoformat()
+                        review_days = portfolio.get("review_days", 90)
+                        next_review = (datetime.date.today() + datetime.timedelta(days=review_days)).isoformat()
     
                         port_resp = sb.table("portfolios").insert({
                             "user_id": st.session_state.sb_user_id,
@@ -2375,7 +2355,7 @@ if st.session_state.sb_view_mode == "chat":
                             "investor_type": portfolio["investor_type"],
                             "sip_amount": portfolio["sip_amount"],
                             "time_horizon": portfolio["time_horizon"],
-                            "review_freq": portfolio.get("review_freq", "quarterly"),
+                            "review_freq": str(review_days),
                             "next_review_date": next_review,
                         }).execute()
     
@@ -2514,7 +2494,8 @@ else:
                     f"{port.get('investor_type', '—')} · "
                     f"₹{port.get('sip_amount', 0):,}/mo · "
                     f"{port.get('time_horizon', '—')} horizon · "
-                    f"Next review: {port.get('next_review_date', '—')}"
+                    f"Review: every {port.get('review_freq', '90')} days · "
+                    f"Next: {port.get('next_review_date', '—')}"
                 )
 
                 # Fetch holdings
@@ -2643,8 +2624,10 @@ else:
                                         st.success(f"**{r['Stock']}** — {r['_reason']} (Score {r['Score']})")
 
                                 # Advance next review date
-                                freq_days = {"monthly": 30, "quarterly": 90, "semi-annually": 180, "annually": 365}
-                                next_days = freq_days.get(port.get("review_freq", "quarterly"), 90)
+                                try:
+                                    next_days = int(port.get("review_freq", 90))
+                                except (ValueError, TypeError):
+                                    next_days = 90
                                 new_review = (today + datetime.timedelta(days=next_days)).isoformat()
                                 try:
                                     sb.table("portfolios").update(
