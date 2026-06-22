@@ -2533,6 +2533,115 @@ else:
                 else:
                     st.caption("No holdings found.")
 
+                # ── Review Section ──
+                today = datetime.date.today()
+                review_date = None
+                if port.get("next_review_date"):
+                    try:
+                        review_date = datetime.date.fromisoformat(str(port["next_review_date"]))
+                    except (ValueError, TypeError):
+                        review_date = None
+
+                if review_date and holdings:
+                    days_until = (review_date - today).days
+
+                    if days_until > 7:
+                        st.caption(f"📅 Next review in {days_until} days ({review_date.isoformat()})")
+                    else:
+                        if days_until > 0:
+                            st.warning(f"📅 Review due in {days_until} days!")
+                        elif days_until == 0:
+                            st.warning("📅 Review due today!")
+                        else:
+                            st.error(f"📅 Review overdue by {abs(days_until)} days!")
+
+                        if st.button("🔄 Review Portfolio", key=f"review_{port['id']}", use_container_width=True):
+                            with st.spinner("Fetching live prices..."):
+                                review_rows = []
+                                total_entry = 0
+                                total_current = 0
+
+                                for h in holdings:
+                                    ticker = h["ticker"]
+                                    entry_price = h.get("price_at_entry") or 0
+                                    entry_score = h.get("score_at_entry") or 0
+                                    shares = h.get("shares") or 0
+
+                                    try:
+                                        cinfo = yf.Ticker(ticker).info
+                                        now_price = cinfo.get("currentPrice") or cinfo.get("regularMarketPrice") or 0
+                                    except Exception:
+                                        now_price = 0
+
+                                    urow = universe_df[universe_df["ticker"] == ticker]
+                                    now_score = int(urow["score"].iloc[0]) if len(urow) and pd.notna(urow["score"].iloc[0]) else 0
+
+                                    pnl = (now_price - entry_price) * shares if entry_price > 0 else 0
+                                    ret = ((now_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+                                    total_entry += entry_price * shares
+                                    total_current += now_price * shares
+
+                                    sc = now_score - entry_score
+                                    if now_score <= 1 and entry_score >= 3:
+                                        action = f"🔴 SELL ALL ({shares})"
+                                        reason = "Fundamentals collapsed."
+                                    elif sc <= -2:
+                                        sell_n = max(1, shares // 2)
+                                        action = f"🟠 SELL {sell_n} of {shares}"
+                                        reason = "Score dropped sharply. Reduce exposure."
+                                    elif sc <= -1:
+                                        action = "🟡 HOLD (watch)"
+                                        reason = "Slight deterioration. Monitor next review."
+                                    elif sc == 0:
+                                        action = "🟢 HOLD"
+                                        reason = "Fundamentals stable."
+                                    else:
+                                        action = "🟢 BUY MORE"
+                                        reason = "Score improved. Consider adding."
+
+                                    review_rows.append({
+                                        "Stock": h.get("name") or ticker,
+                                        "Shares": shares,
+                                        "Entry": f"₹{entry_price:,.2f}",
+                                        "Now": f"₹{now_price:,.2f}",
+                                        "P&L": f"₹{pnl:,.0f}",
+                                        "Return": f"{ret:+.1f}%",
+                                        "Score": f"{entry_score}→{now_score}",
+                                        "Action": action,
+                                        "_reason": reason,
+                                    })
+
+                                port_pnl = total_current - total_entry
+                                port_ret = (port_pnl / total_entry * 100) if total_entry > 0 else 0
+
+                                m1, m2, m3 = st.columns(3)
+                                m1.metric("Invested", f"₹{total_entry:,.0f}")
+                                m2.metric("Current Value", f"₹{total_current:,.0f}")
+                                m3.metric("Total Return", f"{port_ret:+.1f}%", delta=f"₹{port_pnl:,.0f}")
+
+                                display_df = pd.DataFrame(review_rows).drop(columns=["_reason"])
+                                st.dataframe(display_df, hide_index=True, use_container_width=True)
+
+                                for r in review_rows:
+                                    if "SELL" in r["Action"]:
+                                        st.error(f"**{r['Stock']}** — {r['Action']}: {r['_reason']} (Score {r['Score']})")
+                                    elif "BUY" in r["Action"]:
+                                        st.success(f"**{r['Stock']}** — {r['_reason']} (Score {r['Score']})")
+
+                                # Advance next review date
+                                freq_days = {"monthly": 30, "quarterly": 90, "semi-annually": 180, "annually": 365}
+                                next_days = freq_days.get(port.get("review_freq", "quarterly"), 90)
+                                new_review = (today + datetime.timedelta(days=next_days)).isoformat()
+                                try:
+                                    sb.table("portfolios").update(
+                                        {"next_review_date": new_review}
+                                    ).eq("id", port["id"]).execute()
+                                    st.caption(f"✅ Next review set to {new_review}")
+                                except Exception:
+                                    pass
+
+                
+
                 # Rename & Delete
                 col_r, col_d = st.columns([3, 1])
                 with col_r:
