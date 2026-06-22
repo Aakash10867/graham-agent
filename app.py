@@ -588,19 +588,20 @@ SCREENER_PRESETS = [
 ]
 
 # ══════════════════════════════════════════════
-# CSS — CLEAN, SOLID, MINIMAL
+# CSS — INSTITUTIONAL LIGHT THEME
 # ══════════════════════════════════════════════
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@300;400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@700;900&family=Inter:wght@400;500;600&display=swap');
 
 /* ── Base ── */
 .stApp {
-    background-color: #0f1117 !important;
+    background-color: #F8F9FA !important; /* Concrete Off-White */
 }
 
 .stApp, .stApp * {
     font-family: 'Inter', sans-serif !important;
+    color: #374151 !important; /* Dark Slate */
 }
 
 [data-testid="stAppViewContainer"] {
@@ -612,44 +613,47 @@ st.markdown("""
 
 /* ── Sidebar ── */
 [data-testid="stSidebar"] {
-    background-color: #161b22 !important;
-    border-right: 1px solid rgba(255,255,255,0.06) !important;
+    background-color: #FFFFFF !important;
+    border-right: 1px solid #E5E7EB !important;
 }
 
 [data-testid="stSidebar"] [data-testid="stMarkdown"] p {
-    color: #9ca3af !important;
+    color: #6B7280 !important;
     font-size: 0.85rem !important;
+}
+
+/* ── Heavy, Carved Headers ── */
+[data-testid="stSidebar"] h1, .stApp h1 {
+    font-family: 'Roboto Slab', serif !important;
+    color: #111827 !important;
+    font-weight: 900 !important;
+    letter-spacing: -0.5px !important;
+    text-transform: uppercase !important;
+    /* 3D Debossed 'stamped concrete' effect */
+    text-shadow: 1px 1px 0px #ffffff, 2px 2px 0px rgba(0,0,0,0.08) !important;
 }
 
 [data-testid="stSidebar"] h1 {
-    font-family: 'Space Grotesk', sans-serif !important;
-    color: #00f5d4 !important;
     font-size: 1.3rem !important;
-    font-weight: 700 !important;
-    letter-spacing: 1px !important;
+}
+
+.stApp h1 {
+    font-size: 2.2rem !important;
+    padding-bottom: 2px;
 }
 
 [data-testid="stSidebar"] h3 {
-    font-family: 'Space Grotesk', sans-serif !important;
-    color: #e5e7eb !important;
+    font-family: 'Roboto Slab', serif !important;
+    color: #4B5563 !important;
     font-size: 0.85rem !important;
-    font-weight: 600 !important;
+    font-weight: 700 !important;
     text-transform: uppercase !important;
     letter-spacing: 1.5px !important;
     margin-top: 1.5rem !important;
 }
 
-[data-testid="stSidebar"] hr {
-    border-color: rgba(255,255,255,0.06) !important;
-}
-
-/* ── Title ── */
-.stApp h1 {
-    font-family: 'Space Grotesk', sans-serif !important;
-    font-weight: 700 !important;
-    font-size: 2rem !important;
-    color: #00f5d4 !important;
-    padding-bottom: 2px;
+[data-testid="stSidebar"] hr, .stApp hr {
+    border-color: #E5E7EB !important;
 }
 
 .stApp .stCaption, .stApp [data-testid="stCaptionContainer"] p {
@@ -659,35 +663,38 @@ st.markdown("""
 
 /* ── Chat bubbles ── */
 [data-testid="stChatMessage"] {
-    background: #161b22 !important;
-    border: 1px solid rgba(255,255,255,0.06) !important;
-    border-radius: 12px !important;
+    background: #FFFFFF !important;
+    border: 1px solid #E5E7EB !important;
+    border-radius: 4px !important; /* Sharper, institutional corners */
     padding: 1rem 1.2rem !important;
     margin-bottom: 10px !important;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.02) !important;
 }
 
 [data-testid="stChatMessage"] p,
 [data-testid="stChatMessage"] li,
 [data-testid="stChatMessage"] span {
-    color: #e5e7eb !important;
+    color: #1F2937 !important;
     line-height: 1.7 !important;
-    font-size: 0.93rem !important;
+    font-size: 0.95rem !important;
 }
 
 [data-testid="stChatMessage"] strong {
-    color: #00f5d4 !important;
+    color: #1D4ED8 !important; /* Trust Blue */
 }
 
 [data-testid="stChatMessage"] code {
-    background: rgba(0, 245, 212, 0.08) !important;
-    color: #00f5d4 !important;
-    border-radius: 4px !important;
+    background: #F3F4F6 !important;
+    color: #1D4ED8 !important;
+    border-radius: 2px !important;
     padding: 2px 6px !important;
+    border: 1px solid #E5E7EB !important;
 }
 
 [data-testid="stChatMessage"] [data-testid="stAvatar"] {
-    border: 1px solid rgba(0, 245, 212, 0.3) !important;
-    border-radius: 50% !important;
+    border: 1px solid #E5E7EB !important;
+    border-radius: 4px !important; /* Square avatar */
+    background: #F8F9FA !important;
 }
 
 /* ── Chat input ── */
@@ -698,112 +705,96 @@ st.markdown("""
 
 [data-testid="stChatInput"] textarea,
 [data-testid="stChatInputContainer"] textarea {
-    background: #161b22 !important;
-    border: 1px solid rgba(255,255,255,0.1) !important;
-    border-radius: 12px !important;
-    color: #e5e7eb !important;
-    font-size: 0.93rem !important;
+    background: #FFFFFF !important;
+    border: 1px solid #D1D5DB !important;
+    border-radius: 4px !important;
+    color: #111827 !important;
+    font-size: 0.95rem !important;
     padding: 12px 16px !important;
 }
 
 [data-testid="stChatInput"] textarea:focus,
 [data-testid="stChatInputContainer"] textarea:focus {
-    border-color: rgba(0, 245, 212, 0.4) !important;
-    box-shadow: 0 0 0 1px rgba(0, 245, 212, 0.15) !important;
+    border-color: #1D4ED8 !important;
+    box-shadow: 0 0 0 1px rgba(29, 78, 216, 0.2) !important;
     outline: none !important;
 }
 
 [data-testid="stChatInput"] textarea::placeholder {
-    color: #4b5563 !important;
+    color: #9CA3AF !important;
 }
 
 [data-testid="stChatInput"] button,
 [data-testid="stChatInputContainer"] button {
-    background: #00f5d4 !important;
+    background: #111827 !important; /* Solid dark button */
+    color: #FFFFFF !important;
     border: none !important;
-    border-radius: 8px !important;
+    border-radius: 4px !important;
 }
 
 [data-testid="stChatInput"] button:hover,
 [data-testid="stChatInputContainer"] button:hover {
-    background: #00dfc0 !important;
+    background: #374151 !important;
 }
 
-/* ── Kill red focus outlines ── */
-[data-testid="stChatInput"] > div:focus-within,
-[data-testid="stChatInputContainer"] > div:focus-within {
-    outline: none !important;
-    box-shadow: none !important;
-    border: none !important;
-}
-
-[data-testid="stChatInput"] [data-baseweb="textarea"],
-[data-testid="stChatInput"] [data-baseweb="base-input"] {
-    outline: none !important;
-    box-shadow: none !important;
-    background-color: transparent !important;
-}
-
-[data-testid="stChatInput"] [data-baseweb="base-input"]:focus-within {
-    border-color: rgba(0, 245, 212, 0.4) !important;
-    box-shadow: none !important;
-}
-
-*:focus, *:active, *:focus-visible { outline: none !important; }
-div[data-baseweb] [aria-invalid] { box-shadow: none !important; }
-
-/* ── Buttons — clean pill ── */
+/* ── Buttons — Brutalist/Institutional ── */
 .stButton > button {
-    background: rgba(255,255,255,0.04) !important;
-    border: 1px solid rgba(255,255,255,0.1) !important;
-    border-radius: 8px !important;
-    color: #d1d5db !important;
-    font-size: 0.84rem !important;
-    font-weight: 500 !important;
+    background: #FFFFFF !important;
+    border: 1px solid #D1D5DB !important;
+    border-radius: 4px !important;
+    color: #374151 !important;
+    font-size: 0.85rem !important;
+    font-weight: 600 !important;
     padding: 8px 20px !important;
-    transition: all 0.15s ease !important;
+    box-shadow: 2px 2px 0px #E5E7EB !important; /* Physical button weight */
+    transition: all 0.1s ease !important;
 }
 
 .stButton > button:hover {
-    background: rgba(0, 245, 212, 0.08) !important;
-    border-color: rgba(0, 245, 212, 0.3) !important;
-    color: #00f5d4 !important;
+    border-color: #9CA3AF !important;
+    color: #111827 !important;
+}
+
+.stButton > button:active {
+    box-shadow: 0px 0px 0px #E5E7EB !important;
+    transform: translate(2px, 2px) !important;
 }
 
 /* ── Text input ── */
 .stTextInput > div > div > input {
-    background: #161b22 !important;
-    border: 1px solid rgba(255,255,255,0.1) !important;
-    border-radius: 8px !important;
-    color: #e5e7eb !important;
-    font-family: 'Space Grotesk', sans-serif !important;
-    font-size: 0.93rem !important;
+    background: #FFFFFF !important;
+    border: 1px solid #D1D5DB !important;
+    border-radius: 4px !important;
+    color: #111827 !important;
+    font-family: 'Roboto Slab', serif !important;
+    font-size: 0.95rem !important;
     padding: 10px 14px !important;
     text-align: center !important;
 }
 
 .stTextInput > div > div > input::placeholder {
-    color: #4b5563 !important;
+    color: #9CA3AF !important;
 }
 
 .stTextInput > div > div > input:focus {
-    border-color: rgba(0, 245, 212, 0.4) !important;
-    box-shadow: 0 0 0 1px rgba(0, 245, 212, 0.1) !important;
+    border-color: #1D4ED8 !important;
+    box-shadow: 0 0 0 1px rgba(29, 78, 216, 0.2) !important;
     outline: none !important;
 }
 
 .stTextInput label {
-    color: #6b7280 !important;
-    font-size: 0.78rem !important;
+    color: #4B5563 !important;
+    font-size: 0.75rem !important;
     letter-spacing: 1px !important;
     text-transform: uppercase !important;
+    font-weight: 700 !important;
 }
 
 /* ── Bottom dock ── */
 [data-testid="stBottom"] {
-    background: #0f1117 !important;
-    background-color: #0f1117 !important;
-    border-top: 1px solid rgba(255,255,255,0.06) !important;
+    background: #F8F9FA !important;
+    background-color: #F8F9FA !important;
+    border-top: 1px solid #E5E7EB !important;
 }
 
 [data-testid="stBottom"] > div {
@@ -812,16 +803,16 @@ div[data-baseweb] [aria-invalid] { box-shadow: none !important; }
 }
 
 /* ── Spinner ── */
-.stSpinner > div { border-top-color: #00f5d4 !important; }
-[data-testid="stSpinnerContainer"] { color: #6b7280 !important; }
+.stSpinner > div { border-top-color: #1D4ED8 !important; }
+[data-testid="stSpinnerContainer"] { color: #6B7280 !important; }
 
 /* ── Scrollbar ── */
-::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #9CA3AF; }
 
-/* ── Tables — scoped to actual tables only ── */
+/* ── Tables ── */
 .stDataFrame, .stTable {
     max-width: 100% !important;
     overflow-x: auto !important;
@@ -832,11 +823,23 @@ div[data-baseweb] [aria-invalid] { box-shadow: none !important; }
     overflow-x: auto !important;
     white-space: nowrap !important;
     max-width: 100% !important;
+    border: 1px solid #E5E7EB !important;
+    border-radius: 4px !important;
+}
+
+[data-testid="stChatMessage"] th {
+    background-color: #F3F4F6 !important;
+    color: #111827 !important;
+    font-weight: 600 !important;
+}
+
+[data-testid="stChatMessage"] td {
+    border-top: 1px solid #E5E7EB !important;
 }
 
 /* ── Responsive ── */
 @media (max-width: 768px) {
-    .stApp h1 { font-size: 1.5rem !important; }
+    .stApp h1 { font-size: 1.8rem !important; }
 }
 </style>
 """, unsafe_allow_html=True)
