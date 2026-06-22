@@ -2606,24 +2606,13 @@ else:
                                         "_reason": reason,
                                     })
 
-                                port_pnl = total_current - total_entry
-                                port_ret = (port_pnl / total_entry * 100) if total_entry > 0 else 0
+                                st.session_state[f"review_data_{port['id']}"] = {
+                                    "rows": review_rows,
+                                    "total_entry": total_entry,
+                                    "total_current": total_current,
+                                    "holdings": holdings,
+                                }
 
-                                m1, m2, m3 = st.columns(3)
-                                m1.metric("Invested", f"₹{total_entry:,.0f}")
-                                m2.metric("Current Value", f"₹{total_current:,.0f}")
-                                m3.metric("Total Return", f"{port_ret:+.1f}%", delta=f"₹{port_pnl:,.0f}")
-
-                                display_df = pd.DataFrame(review_rows).drop(columns=["_reason"])
-                                st.dataframe(display_df, hide_index=True, use_container_width=True)
-
-                                for r in review_rows:
-                                    if "SELL" in r["Action"]:
-                                        st.error(f"**{r['Stock']}** — {r['Action']}: {r['_reason']} (Score {r['Score']})")
-                                    elif "BUY" in r["Action"]:
-                                        st.success(f"**{r['Stock']}** — {r['_reason']} (Score {r['Score']})")
-
-                                # Advance next review date
                                 try:
                                     next_days = int(port.get("review_freq", 90))
                                 except (ValueError, TypeError):
@@ -2633,51 +2622,112 @@ else:
                                     sb.table("portfolios").update(
                                         {"next_review_date": new_review}
                                     ).eq("id", port["id"]).execute()
-                                    st.caption(f"✅ Next review set to {new_review}")
                                 except Exception:
                                     pass
 
-                                # ── Apply Changes Button ──
-                                has_actions = any("SELL" in r["Action"] or "BUY" in r["Action"] for r in review_rows)
+                review_state = st.session_state.get(f"review_data_{port['id']}")
+                if review_state:
+                    review_rows = review_state["rows"]
+                    total_entry = review_state["total_entry"]
+                    total_current = review_state["total_current"]
+                    rev_holdings = review_state["holdings"]
 
-                                if has_actions:
-                                    st.markdown("---")
-                                    st.caption("⚠️ You still need to execute trades at your broker (Zerodha, Groww, etc.). This button updates your portfolio records to match.")
+                    port_pnl = total_current - total_entry
+                    port_ret = (port_pnl / total_entry * 100) if total_entry > 0 else 0
 
-                                    if st.button("✅ Apply Changes to Portfolio", key=f"apply_{port['id']}", use_container_width=True):
-                                        applied = []
-                                        for i, r in enumerate(review_rows):
-                                            h = holdings[i]
+                    m1, m2, m3 = st.columns(3)
+                    m1.metric("Invested", f"₹{total_entry:,.0f}")
+                    m2.metric("Current Value", f"₹{total_current:,.0f}")
+                    m3.metric("Total Return", f"{port_ret:+.1f}%", delta=f"₹{port_pnl:,.0f}")
 
-                                            if "SELL ALL" in r["Action"]:
-                                                sb.table("holdings").delete().eq("id", h["id"]).execute()
-                                                applied.append(f"Removed {r['Stock']}")
+                    display_df = pd.DataFrame(review_rows).drop(columns=["_reason"])
+                    st.dataframe(display_df, hide_index=True, use_container_width=True)
 
-                                            elif "SELL" in r["Action"] and "of" in r["Action"]:
-                                                parts = r["Action"].split("SELL")[1].split("of")
-                                                sell_n = int(parts[0].strip())
-                                                new_shares = max(0, (h.get("shares") or 0) - sell_n)
-                                                new_price = float(r["Now"].replace("₹", "").replace(",", ""))
-                                                new_invested = new_shares * (h.get("price_at_entry") or new_price)
+                    for r in review_rows:
+                        if "SELL" in r["Action"]:
+                            st.error(f"**{r['Stock']}** — {r['Action']}: {r['_reason']} (Score {r['Score']})")
+                        elif "BUY" in r["Action"]:
+                            st.success(f"**{r['Stock']}** — {r['_reason']} (Score {r['Score']})")
 
-                                                if new_shares == 0:
-                                                    sb.table("holdings").delete().eq("id", h["id"]).execute()
-                                                    applied.append(f"Removed {r['Stock']} (all shares sold)")
-                                                else:
-                                                    sb.table("holdings").update({
-                                                        "shares": new_shares,
-                                                        "sip_amount_inr": round(new_invested, 2),
-                                                    }).eq("id", h["id"]).execute()
-                                                    applied.append(f"{r['Stock']}: {h.get('shares')}→{new_shares} shares")
+                    action_stocks = [(i, r) for i, r in enumerate(review_rows)
+                                     if "SELL" in r["Action"] or "BUY" in r["Action"]]
 
-                                            elif "BUY" in r["Action"]:
-                                                applied.append(f"{r['Stock']}: Buy more at your broker, then update manually")
+                    if action_stocks:
+                        st.markdown("---")
+                        st.caption("Update what you actually did at your broker:")
 
-                                        if applied:
-                                            for a in applied:
-                                                st.write(f"• {a}")
-                                            st.success("Portfolio records updated.")
-                                            st.rerun()
+                        for idx, r in action_stocks:
+                            h = rev_holdings[idx]
+
+                            if "SELL" in r["Action"]:
+                                if "SELL ALL" in r["Action"]:
+                                    default_sell = h.get("shares") or 0
+                                else:
+                                    try:
+                                        default_sell = int(r["Action"].split("SELL")[1].split("of")[0].strip())
+                                    except (ValueError, IndexError):
+                                        default_sell = 0
+                                st.number_input(
+                                    f"🔴 {r['Stock']} — shares sold (of {h.get('shares', 0)})",
+                                    min_value=0, max_value=h.get("shares") or 0,
+                                    value=default_sell,
+                                    key=f"sold_{port['id']}_{h['id']}"
+                                )
+
+                            elif "BUY" in r["Action"]:
+                                c1, c2 = st.columns(2)
+                                with c1:
+                                    st.number_input(
+                                        f"🟢 {r['Stock']} — shares bought",
+                                        min_value=0, value=0,
+                                        key=f"add_qty_{port['id']}_{h['id']}"
+                                    )
+                                with c2:
+                                    st.number_input(
+                                        f"🟢 {r['Stock']} — price paid (₹)",
+                                        min_value=0.0, value=0.0, format="%.2f",
+                                        key=f"add_price_{port['id']}_{h['id']}"
+                                    )
+
+                        if st.button("✅ Portfolio Updated", key=f"apply_{port['id']}", use_container_width=True):
+                            for i, r in enumerate(review_rows):
+                                h = rev_holdings[i]
+
+                                if "SELL" in r["Action"]:
+                                    sold = st.session_state.get(f"sold_{port['id']}_{h['id']}", 0)
+                                    if sold > 0:
+                                        old_shares = h.get("shares") or 0
+                                        new_shares = old_shares - sold
+                                        if new_shares <= 0:
+                                            sb.table("holdings").delete().eq("id", h["id"]).execute()
+                                        else:
+                                            new_invested = new_shares * (h.get("price_at_entry") or 0)
+                                            sb.table("holdings").update({
+                                                "shares": new_shares,
+                                                "sip_amount_inr": round(new_invested, 2),
+                                            }).eq("id", h["id"]).execute()
+
+                                elif "BUY" in r["Action"]:
+                                    new_qty = st.session_state.get(f"add_qty_{port['id']}_{h['id']}", 0)
+                                    buy_price = st.session_state.get(f"add_price_{port['id']}_{h['id']}", 0.0)
+                                    if new_qty > 0 and buy_price > 0:
+                                        old_shares = h.get("shares") or 0
+                                        old_price = h.get("price_at_entry") or 0
+                                        total_shares = old_shares + new_qty
+                                        avg_price = ((old_shares * old_price) + (new_qty * buy_price)) / total_shares
+                                        sb.table("holdings").update({
+                                            "shares": total_shares,
+                                            "price_at_entry": round(avg_price, 2),
+                                            "sip_amount_inr": round(total_shares * avg_price, 2),
+                                        }).eq("id", h["id"]).execute()
+
+                            st.session_state.pop(f"review_data_{port['id']}", None)
+                            st.success("Portfolio updated.")
+                            st.rerun()
+
+                    if st.button("✕ Close Review", key=f"close_review_{port['id']}"):
+                        st.session_state.pop(f"review_data_{port['id']}", None)
+                        st.rerun()
 
                 # Rename & Delete
                 col_r, col_d = st.columns([3, 1])
