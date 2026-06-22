@@ -259,6 +259,11 @@ def fetch_fundamentals(ticker):
             "rev_growth": None,
             "ni_growth": None,
             "debt_growth": None,
+            # Daily Tracking & Momentum Metrics
+            "price_1d_pct": None,
+            "price_5d_pct": None,
+            "rsi_14": None,
+            "vol_spike_flag": False,
             # Historical (y0 = most recent year, y3 = oldest)
             "years_of_data": 0,
             "revenue_y0": None, "revenue_y1": None, "revenue_y2": None, "revenue_y3": None,
@@ -268,6 +273,34 @@ def fetch_fundamentals(ticker):
             "roe_y0": None, "roe_y1": None, "roe_y2": None, "roe_y3": None,
             "de_y0": None, "de_y1": None, "de_y2": None, "de_y3": None,
         }
+
+        # ── Daily Momentum & Tracking Data ──
+        try:
+            hist = stock.history(period="1mo")
+            if not hist.empty and len(hist) >= 2:
+                closes = hist["Close"]
+                vols = hist["Volume"]
+
+                # 1D and 5D Returns
+                data["price_1d_pct"] = round((closes.iloc[-1] / closes.iloc[-2] - 1) * 100, 2)
+                if len(closes) >= 6:
+                    data["price_5d_pct"] = round((closes.iloc[-1] / closes.iloc[-6] - 1) * 100, 2)
+                
+                # Volume Spike (>300% of average)
+                avg_vol = vols.mean()
+                if avg_vol > 0:
+                    data["vol_spike_flag"] = bool(vols.iloc[-1] > (3 * avg_vol))
+
+                # 14-day RSI
+                if len(closes) > 14:
+                    delta = closes.diff()
+                    gain = delta.clip(lower=0).ewm(span=14, adjust=False).mean()
+                    loss = -1 * delta.clip(upper=0).ewm(span=14, adjust=False).mean()
+                    rs = gain / loss
+                    rsi = 100 - (100 / (1 + rs))
+                    data["rsi_14"] = round(float(rsi.iloc[-1]), 2)
+        except Exception:
+            pass # Fails silently, leaving metrics as None
 
         # Historical data extraction (up to 4 years)
         try:
@@ -562,6 +595,7 @@ def main():
         "pe", "pb", "roe_pct", "de", "eps", "earnings_yield",
         "dividend_yield_pct", "profit_margin",
         "rev_growth", "ni_growth", "debt_growth",
+        "price_1d_pct", "price_5d_pct", "rsi_14", "vol_spike_flag",
         "years_of_data",
         "revenue_y0", "revenue_y1", "revenue_y2", "revenue_y3",
         "net_income_y0", "net_income_y1", "net_income_y2", "net_income_y3",
