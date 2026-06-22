@@ -2841,7 +2841,7 @@ else:
                         st.caption(f"📊 Market context: {nifty_note}")
 
                     display_df = pd.DataFrame(review_rows).drop(columns=[c for c in review_rows[0] if c.startswith("_")])
-                    st.dataframe(display_df, hide_index=True)
+                    st.dataframe(display_df, hide_index=True, use_container_width=True)
 
                     # Per-stock reasoning with book grounding
                     for r in review_rows:
