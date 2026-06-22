@@ -88,6 +88,70 @@ def allocate_shares(stocks, sip_amount):
 
     return result, round(remaining, 2)
 
+def find_replacement_candidates(investor_type, time_horizon, exclude_tickers, current_sectors):
+    """Find replacement stocks when review flags sells."""
+    df = universe_df.copy()
+
+    if "quality_pass" in df.columns:
+        df = df[df["quality_pass"] != False]
+    df = df[df["years_of_data"] >= 2]
+    df = df[pd.notna(df["pe"]) & pd.notna(df["roe_pct"]) & pd.notna(df["de"])]
+    df = df[df["pe"] > 0]
+
+    # Same profile filtering as get_sip_candidates
+    if investor_type == "defensive":
+        df = df[df["score"] >= 3]
+        mask = df["graham_pass"] == True
+        if mask.sum() >= 5:
+            df = df[mask]
+    elif investor_type == "enterprising":
+        df = df[df["score"] >= 2]
+        mask = df["trajectory_pass"] == True
+        if mask.sum() >= 5:
+            df = df[mask]
+    else:
+        df = df[df["score"] >= 2]
+        mask = (df["greenblatt_pass"] == True) | (df["dorsey_pass"] == True)
+        if mask.sum() >= 5:
+            df = df[mask]
+
+    if time_horizon == "short":
+        high_score = df[df["score"] >= 3]
+        if len(high_score) >= 5:
+            df = high_score
+
+    # Exclude stocks already in portfolio
+    df = df[~df["ticker"].isin(exclude_tickers)]
+
+    # Exclude sectors at the 2-stock cap
+    from collections import Counter
+    sector_counts = Counter(current_sectors)
+    full_sectors = [s for s, c in sector_counts.items() if c >= 2]
+    if full_sectors:
+        df = df[~df["sector"].isin(full_sectors)]
+
+    # Sort
+    df = df.copy()
+    df["_sort_score"] = -df["score"]
+    df["_sort_pe"] = df["pe"].apply(lambda x: x if pd.notna(x) else 9999)
+    df["_sort_roe"] = df["roe_pct"].apply(lambda x: -x if pd.notna(x) else 9999)
+    df = df.sort_values(["_sort_score", "_sort_pe", "_sort_roe"])
+
+    candidates = []
+    for _, row in df.head(5).iterrows():
+        candidates.append({
+            "ticker": row["ticker"],
+            "name": row.get("name", "N/A") if pd.notna(row.get("name")) else "N/A",
+            "sector": row.get("sector", "N/A") if pd.notna(row.get("sector")) else "N/A",
+            "price": round(row["price"], 2) if pd.notna(row.get("price")) else 0,
+            "score": int(row["score"]),
+            "pe": round(row["pe"], 2) if pd.notna(row.get("pe")) else "N/A",
+            "roe_pct": round(row["roe_pct"], 2) if pd.notna(row.get("roe_pct")) else "N/A",
+        })
+    return candidates
+
+
+
 def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int, time_horizon: str, review_days: int = 90, stocks_json: str = "[]") -> dict:
     """Register a finalized SIP portfolio so the user can save it to their account.
     Call this ONLY after you have presented the final portfolio table with all stocks and allocations.
@@ -2651,6 +2715,7 @@ else:
 
                     action_stocks = [(i, r) for i, r in enumerate(review_rows)
                                      if "SELL" in r["Action"] or "BUY" in r["Action"]]
+                    sell_stocks = [(i, r) for i, r in enumerate(review_rows) if "SELL" in r["Action"]]
 
                     if action_stocks:
                         st.markdown("---")
@@ -2689,6 +2754,66 @@ else:
                                         key=f"add_price_{port['id']}_{h['id']}"
                                     )
 
+                        # ── Replacement candidates if sells exist ──
+                        if sell_stocks:
+                            # Calculate freed capital
+                            freed = 0
+                            for idx, r in sell_stocks:
+                                h = rev_holdings[idx]
+                                sell_qty = st.session_state.get(f"sold_{port['id']}_{h['id']}", 0)
+                                price = float(r["Now"].replace("₹", "").replace(",", ""))
+                                freed += sell_qty * price
+
+                            # Get remaining portfolio sectors (after sells)
+                            remaining_sectors = []
+                            for i, h in enumerate(rev_holdings):
+                                is_sell = any(si == i for si, _ in sell_stocks)
+                                if not is_sell:
+                                    remaining_sectors.append(h.get("sector", ""))
+                                else:
+                                    sold_qty = st.session_state.get(f"sold_{port['id']}_{h['id']}", 0)
+                                    if (h.get("shares") or 0) - sold_qty > 0:
+                                        remaining_sectors.append(h.get("sector", ""))
+
+                            all_tickers = [h["ticker"] for h in rev_holdings]
+                            candidates = find_replacement_candidates(
+                                port.get("investor_type", "balanced"),
+                                port.get("time_horizon", "medium"),
+                                all_tickers,
+                                remaining_sectors
+                            )
+
+                            if candidates:
+                                st.markdown("---")
+                                st.markdown(f"**Replacement candidates** (≈₹{freed:,.0f} freed from sells)")
+
+                                cand_df = pd.DataFrame(candidates)
+                                cand_display = cand_df[["name", "ticker", "sector", "price", "score", "pe", "roe_pct"]].rename(columns={
+                                    "name": "Stock", "ticker": "Ticker", "sector": "Sector",
+                                    "price": "Price", "score": "Score", "pe": "P/E", "roe_pct": "ROE %"
+                                })
+                                st.dataframe(cand_display, hide_index=True, use_container_width=True)
+
+                                for c in candidates:
+                                    col_sel, col_qty, col_px = st.columns([1, 2, 2])
+                                    with col_sel:
+                                        st.checkbox(
+                                            c["name"][:15],
+                                            key=f"repl_sel_{port['id']}_{c['ticker']}",
+                                            value=False
+                                        )
+                                    with col_qty:
+                                        st.number_input(
+                                            f"Shares", min_value=0, value=0,
+                                            key=f"repl_qty_{port['id']}_{c['ticker']}"
+                                        )
+                                    with col_px:
+                                        st.number_input(
+                                            f"Price (₹)", min_value=0.0,
+                                            value=float(c["price"]), format="%.2f",
+                                            key=f"repl_px_{port['id']}_{c['ticker']}"
+                                        )
+
                         if st.button("✅ Portfolio Updated", key=f"apply_{port['id']}", use_container_width=True):
                             for i, r in enumerate(review_rows):
                                 h = rev_holdings[i]
@@ -2720,6 +2845,33 @@ else:
                                             "price_at_entry": round(avg_price, 2),
                                             "sip_amount_inr": round(total_shares * avg_price, 2),
                                         }).eq("id", h["id"]).execute()
+
+                            # Insert replacement stocks
+                            if sell_stocks:
+                                for c in candidates:
+                                    selected = st.session_state.get(f"repl_sel_{port['id']}_{c['ticker']}", False)
+                                    qty = st.session_state.get(f"repl_qty_{port['id']}_{c['ticker']}", 0)
+                                    px = st.session_state.get(f"repl_px_{port['id']}_{c['ticker']}", 0.0)
+
+                                    if selected and qty > 0 and px > 0:
+                                        urow = universe_df[universe_df["ticker"] == c["ticker"]]
+                                        score = int(urow["score"].iloc[0]) if len(urow) and pd.notna(urow["score"].iloc[0]) else None
+                                        pe = float(urow["pe"].iloc[0]) if len(urow) and pd.notna(urow["pe"].iloc[0]) else None
+                                        roe = float(urow["roe_y0"].iloc[0]) if len(urow) and "roe_y0" in urow.columns and pd.notna(urow["roe_y0"].iloc[0]) else None
+
+                                        sb.table("holdings").insert({
+                                            "portfolio_id": port["id"],
+                                            "ticker": c["ticker"],
+                                            "name": c["name"],
+                                            "sector": c["sector"],
+                                            "allocation_pct": 0,
+                                            "shares": qty,
+                                            "sip_amount_inr": round(qty * px, 2),
+                                            "price_at_entry": round(px, 2),
+                                            "pe_at_entry": pe,
+                                            "roe_at_entry": roe,
+                                            "score_at_entry": score,
+                                        }).execute()
 
                             st.session_state.pop(f"review_data_{port['id']}", None)
                             st.success("Portfolio updated.")
