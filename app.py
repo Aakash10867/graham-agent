@@ -3458,11 +3458,19 @@ elif st.session_state.sb_view_mode == "portfolios":
                             st.info(f"**{r['Stock']}** — {r['Action']}\n\n{r['_reasoning']}")
                         matching = next((h for h in enriched_data if h.get("ticker") == r["_ticker"]), None)
                         if matching:
-                            with st.expander(f"Quality Data: {r['Stock']}"):
-                                st.caption(f"Flags: {matching.get('quality_flags', 'N/A')}")
-                                st.caption(f"Cash conversion: {matching.get('cash_conversion', 'N/A')}")
-                                st.caption(f"has_red_flags: {matching.get('has_red_flags', False)}")
-                                st.caption(f"ROE trend: {matching.get('roe_trend', [])}")
+                            flags = matching.get('quality_flags', 'N/A')
+                            ccr = matching.get('cash_conversion', 'N/A')
+                            red = matching.get('has_red_flags', False)
+                            roe_t = matching.get('roe_trend', [])
+                            st.markdown(
+                                f"<details><summary style='cursor:pointer;color:#6B7280;font-size:0.82rem;'>"
+                                f"Quality Data: {r['Stock']}</summary>"
+                                f"<p style='color:#6B7280;font-size:0.8rem;margin:4px 0;'>"
+                                f"Flags: {flags}<br>"
+                                f"Cash conversion: {ccr} · Red flags: {red}<br>"
+                                f"ROE trend: {roe_t}</p></details>",
+                                unsafe_allow_html=True
+                            )
                     # ── Update form — ALL holdings ──
                     sell_stocks = [(i, r) for i, r in enumerate(review_rows) if "SELL" in r["Action"]]
 
@@ -3489,13 +3497,14 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 "allocation_pct": alloc, "price": r["_now_price"],
                             })
                     sip_alloc = {}
+                    unallocated_sip = cycle_amount
                     if sip_stocks and cycle_amount > 0:
-                        allocated, unallocated = allocate_shares(sip_stocks, cycle_amount)
+                        allocated, unallocated_sip = allocate_shares(sip_stocks, cycle_amount)
                         for a in allocated:
                             sip_alloc[a["ticker"]] = a["shares"]
                         st.caption(f"💰 This cycle ({review_days} days): ₹{cycle_amount:,} to invest — suggested shares pre-filled below")
-                        if unallocated > 0:
-                            st.caption(f"₹{unallocated:,.0f} unallocatable (not enough for another share)")
+                        if unallocated_sip > 0:
+                            st.caption(f"₹{unallocated_sip:,.0f} unallocatable (not enough for another share)")
                     else:
                         st.caption("Update what you actually did at your broker since last review:")
 
@@ -3550,20 +3559,21 @@ elif st.session_state.sb_view_mode == "portfolios":
                         )
                         if candidates:
                             st.markdown("---")
-                            st.markdown(f"**Replacement candidates** (≈₹{freed:,.0f} freed from sells)")
+                            total_repl_budget = freed + unallocated_sip
+                            st.markdown(f"**Replacement candidates** (₹{freed:,.0f} freed + ₹{unallocated_sip:,.0f} SIP = **₹{total_repl_budget:,.0f}** to deploy)")
                             cand_df = pd.DataFrame(candidates)
                             cand_display = cand_df[["name", "ticker", "sector", "price", "score", "pe", "roe_pct"]].rename(columns={
                                 "name": "Stock", "ticker": "Ticker", "sector": "Sector",
                                 "price": "Price", "score": "Score", "pe": "P/E", "roe_pct": "ROE %"
                             })
                             st.dataframe(cand_display, hide_index=True, use_container_width=True)
-                            st.caption("Shares pre-filled from freed capital. Set to 0 to skip a stock.")
-                            per_slot = freed / len(candidates) if candidates else 0
+                            st.caption("Shares pre-filled from total budget. Set to 0 to skip a stock.")
+                            per_slot = total_repl_budget / len(candidates) if candidates else 0
                             for c in candidates:
                                 suggested = max(1, int(per_slot // c["price"])) if c["price"] > 0 else 0
                                 col_name, col_qty, col_px = st.columns([2, 1, 1])
                                 with col_name:
-                                    st.markdown(f"**{c['name'][:20]}** ({c['ticker']})")
+                                    st.markdown(f"**{c['name'].strip()}** ({c['ticker']})")
                                 with col_qty:
                                     st.number_input("Shares", min_value=0, value=suggested, key=f"repl_qty_{port['id']}_{c['ticker']}")
                                 with col_px:
@@ -3575,11 +3585,11 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 rp = st.session_state.get(f"repl_px_{port['id']}_{c['ticker']}", 0.0)
                                 if rq > 0:
                                     spent += rq * rp
-                            remaining = freed - spent
+                            remaining = total_repl_budget - spent
                             if remaining >= 0:
-                                st.caption(f"💰 ₹{freed:,.0f} freed — ₹{spent:,.0f} allocated = ₹{remaining:,.0f} remaining")
+                                st.caption(f"💰 Budget: ₹{total_repl_budget:,.0f} — Allocated: ₹{spent:,.0f} = ₹{remaining:,.0f} remaining")
                             else:
-                                st.warning(f"Over-allocated by ₹{abs(remaining):,.0f}. Freed: ₹{freed:,.0f}, Allocated: ₹{spent:,.0f}")
+                                st.warning(f"Over-allocated by ₹{abs(remaining):,.0f}. Budget: ₹{total_repl_budget:,.0f}, Allocated: ₹{spent:,.0f}")
 
                     # ── Single update button ──
                     if st.button("✅ Portfolio Updated", key=f"apply_{port['id']}", use_container_width=True):
