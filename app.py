@@ -2939,7 +2939,7 @@ else:
                 # ── Portfolio Growth Chart ──
                 try:
                     hist_resp = sb.table("portfolio_history").select(
-                        "date, total_value, daily_return_pct"
+                        "date, total_value, daily_return_pct, nifty_value"
                     ).eq("portfolio_id", port["id"]).order("date").execute()
                     hist_data = hist_resp.data
 
@@ -2948,18 +2948,34 @@ else:
                         hist_df["date"] = pd.to_datetime(hist_df["date"])
                         hist_df = hist_df.set_index("date")
 
-                        st.markdown("**Portfolio Value**")
-                        st.line_chart(hist_df["total_value"], use_container_width=True, color="#1D4ED8")
+                        # Normalize both to % return from day 1
+                        port_base = hist_df["total_value"].iloc[0]
+                        chart_data = pd.DataFrame(index=hist_df.index)
+                        chart_data["Portfolio"] = ((hist_df["total_value"] / port_base) - 1) * 100 if port_base > 0 else 0
 
-                        # Show return summary below chart
+                        has_nifty = "nifty_value" in hist_df.columns and hist_df["nifty_value"].notna().sum() >= 2
+                        if has_nifty:
+                            nifty_base = hist_df["nifty_value"].dropna().iloc[0]
+                            chart_data["Nifty 50"] = ((hist_df["nifty_value"] / nifty_base) - 1) * 100 if nifty_base > 0 else 0
+
+                        st.markdown("**Growth vs Market (%)**")
+                        st.line_chart(chart_data, use_container_width=True, color=["#1D4ED8", "#9CA3AF"][:len(chart_data.columns)])
+
+                        # Summary
                         first_val = hist_df["total_value"].iloc[0]
                         last_val = hist_df["total_value"].iloc[-1]
-                        growth = ((last_val - first_val) / first_val) * 100 if first_val > 0 else 0
+                        port_growth = ((last_val - first_val) / first_val) * 100 if first_val > 0 else 0
                         days_tracked = (hist_df.index[-1] - hist_df.index[0]).days
-                        st.caption(
-                            f"₹{first_val:,.0f} → ₹{last_val:,.0f} · "
-                            f"{growth:+.1f}% over {days_tracked} days"
-                        )
+
+                        summary = f"Portfolio: ₹{first_val:,.0f} → ₹{last_val:,.0f} ({port_growth:+.1f}%)"
+                        if has_nifty:
+                            nifty_first = hist_df["nifty_value"].dropna().iloc[0]
+                            nifty_last = hist_df["nifty_value"].dropna().iloc[-1]
+                            nifty_growth = ((nifty_last - nifty_first) / nifty_first) * 100 if nifty_first > 0 else 0
+                            alpha = port_growth - nifty_growth
+                            summary += f" · Nifty: {nifty_growth:+.1f}% · Alpha: {alpha:+.1f}%"
+                        summary += f" · {days_tracked} days"
+                        st.caption(summary)
                     elif hist_data and len(hist_data) == 1:
                         st.caption("📈 Growth chart available after 2+ days of tracking.")
                 except Exception:
