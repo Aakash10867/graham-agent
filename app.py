@@ -1067,8 +1067,8 @@ with st.sidebar:
                         st.rerun()
                     except Exception as e:
                         st.error(f"Sign up failed: {e}")
-    # Inside with st.sidebar:
-else:
+
+    else:
     st.caption(f"Logged in as {st.session_state.sb_user_email}")
     
     if st.button("📥 Import Existing Portfolio", use_container_width=True):
