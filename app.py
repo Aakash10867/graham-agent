@@ -821,49 +821,17 @@ div[data-baseweb] [aria-invalid] { box-shadow: none !important; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
 
-/* ── Tables & Text — Unifying DataFrames and Markdown ── */
-
-/* 1. Fix standard paragraph text wrapping inside chat */
-[data-testid="stChatMessage"] p {
-    line-height: 1.6 !important;
-    word-wrap: break-word !important;
+/* ── Tables — scoped to actual tables only ── */
+.stDataFrame, .stTable {
+    max-width: 100% !important;
+    overflow-x: auto !important;
 }
 
-/* 2. Unify Chat Tables and Streamlit Static Tables */
-[data-testid="stChatMessage"] table, .stTable {
-    width: 100% !important;
-    border-collapse: collapse !important;
-    margin: 1.2rem 0 !important;
-    display: table !important; /* Overrides broken block display */
-    color: #e5e7eb !important;
-    font-size: 0.9rem !important;
-}
-
-[data-testid="stChatMessage"] th, .stTable th {
-    text-align: left !important;
-    padding: 12px 16px !important;
-    background-color: rgba(255, 255, 255, 0.04) !important;
-    border-bottom: 2px solid rgba(0, 245, 212, 0.4) !important; /* Theme accent */
-    color: #9ca3af !important;
-    font-weight: 600 !important;
-    white-space: nowrap !important; /* Keep headers crisp */
-}
-
-[data-testid="stChatMessage"] td, .stTable td {
-    padding: 12px 16px !important;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
-    vertical-align: middle !important;
-}
-
-/* 3. Give the right-most columns room to breathe */
-[data-testid="stChatMessage"] th:last-child, .stTable th:last-child,
-[data-testid="stChatMessage"] td:last-child, .stTable td:last-child {
-    padding-right: 24px !important;
-}
-
-/* 4. Ensure DataFrames stretch properly if kept */
-.stDataFrame {
-    width: 100% !important;
+[data-testid="stChatMessage"] table {
+    display: block !important;
+    overflow-x: auto !important;
+    white-space: nowrap !important;
+    max-width: 100% !important;
 }
 
 /* ── Responsive ── */
@@ -2585,7 +2553,7 @@ if st.session_state.sb_view_mode == "chat":
                         "Allocation": f"{s.get('allocation_pct', 0)}%",
                         "Monthly": f"₹{portfolio['sip_amount'] * s.get('allocation_pct', 0) / 100:,.0f}",
                     })
-                st.table(pd.DataFrame(preview_data).set_index("Stock", drop=True))
+                st.dataframe(pd.DataFrame(preview_data), hide_index=True, use_container_width=True)
                 st.caption(f"Total SIP: ₹{portfolio['sip_amount']:,}/month · {portfolio.get('investor_type', '')} · {portfolio.get('time_horizon', '')} horizon")
                 if st.button("💾 Save Portfolio", use_container_width=True):
                     try:
@@ -2638,7 +2606,7 @@ if st.session_state.sb_view_mode == "chat":
                                 "Shares": s["shares"], "Invested": f"₹{s['actual_amount']:,.0f}",
                                 "Target": f"₹{portfolio['sip_amount'] * s['allocation_pct'] / 100:,.0f}",
                             })
-                        st.table(pd.DataFrame(breakdown_data).set_index("Stock", drop=True))
+                        st.dataframe(pd.DataFrame(breakdown_data), hide_index=True, use_container_width=True)
                         st.session_state.pending_portfolio = None
                     except Exception as e:
                         st.error(f"Save failed: {e}")
@@ -2722,7 +2690,7 @@ else:
                         "allocation_pct": "Alloc %", "score_at_entry": "Score",
                     }
                     available = {k: v for k, v in display_cols.items() if k in hold_df.columns}
-                    st.table(hold_df[list(available.keys())].rename(columns=available).set_index("Stock", drop=True))
+                    st.dataframe(hold_df[list(available.keys())].rename(columns=available), hide_index=True, use_container_width=True)
                 else:
                     st.caption("No holdings found.")
 
@@ -2873,7 +2841,7 @@ else:
                         st.caption(f"📊 Market context: {nifty_note}")
 
                     display_df = pd.DataFrame(review_rows).drop(columns=[c for c in review_rows[0] if c.startswith("_")])
-                    st.table(display_df.set_index("Stock", drop=True))
+                    st.dataframe(display_df, hide_index=True, use_container_width=True)
 
                     # Per-stock reasoning with book grounding
                     for r in review_rows:
@@ -2971,7 +2939,7 @@ else:
                                 "name": "Stock", "ticker": "Ticker", "sector": "Sector",
                                 "price": "Price", "score": "Score", "pe": "P/E", "roe_pct": "ROE %"
                             })
-                            st.table(cand_display.set_index("Stock", drop=True))
+                            st.dataframe(cand_display, hide_index=True, use_container_width=True)
                             for c in candidates:
                                 col_sel, col_qty, col_px = st.columns([1, 2, 2])
                                 with col_sel:
