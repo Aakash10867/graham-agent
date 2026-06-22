@@ -548,17 +548,30 @@ st.set_page_config(
     layout="centered",
 )
 
-for _key in ["sb_access_token", "sb_refresh_token", "sb_user_email", "sb_user_id"]:
-    if _key not in st.session_state:
-        st.session_state[_key] = None
-if "pending_portfolio" not in st.session_state:
-    st.session_state.pending_portfolio = None
-if "pending_retry" not in st.session_state:
-    st.session_state.pending_retry = None
-
 
 if "sb_view_mode" not in st.session_state:
     st.session_state.sb_view_mode = "chat"
+
+# ══════════════════════════════════════════════
+# CRITICAL INITIALIZATION (Prevents Crashes)
+# ══════════════════════════════════════════════
+default_state = {
+    "sb_view_mode": "chat",
+    "messages": [],
+    "chat_history": [],
+    "sb_access_token": None,
+    "sb_refresh_token": None,
+    "sb_user_email": None,
+    "sb_user_id": None,
+    "pending_portfolio": None,
+    "pending_retry": None
+}
+
+for key, value in default_state.items():
+    if key not in st.session_state:
+        st.session_state[key] = value
+
+
 
 # ══════════════════════════════════════════════
 # PRESET PROMPTS — reduced to essentials
