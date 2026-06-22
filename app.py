@@ -2917,7 +2917,7 @@ else:
                         "allocation_pct": "Alloc %", "score_at_entry": "Score",
                     }
                     available = {k: v for k, v in display_cols.items() if k in hold_df.columns}
-                    st.dataframe(hold_df[list(available.keys())].rename(columns=available), hide_index=True, use_container_width=True)
+                    st.table(hold_df[list(available.keys())].rename(columns=available))
                 else:
                     st.caption("No holdings found.")
 
