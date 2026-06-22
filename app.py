@@ -2846,6 +2846,8 @@ if st.session_state.sb_view_mode == "chat":
                 st.session_state.pending_prompt = st.session_state.pop("pending_retry")
                 st.rerun()
 
+
+
 elif st.session_state.sb_view_mode == "import":
     st.markdown("### 📥 Import Your Existing Portfolio")
     st.caption("Onboard your current holdings to analyze them using the DeepMoat framework.")
@@ -2918,11 +2920,9 @@ elif st.session_state.sb_view_mode == "import":
                 else:
                     try:
                         sb = get_supabase()
-                        # Map review frequency defaults based on horizon rules
                         review_days = 90 if horizon == "medium" else (180 if horizon == "long" else 30)
                         next_review = (datetime.date.today() + datetime.timedelta(days=review_days)).isoformat()
                         
-                        # Insert Portfolio
                         port_resp = sb.table("portfolios").insert({
                             "user_id": st.session_state.sb_user_id,
                             "name": p_name,
@@ -2935,7 +2935,6 @@ elif st.session_state.sb_view_mode == "import":
                         
                         portfolio_id = port_resp.data[0]["id"]
                         
-                        # Loop & Insert Holdings mapped at current valuations
                         for s in st.session_state.import_holding_pool:
                             row = universe_df[universe_df["ticker"] == s["ticker"]]
                             pe = float(row["pe"].iloc[0]) if len(row) and pd.notna(row["pe"].iloc[0]) else None
@@ -2957,16 +2956,13 @@ elif st.session_state.sb_view_mode == "import":
                                 "score_at_entry": score
                             }).execute()
                         
-                        # Clear pool state
                         st.session_state.import_holding_pool = []
-                        st.success("Portfolio registered successfully!")
-                        
-                        # AUTOMATIC INSTANT LAUNCH: Route them back to portfolios tab!
                         st.session_state.sb_view_mode = "portfolios"
                         st.rerun()
                         
                     except Exception as e:
                         st.error(f"Failed to onboard portfolio: {e}")
+
 
 elif st.session_state.sb_view_mode == "portfolios":
     st.markdown("### 📁 My Portfolios")
