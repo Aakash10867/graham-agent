@@ -1069,7 +1069,7 @@ with st.sidebar:
                         st.error(f"Sign up failed: {e}")
 
     else:
-    st.caption(f"Logged in as {st.session_state.sb_user_email}")
+        st.caption(f"Logged in as {st.session_state.sb_user_email}")
     
     if st.button("📥 Import Existing Portfolio", use_container_width=True):
         st.session_state.sb_view_mode = "import"
