@@ -631,6 +631,58 @@ st.markdown("""
     border-color: #1D4ED8 !important;
 }
 
+/* ── Fix 5: Force All Standard Buttons to Light Theme ── */
+.stButton > button, 
+div[data-testid="stButton"] > button,
+[data-testid="baseButton-secondary"],
+[data-testid="baseButton-primary"] {
+    background-color: #FFFFFF !important;
+    color: #111827 !important;
+    border: 1px solid #D1D5DB !important;
+    box-shadow: 2px 2px 0px rgba(0,0,0,0.05) !important;
+    font-weight: 600 !important;
+    transition: all 0.1s ease !important;
+}
+
+.stButton > button:hover,
+div[data-testid="stButton"] > button:hover,
+[data-testid="baseButton-secondary"]:hover,
+[data-testid="baseButton-primary"]:hover {
+    background-color: #F8F9FA !important;
+    border-color: #1D4ED8 !important; /* Trust Blue on hover */
+    color: #1D4ED8 !important;
+}
+
+/* Ensure text/markdown inside the button inherits the correct color */
+.stButton > button * {
+    color: inherit !important; 
+}
+
+/* ── Fix 6: Eradicate the dotted outline inside the chat text area ── */
+[data-testid="stChatInput"] textarea,
+[data-testid="stChatInputContainer"] textarea {
+    outline: none !important;
+    border: none !important;
+    box-shadow: none !important;
+    outline-style: none !important; /* Kills the browser default dotted line */
+}
+
+[data-testid="stChatInput"] textarea:focus,
+[data-testid="stChatInputContainer"] textarea:focus {
+    outline: none !important;
+    border: none !important;
+    box-shadow: none !important;
+    outline-style: none !important;
+}
+
+/* ── Fix 7: Force the Info Box background to solid white ── */
+div[data-testid="stAlert"] {
+    background-color: transparent !important;
+}
+div[data-testid="stAlert"] > div {
+    background-color: #FFFFFF !important;
+}
+
 
 /* ── Base ── */
 .stApp {
