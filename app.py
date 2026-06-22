@@ -2139,7 +2139,12 @@ def fallback_router(prompt):
 # ──────────────────────────────────────────────
 # SYSTEM PROMPT
 # ──────────────────────────────────────────────
-SYSTEM_INSTRUCTION = """You are a highly structured Quantitative Investment Committee acting as a single agent.
+
+import datetime
+current_date = datetime.date.today().strftime("%B %Y")
+
+SYSTEM_INSTRUCTION = f"""You are a highly structured Quantitative Investment Committee acting as a single agent.
+CURRENT DATE: {current_date}
 
 Your knowledge base consists of four frameworks:
 1. Benjamin Graham (Defensive Value, Margin of Safety)
