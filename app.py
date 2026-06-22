@@ -88,19 +88,23 @@ def allocate_shares(stocks, sip_amount):
 
     return result, round(remaining, 2)
 
-
-def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int, time_horizon: str, review_frequency: str = "quarterly", stocks: list = None) -> dict:
+def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int, time_horizon: str, review_frequency: str = "quarterly", stocks_json: str = "[]") -> dict:
     """Register a finalized SIP portfolio so the user can save it to their account.
     Call this ONLY after you have presented the final portfolio table with all stocks and allocations.
 
     Args:
         portfolio_name: Short descriptive name, e.g. 'Conservative Growth SIP - June 2026'
-        investor_type: The investor profile - conservative, moderate, or aggressive
+        investor_type: The investor profile - defensive, balanced, or enterprising
         sip_amount: Monthly SIP amount in INR
         time_horizon: Investment time horizon from the questionnaire
         review_frequency: How often to review - monthly, quarterly, semi-annually, annually
-        stocks: List of dicts, each with keys: ticker, name, sector, allocation_pct
+        stocks_json: A JSON string representing a list of stock objects. Each object must have keys: ticker (str), name (str), sector (str), allocation_pct (number). Example: [{"ticker":"TCS.NS","name":"TCS","sector":"Technology","allocation_pct":20}]
     """
+    try:
+        stocks = json.loads(stocks_json) if isinstance(stocks_json, str) else stocks_json
+    except json.JSONDecodeError:
+        return {"error": f"Could not parse stocks_json: {stocks_json[:200]}"}
+
     if not stocks:
         return {"error": "No stocks provided."}
     st.session_state.pending_portfolio = {
