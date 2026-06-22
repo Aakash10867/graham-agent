@@ -3150,6 +3150,11 @@ else:
                                     f"{r['Stock']} — price paid (₹)",
                                     min_value=0.0, value=float(r["_now_price"]), format="%.2f", key=f"add_price_{port['id']}_{h_id}"
                                 )
+                            st.number_input(
+                                f"🔻 {r['Stock']} — shares sold (of {r['Shares']})",
+                                min_value=0, max_value=r["Shares"], value=0,
+                                key=f"manual_sold_{port['id']}_{h_id}"
+                            )
 
                     # ── Replacement candidates if sells exist ──
                     candidates = []
@@ -3205,18 +3210,27 @@ else:
                                         new_invested = new_shares * r["_entry_price"]
                                         sb.table("holdings").update({"shares": new_shares, "sip_amount_inr": round(new_invested, 2)}).eq("id", h_id).execute()
                             else:
-                                new_qty = st.session_state.get(f"add_qty_{port['id']}_{h_id}", 0)
-                                buy_price = st.session_state.get(f"add_price_{port['id']}_{h_id}", 0.0)
-                                if new_qty > 0 and buy_price > 0:
-                                    old_shares = r["Shares"]
-                                    old_price = r["_entry_price"]
-                                    total_shares = old_shares + new_qty
-                                    avg_price = ((old_shares * old_price) + (new_qty * buy_price)) / total_shares
-                                    sb.table("holdings").update({
-                                        "shares": total_shares,
-                                        "price_at_entry": round(avg_price, 2),
-                                        "sip_amount_inr": round(total_shares * avg_price, 2),
-                                    }).eq("id", h_id).execute()
+                                manual_sold = st.session_state.get(f"manual_sold_{port['id']}_{h_id}", 0)
+                                if manual_sold > 0:
+                                    new_shares = r["Shares"] - manual_sold
+                                    if new_shares <= 0:
+                                        sb.table("holdings").delete().eq("id", h_id).execute()
+                                    else:
+                                        new_invested = new_shares * r["_entry_price"]
+                                        sb.table("holdings").update({"shares": new_shares, "sip_amount_inr": round(new_invested, 2)}).eq("id", h_id).execute()
+                                else:
+                                    new_qty = st.session_state.get(f"add_qty_{port['id']}_{h_id}", 0)
+                                    buy_price = st.session_state.get(f"add_price_{port['id']}_{h_id}", 0.0)
+                                    if new_qty > 0 and buy_price > 0:
+                                        old_shares = r["Shares"]
+                                        old_price = r["_entry_price"]
+                                        total_shares = old_shares + new_qty
+                                        avg_price = ((old_shares * old_price) + (new_qty * buy_price)) / total_shares
+                                        sb.table("holdings").update({
+                                            "shares": total_shares,
+                                            "price_at_entry": round(avg_price, 2),
+                                            "sip_amount_inr": round(total_shares * avg_price, 2),
+                                        }).eq("id", h_id).execute()
                         if sell_stocks and candidates:
                             for c in candidates:
                                 selected = st.session_state.get(f"repl_sel_{port['id']}_{c['ticker']}", False)
