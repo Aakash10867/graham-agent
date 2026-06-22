@@ -1943,7 +1943,7 @@ Message 4 (after they answer): Ask ONLY "How often do you want to check on your 
 
 NEVER ask more than one question in a single message. If the user gives multiple answers at once, accept them and skip ahead.
 
-After presenting your final SIP portfolio with all stocks and allocations, ALWAYS call register_portfolio with the complete structured data so the user can save it. This is mandatory — do not skip it.
+After presenting your final SIP portfolio with all stocks and allocations, you MUST immediately call register_portfolio in the SAME response. Do NOT ask the user for permission to register. Do NOT say "would you like me to save this" or "shall I register this." Just call the tool. This is mandatory and non-negotiable.
 
 CRITICAL: Frame question 3 around GOALS, never around LOSSES or RISK. Do NOT mention portfolio drops, drawdowns, or volatility in the question itself.
 
@@ -2368,6 +2368,18 @@ with chat_area:
                     st.success(f"Portfolio saved! Invested ₹{portfolio['sip_amount'] - unallocated:,.0f} of ₹{portfolio['sip_amount']:,}.")
                     if unallocated > 0:
                         st.info(f"₹{unallocated:,.0f} unallocated (not enough for another share of any holding).")
+
+                    # Show actual share breakdown
+                    breakdown_data = []
+                    for s in allocated:
+                        breakdown_data.append({
+                            "Stock": s["name"] or s["ticker"],
+                            "Price": f"₹{s['price']:,.2f}",
+                            "Shares": s["shares"],
+                            "Invested": f"₹{s['actual_amount']:,.0f}",
+                            "Target": f"₹{portfolio['sip_amount'] * s['allocation_pct'] / 100:,.0f}",
+                        })
+                    st.dataframe(pd.DataFrame(breakdown_data), hide_index=True, use_container_width=True)
                     st.session_state.pending_portfolio = None
                     st.rerun()
 
@@ -2402,6 +2414,8 @@ with chat_area:
                         "content": answer,
                         "model": model_used,
                     })
+                    if st.session_state.get("pending_portfolio"):
+                        st.rerun()
 
                 except Exception as e:
                     error_msg = str(e)
