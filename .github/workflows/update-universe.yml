@@ -1,9 +1,9 @@
-name: Monthly Universe Update
+name: Daily Universe Update
 
 on:
   schedule:
-    # Runs at 6:00 AM UTC on the 01st of every month
-    - cron: '0 6 01 * *'
+    # Runs at 00:30 UTC, which translates exactly to 6:00 AM IST
+    - cron: '30 0 * * *'
   # Allow manual trigger from GitHub Actions tab
   workflow_dispatch:
 
