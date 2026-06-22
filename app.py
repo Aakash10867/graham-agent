@@ -594,6 +594,65 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@700;900&family=Inter:wght@400;500;600&display=swap');
 
+/* ── Fix 1: Nuke the dark chat container ── */
+[data-testid="stChatInput"] {
+    background-color: #FFFFFF !important;
+    border: 1px solid #D1D5DB !important;
+    border-radius: 4px !important;
+    box-shadow: 2px 2px 0px rgba(0,0,0,0.05) !important;
+}
+
+[data-testid="stChatInput"] > div {
+    background-color: transparent !important;
+}
+
+/* Ensure the send arrow icon is visible */
+[data-testid="stChatInput"] button svg {
+    fill: #FFFFFF !important;
+}
+
+/* ── Fix 2: Institutionalize the st.info alerts ── */
+[data-testid="stAlert"] {
+    background-color: #FFFFFF !important;
+    border: 1px solid #E5E7EB !important;
+    border-left: 4px solid #1D4ED8 !important; /* Trust Blue Accent */
+    color: #374151 !important;
+    border-radius: 4px !important;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.02) !important;
+}
+
+/* ── Fix 3: Clean up radio buttons (Login/Signup) ── */
+[data-baseweb="radio"] div {
+    background-color: #FFFFFF !important;
+    border-color: #D1D5DB !important;
+}
+[data-baseweb="radio"] div[data-checked="true"] {
+    background-color: #1D4ED8 !important; /* Trust blue instead of red */
+    border-color: #1D4ED8 !important;
+}
+
+/* ── Fix 4: Kill the Base Web Red Focus Ring ── */
+[data-testid="stChatInput"] > div:focus-within,
+[data-testid="stChatInputContainer"] > div:focus-within,
+[data-baseweb="base-input"]:focus-within,
+[data-baseweb="textarea"]:focus-within {
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+/* Force the Trust Blue border when actually typing */
+[data-testid="stChatInput"] [data-baseweb="base-input"]:focus-within {
+    border-color: #1D4ED8 !important;
+    box-shadow: 0 0 0 1px rgba(29, 78, 216, 0.2) !important;
+}
+
+/* Strip any leftover red outlines from all generic focus states */
+*:focus, *:active, *:focus-visible { 
+    outline: none !important; 
+}
+div[data-baseweb] [aria-invalid] { 
+    box-shadow: none !important; 
+}
 
 /* ── Base ── */
 .stApp {
