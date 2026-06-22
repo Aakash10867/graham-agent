@@ -2493,7 +2493,7 @@ else:
         st.info("No saved portfolios yet. Use the SIP Portfolio builder to create one!")
     else:
         for port in portfolios:
-            with st.expander(f"📊 {port['name']}", expanded=False):
+            with st.expander(port["name"], expanded=False):
                 st.caption(
                     f"Created: {port['created_at'][:10]} · "
                     f"{port.get('investor_type', '—')} · "
