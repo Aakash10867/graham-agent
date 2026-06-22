@@ -1105,23 +1105,6 @@ with st.sidebar:
         st.session_state.chat_history = []
         st.rerun()
 
-    st.markdown("---")
-
-    st.markdown("### How it works")
-    st.markdown(
-        "Ask about any stock by name or ticker. "
-        "The engine pulls live data from Yahoo Finance, "
-        "scores it against four investment frameworks, "
-        "and grounds its reasoning in classic investment books."
-    )
-
-    st.markdown("### Frameworks")
-    st.markdown(
-        "**Graham** — Deep value, margin of safety\n\n"
-        "**Greenblatt** — Magic formula, capital efficiency\n\n"
-        "**Dorsey** — Economic moats, financial health\n\n"
-        "**Trajectory** — Revenue & earnings momentum"
-    )
 
     st.markdown("---")
     st.markdown(
