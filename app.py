@@ -1113,17 +1113,8 @@ with st.sidebar:
             st.session_state.sb_user_email = None
             st.session_state.sb_user_id = None
             st.rerun()
-        if st.button("Log Out", use_container_width=True, key="logout_btn"):
-            try:
-                sb = get_supabase()
-                sb.auth.sign_out()
-            except Exception:
-                pass
-            st.session_state.sb_access_token = None
-            st.session_state.sb_refresh_token = None
-            st.session_state.sb_user_email = None
-            st.session_state.sb_user_id = None
-            st.rerun()
+
+    
 
     st.divider()
     st.markdown("Multi-framework investment analysis powered by Graham, Greenblatt, Dorsey, and momentum scoring.")
