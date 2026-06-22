@@ -1101,18 +1101,6 @@ with st.sidebar:
             st.session_state.sb_view_mode = "chat" # Resets view on logout
             st.rerun()
 
-        # (Keep your existing Log Out button right here)
-        if st.button("Log Out", use_container_width=True):
-            try:
-                sb = get_supabase()
-                sb.auth.sign_out()
-            except Exception:
-                pass
-            st.session_state.sb_access_token = None
-            st.session_state.sb_refresh_token = None
-            st.session_state.sb_user_email = None
-            st.session_state.sb_user_id = None
-            st.rerun()
 
     
 
