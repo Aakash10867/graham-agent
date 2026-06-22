@@ -397,6 +397,8 @@ for _key in ["sb_access_token", "sb_refresh_token", "sb_user_email", "sb_user_id
         st.session_state[_key] = None
 if "pending_portfolio" not in st.session_state:
     st.session_state.pending_portfolio = None
+if "pending_retry" not in st.session_state:
+    st.session_state.pending_retry = None
 
 
 if "sb_view_mode" not in st.session_state:
@@ -2496,19 +2498,18 @@ if st.session_state.sb_view_mode == "chat":
                 st.markdown(prompt)
     
             with st.chat_message("assistant", avatar=AGENT_AVATAR):
+                response_placeholder = st.empty()
                 with st.spinner("Routing & Analyzing..."):
                     try:
-                        # Only intercept the first message; follow-ups go direct
                         if len(st.session_state.messages) <= 1:
                             rewritten_directive = intercept_and_rewrite_query(prompt)
                         else:
                             rewritten_directive = prompt
                         
                         answer, model_used = agent_turn(rewritten_directive)
-                        
-                        # 3. RENDER
-                        st.markdown(answer)
-                        st.caption(f"⚡ {model_used} | Routed via Interceptor")
+    
+                response_placeholder.markdown(answer)
+                st.caption(f"⚡ {model_used} | Routed via Interceptor")
                         
                         # Append the true answer to history, but keep the user's original prompt for continuity
                         st.session_state.messages.append({
@@ -2531,6 +2532,16 @@ if st.session_state.sb_view_mode == "chat":
                             })
                         else:
                             st.error(f"Error: {error_msg[:150]}")
+                            # Remove the failed user message so history stays clean
+                            if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+                                st.session_state.messages.pop()
+                            st.session_state.pending_retry = prompt
+    
+        # ── Retry button (outside chat_message block) ──
+        if st.session_state.get("pending_retry"):
+            if st.button("🔄 Retry last query", use_container_width=True):
+                st.session_state.pending_prompt = st.session_state.pop("pending_retry")
+                st.rerun()
 else:
     # ══════════════════════════════════════════════
     # PORTFOLIO DASHBOARD
