@@ -1078,6 +1078,36 @@ with h_col2:
 
 st.caption("Quantitative investment analysis — Graham, Greenblatt, Dorsey, and Trajectory frameworks.")
 st.markdown("---")
+# ──────────────────────────────────────────────
+# PUBLIC LEADERBOARD (Landing Page Only)
+# ──────────────────────────────────────────────
+if st.session_state.sb_view_mode == "chat" and not st.session_state.messages:
+    try:
+        sb = get_supabase()
+        # Fetch the top 3 public portfolios by current return
+        leaderboard_resp = sb.table("portfolios").select(
+            "name, investor_type, time_horizon, current_return_pct"
+        ).order("current_return_pct", desc=True).limit(3).execute()
+        
+        top_portfolios = leaderboard_resp.data
+        
+        if top_portfolios:
+            st.markdown("### 🏆 Top Performing Committees")
+            l_cols = st.columns(3)
+            for i, port in enumerate(top_portfolios):
+                with l_cols[i]:
+                    with st.container(border=True):
+                        st.metric(
+                            label=port["name"], 
+                            value=f"{port.get('current_return_pct', 0):+.2f}%", 
+                            delta=str(port.get("investor_type", "balanced")).title()
+                        )
+                        st.caption(f"Horizon: {str(port.get('time_horizon', 'medium')).title()}")
+            st.markdown("---")
+    except Exception as e:
+        pass # Fail silently if database is unreachable or empty
+
+
 
 # ──────────────────────────────────────────────
 # LOAD BOOKS INTO CHROMADB (runs once, cached)
