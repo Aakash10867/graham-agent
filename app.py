@@ -2529,6 +2529,17 @@ if st.session_state.sb_view_mode == "chat":
                 if answer:
                     response_placeholder.markdown(answer)
                     st.caption(f"⚡ {model_used} | Routed via Interceptor")
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": answer,
+                        "model": model_used,
+                    })
+                    if st.session_state.get("pending_portfolio"):
+                        st.rerun()
+
+                if answer:
+                    response_placeholder.markdown(answer)
+                    st.caption(f"⚡ {model_used} | Routed via Interceptor")
 
                     st.session_state.messages.append({
                         "role": "assistant",
