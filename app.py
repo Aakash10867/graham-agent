@@ -2936,6 +2936,35 @@ else:
                 else:
                     st.caption("No holdings found.")
 
+                # ── Portfolio Growth Chart ──
+                try:
+                    hist_resp = sb.table("portfolio_history").select(
+                        "date, total_value, daily_return_pct"
+                    ).eq("portfolio_id", port["id"]).order("date").execute()
+                    hist_data = hist_resp.data
+
+                    if hist_data and len(hist_data) >= 2:
+                        hist_df = pd.DataFrame(hist_data)
+                        hist_df["date"] = pd.to_datetime(hist_df["date"])
+                        hist_df = hist_df.set_index("date")
+
+                        st.markdown("**Portfolio Value**")
+                        st.line_chart(hist_df["total_value"], use_container_width=True, color="#1D4ED8")
+
+                        # Show return summary below chart
+                        first_val = hist_df["total_value"].iloc[0]
+                        last_val = hist_df["total_value"].iloc[-1]
+                        growth = ((last_val - first_val) / first_val) * 100 if first_val > 0 else 0
+                        days_tracked = (hist_df.index[-1] - hist_df.index[0]).days
+                        st.caption(
+                            f"₹{first_val:,.0f} → ₹{last_val:,.0f} · "
+                            f"{growth:+.1f}% over {days_tracked} days"
+                        )
+                    elif hist_data and len(hist_data) == 1:
+                        st.caption("📈 Growth chart available after 2+ days of tracking.")
+                except Exception:
+                    pass  # Fail silently if history table doesn't exist yet
+
                 today = datetime.date.today()
                 review_date = None
                 if port.get("next_review_date"):
