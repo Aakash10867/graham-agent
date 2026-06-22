@@ -774,7 +774,6 @@ div[data-testid="stAlert"] > div {
     color: #111827 !important;
     font-weight: 900 !important;
     letter-spacing: -0.5px !important;
-    text-transform: uppercase !important;
     /* 3D Debossed 'stamped concrete' effect */
     text-shadow: 1px 1px 0px #ffffff, 2px 2px 0px rgba(0,0,0,0.08) !important;
 }
@@ -793,7 +792,6 @@ div[data-testid="stAlert"] > div {
     color: #4B5563 !important;
     font-size: 0.85rem !important;
     font-weight: 700 !important;
-    text-transform: uppercase !important;
     letter-spacing: 1.5px !important;
     margin-top: 1.5rem !important;
 }
