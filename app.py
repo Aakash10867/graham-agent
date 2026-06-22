@@ -107,15 +107,29 @@ def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int,
 
     if not stocks:
         return {"error": "No stocks provided."}
+
+    # Normalize review frequency to canonical value
+    rf = review_frequency.lower().strip()
+    if any(k in rf for k in ["month", "active", "30 day"]):
+        canonical_freq = "monthly"
+    elif any(k in rf for k in ["quarter", "moderate", "3 month", "90 day", "few month"]):
+        canonical_freq = "quarterly"
+    elif any(k in rf for k in ["semi", "6 month", "half year", "180", "twice a year"]):
+        canonical_freq = "semi-annually"
+    elif any(k in rf for k in ["year", "annual", "passive", "forget", "12 month"]):
+        canonical_freq = "annually"
+    else:
+        canonical_freq = "quarterly"
+
     st.session_state.pending_portfolio = {
         "name": portfolio_name,
         "investor_type": investor_type,
         "sip_amount": sip_amount,
         "time_horizon": time_horizon,
-        "review_freq": review_frequency,
+        "review_freq": canonical_freq,
         "stocks": stocks
     }
-    return {"status": f"Portfolio '{portfolio_name}' registered with {len(stocks)} stocks. The user can now save it."}
+    return {"status": f"Portfolio '{portfolio_name}' registered with {len(stocks)} stocks. Review frequency: {canonical_freq}. The user can now save it."}
 
 
 
