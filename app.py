@@ -683,6 +683,46 @@ div[data-testid="stAlert"] > div {
     background-color: #FFFFFF !important;
 }
 
+/* ── Fix 8: Portfolio Boundary Cards ── */
+/* Targets the st.container(border=True) wrappers */
+[data-testid="stVerticalBlockBorderWrapper"] {
+    background-color: #FFFFFF !important;
+    border: 1px solid #D1D5DB !important;
+    border-radius: 6px !important;
+    padding: 1.5rem !important; /* Gives the text and tables breathing room */
+    box-shadow: 2px 2px 0px rgba(0,0,0,0.03) !important; /* Subtle institutional weight */
+    margin-bottom: 2rem !important; /* Space between different portfolios */
+}
+
+/* Make sure the portfolio title stands out inside the card */
+[data-testid="stVerticalBlockBorderWrapper"] h3 {
+    margin-top: 0 !important;
+    padding-top: 0 !important;
+    border-bottom: 1px solid #F3F4F6 !important;
+    padding-bottom: 10px !important;
+    margin-bottom: 15px !important;
+}
+
+/* ── Fix 9: Fallback Table Styling ── */
+/* Forces any native HTML/Markdown tables into the light theme */
+.stTable {
+    background-color: #FFFFFF !important;
+}
+.stTable > div > table {
+    border: 1px solid #E5E7EB !important;
+    border-radius: 4px !important;
+}
+.stTable th {
+    background-color: #F9FAFB !important;
+    color: #374151 !important;
+    border-bottom: 2px solid #D1D5DB !important;
+    font-weight: 600 !important;
+}
+.stTable td {
+    color: #111827 !important;
+    border-bottom: 1px solid #E5E7EB !important;
+}
+
 
 /* ── Base ── */
 .stApp {
