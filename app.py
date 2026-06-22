@@ -61,6 +61,58 @@ def get_supabase():
             st.session_state.sb_user_id = None
     return client
 
+def allocate_shares(stocks, sip_amount):
+    result = []
+    for s in stocks:
+        price = s["price"]
+        target = sip_amount * s["allocation_pct"] / 100
+        shares = int(target // price) if price > 0 else 0
+        result.append({**s, "shares": shares, "actual_amount": shares * price})
+
+    remaining = sip_amount - sum(s["actual_amount"] for s in result)
+
+    while remaining > 0:
+        best = None
+        best_gap = -1
+        for s in result:
+            target = sip_amount * s["allocation_pct"] / 100
+            gap = target - s["actual_amount"]
+            if s["price"] <= remaining and gap > best_gap:
+                best = s
+                best_gap = gap
+        if best is None:
+            break
+        best["shares"] += 1
+        best["actual_amount"] = best["shares"] * best["price"]
+        remaining = sip_amount - sum(s["actual_amount"] for s in result)
+
+    return result, round(remaining, 2)
+
+
+def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int, time_horizon: str, review_frequency: str = "quarterly", stocks: list = None) -> dict:
+    """Register a finalized SIP portfolio so the user can save it to their account.
+    Call this ONLY after you have presented the final portfolio table with all stocks and allocations.
+
+    Args:
+        portfolio_name: Short descriptive name, e.g. 'Conservative Growth SIP - June 2026'
+        investor_type: The investor profile - conservative, moderate, or aggressive
+        sip_amount: Monthly SIP amount in INR
+        time_horizon: Investment time horizon from the questionnaire
+        review_frequency: How often to review - monthly, quarterly, semi-annually, annually
+        stocks: List of dicts, each with keys: ticker, name, sector, allocation_pct
+    """
+    if not stocks:
+        return {"error": "No stocks provided."}
+    st.session_state.pending_portfolio = {
+        "name": portfolio_name,
+        "investor_type": investor_type,
+        "sip_amount": sip_amount,
+        "time_horizon": time_horizon,
+        "review_freq": review_frequency,
+        "stocks": stocks
+    }
+    return {"status": f"Portfolio '{portfolio_name}' registered with {len(stocks)} stocks. The user can now save it."}
+
 
 
 # ──────────────────────────────────────────────
@@ -275,6 +327,9 @@ st.set_page_config(
 for _key in ["sb_access_token", "sb_refresh_token", "sb_user_email", "sb_user_id"]:
     if _key not in st.session_state:
         st.session_state[_key] = None
+
+if "pending_portfolio" not in st.session_state:
+    st.session_state.pending_portfolio = None
 
 # ══════════════════════════════════════════════
 # PRESET PROMPTS — reduced to essentials
@@ -1761,6 +1816,7 @@ TOOLS = [
     get_csv_financial_data,
     get_macro_context,
     get_sip_candidates,
+    register_portfolio,
 ]
 
 tool_functions = {
@@ -1780,6 +1836,7 @@ tool_functions = {
     "get_csv_financial_data": get_csv_financial_data,
     "get_macro_context": get_macro_context,
     "get_sip_candidates": get_sip_candidates,
+    "register_portfolio": register_portfolio,
 }
 
 
@@ -1858,6 +1915,7 @@ You have 11 tools available. Pick the right combination for each question — yo
 14. get_csv_financial_data — Reads the pre-scored universe database for a specific ticker to get proprietary framework scores (Graham, Greenblatt, Dorsey, Trajectory pass/fail flags).
 15. get_macro_context — Gets the sector and 5-day performance of the broader market (Nifty 50) to gauge macro momentum versus asset momentum.
 16. get_sip_candidates — Build a SIP portfolio. Collects investor profile (sip_amount, time_horizon, investor_type, review_freq) and returns 30-50 pre-filtered candidates. You then select 5-8 using book wisdom and qualitative judgment. Use when the user wants to start a SIP, build a portfolio, or asks where to invest monthly.
+17. register_portfolio — After presenting your finalized SIP portfolio to the user, call this to register it for saving. Pass portfolio_name, investor_type, sip_amount, time_horizon, review_frequency, and stocks (a list where each item has ticker, name, sector, allocation_pct). ALWAYS call this after presenting the final SIP portfolio table.
 
 SIP PORTFOLIO PROTOCOL:
 When the user wants to build a SIP portfolio, you MUST ask exactly ONE question per message. Wait for the answer before asking the next. The sequence is:
@@ -1868,6 +1926,8 @@ Message 3 (after they answer): Ask ONLY "What is your goal with this SIP?" and g
 Message 4 (after they answer): Ask ONLY "How often do you want to check on your investments?" and give three options: "Set it and forget for years" / "Glance every few months" / "I like staying active and informed"
 
 NEVER ask more than one question in a single message. If the user gives multiple answers at once, accept them and skip ahead.
+
+After presenting your final SIP portfolio with all stocks and allocations, ALWAYS call register_portfolio with the complete structured data so the user can save it. This is mandatory — do not skip it.
 
 CRITICAL: Frame question 3 around GOALS, never around LOSSES or RISK. Do NOT mention portfolio drops, drawdowns, or volatility in the question itself.
 
@@ -2216,7 +2276,88 @@ with chat_area:
             if msg.get("model"):
                 st.caption(f"⚡ {msg['model']}")
 
-    # Handle new input (renders inside container = above buttons)
+    # ── Save Portfolio Button ──
+    if st.session_state.get("pending_portfolio"):
+        portfolio = st.session_state.pending_portfolio
+
+        if st.session_state.sb_user_id is None:
+            st.info("💡 Log in to save this portfolio to your account.")
+        else:
+            if st.button("💾 Save Portfolio", use_container_width=True):
+                try:
+                    sb = get_supabase()
+
+                    freq_days = {
+                        "monthly": 30, "quarterly": 90,
+                        "semi-annually": 180, "annually": 365
+                    }
+                    days = freq_days.get(portfolio.get("review_freq", "quarterly"), 90)
+                    next_review = (datetime.date.today() + datetime.timedelta(days=days)).isoformat()
+
+                    port_resp = sb.table("portfolios").insert({
+                        "user_id": st.session_state.sb_user_id,
+                        "name": portfolio["name"],
+                        "investor_type": portfolio["investor_type"],
+                        "sip_amount": portfolio["sip_amount"],
+                        "time_horizon": portfolio["time_horizon"],
+                        "review_freq": portfolio.get("review_freq", "quarterly"),
+                        "next_review_date": next_review,
+                    }).execute()
+
+                    portfolio_id = port_resp.data[0]["id"]
+
+                    stocks_for_alloc = []
+                    for stock in portfolio["stocks"]:
+                        ticker = stock["ticker"]
+                        try:
+                            info = yf.Ticker(ticker).info
+                            price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
+                        except Exception:
+                            price = 0
+
+                        row = universe_df[universe_df["ticker"] == ticker]
+                        pe = float(row["pe"].iloc[0]) if len(row) and pd.notna(row["pe"].iloc[0]) else None
+                        roe = float(row["roe_y0"].iloc[0]) if len(row) and "roe_y0" in row.columns and pd.notna(row["roe_y0"].iloc[0]) else None
+                        score = int(row["score"].iloc[0]) if len(row) and pd.notna(row["score"].iloc[0]) else None
+                        sector = stock.get("sector", "") or (str(row["sector"].iloc[0]) if len(row) and "sector" in row.columns and pd.notna(row["sector"].iloc[0]) else "")
+
+                        stocks_for_alloc.append({
+                            "ticker": ticker,
+                            "name": stock.get("name", ""),
+                            "sector": sector,
+                            "allocation_pct": stock.get("allocation_pct", 0),
+                            "price": price,
+                            "pe": pe,
+                            "roe": roe,
+                            "score": score,
+                        })
+
+                    allocated, unallocated = allocate_shares(stocks_for_alloc, portfolio["sip_amount"])
+
+                    for s in allocated:
+                        sb.table("holdings").insert({
+                            "portfolio_id": portfolio_id,
+                            "ticker": s["ticker"],
+                            "name": s["name"],
+                            "sector": s["sector"],
+                            "allocation_pct": s["allocation_pct"],
+                            "shares": s["shares"],
+                            "sip_amount_inr": s["actual_amount"],
+                            "price_at_entry": s["price"],
+                            "pe_at_entry": s["pe"],
+                            "roe_at_entry": s["roe"],
+                            "score_at_entry": s["score"],
+                        }).execute()
+
+                    st.success(f"Portfolio saved! Invested ₹{portfolio['sip_amount'] - unallocated:,.0f} of ₹{portfolio['sip_amount']:,}.")
+                    if unallocated > 0:
+                        st.info(f"₹{unallocated:,.0f} unallocated (not enough for another share of any holding).")
+                    st.session_state.pending_portfolio = None
+                    st.rerun()
+
+                except Exception as e:
+                    st.error(f"Save failed: {e}")
+
     # Handle new input (renders inside container = above buttons)
     if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
