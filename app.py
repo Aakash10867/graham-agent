@@ -1127,7 +1127,6 @@ with h_col1:
 with h_col2:
     st.markdown("<h1 style='margin-top: -15px; padding-bottom: 0px;'>DeepMoat</h1>", unsafe_allow_html=True)
 
-st.caption("Quantitative investment analysis — Graham, Greenblatt, Dorsey, and Trajectory frameworks.")
 st.markdown("---")
 # ──────────────────────────────────────────────
 # PUBLIC LEADERBOARD (Landing Page Only)
