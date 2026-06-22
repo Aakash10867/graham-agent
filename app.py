@@ -1943,7 +1943,7 @@ Message 4 (after they answer): Ask ONLY "How often do you want to check on your 
 
 NEVER ask more than one question in a single message. If the user gives multiple answers at once, accept them and skip ahead.
 
-After presenting your final SIP portfolio with all stocks and allocations, you MUST immediately call register_portfolio in the SAME response. Do NOT ask the user for permission to register. Do NOT say "would you like me to save this" or "shall I register this." Just call the tool. This is mandatory and non-negotiable.
+After selecting your final 5-8 stocks with allocations, call register_portfolio with the structured data. Write your analysis and reasoning about the picks in the same response. Do NOT ask the user for permission to save — just call the tool.
 
 CRITICAL: Frame question 3 around GOALS, never around LOSSES or RISK. Do NOT mention portfolio drops, drawdowns, or volatility in the question itself.
 
@@ -2319,6 +2319,19 @@ with chat_area:
         if st.session_state.sb_user_id is None:
             st.info("💡 Log in to save this portfolio to your account.")
         else:
+            # Show portfolio summary from structured data
+            st.markdown("### 📋 Your SIP Portfolio")
+            preview_data = []
+            for s in portfolio["stocks"]:
+                preview_data.append({
+                    "Stock": s.get("name", s["ticker"]),
+                    "Ticker": s["ticker"],
+                    "Sector": s.get("sector", "—"),
+                    "Allocation": f"{s.get('allocation_pct', 0)}%",
+                    "Monthly": f"₹{portfolio['sip_amount'] * s.get('allocation_pct', 0) / 100:,.0f}",
+                })
+            st.dataframe(pd.DataFrame(preview_data), hide_index=True, use_container_width=True)
+            st.caption(f"Total SIP: ₹{portfolio['sip_amount']:,}/month · {portfolio.get('investor_type', '')} · {portfolio.get('time_horizon', '')} horizon")
             if st.button("💾 Save Portfolio", use_container_width=True):
                 try:
                     sb = get_supabase()
