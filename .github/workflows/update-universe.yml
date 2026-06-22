@@ -42,6 +42,19 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Stage the specific CSVs
           git add universe_scored.csv universe_tickers.csv
-          git diff --cached --quiet || git commit -m "Auto-update: universe scored $(date +%Y-%m-%d)"
-          git push
+          
+          # Only proceed if there are actually changes to commit
+          if ! git diff --cached --quiet; then
+            git commit -m "Auto-update: universe scored $(date +%Y-%m-%d)"
+            
+            # Fetch the latest remote changes and rebase our new commit on top of them
+            # This prevents the 'fetch first' rejection and keeps the commit history linear
+            git pull --rebase origin main
+            
+            git push
+          else
+            echo "No changes detected in universe data. Skipping commit and push."
+          fi
