@@ -2966,6 +2966,7 @@ elif st.session_state.sb_view_mode == "import":
                         
                         st.session_state.import_holding_pool = []
                         st.session_state.sb_view_mode = "portfolios"
+                        st.session_state[f"auto_trigger_review_{portfolio_id}"] = True
                         st.rerun()
                         
                     except Exception as e:
