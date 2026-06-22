@@ -2493,55 +2493,62 @@ if st.session_state.sb_view_mode == "chat":
         # Handle new input (renders inside container = above buttons)
         if prompt:
             st.session_state.messages.append({"role": "user", "content": prompt})
-    
+
             with st.chat_message("user", avatar=USER_AVATAR):
                 st.markdown(prompt)
-    
+
             with st.chat_message("assistant", avatar=AGENT_AVATAR):
                 response_placeholder = st.empty()
+                answer = None
+                model_used = None
                 with st.spinner("Routing & Analyzing..."):
                     try:
                         if len(st.session_state.messages) <= 1:
                             rewritten_directive = intercept_and_rewrite_query(prompt)
                         else:
                             rewritten_directive = prompt
-                        
+
                         answer, model_used = agent_turn(rewritten_directive)
-    
-                response_placeholder.markdown(answer)
-                st.caption(f"⚡ {model_used} | Routed via Interceptor")
-                        
-                        # Append the true answer to history, but keep the user's original prompt for continuity
-                        st.session_state.messages.append({
-                            "role": "assistant",
-                            "content": answer,
-                            "model": model_used,
-                        })
-                        if st.session_state.get("pending_portfolio"):
-                            st.rerun()
-    
+
                     except Exception as e:
                         error_msg = str(e)
                         if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg or "All models rate-limited" in error_msg:
                             st.warning("API limit reached. Using fallback system...")
                             fallback_answer = fallback_router(prompt)
-                            st.markdown(fallback_answer)
+                            response_placeholder.markdown(fallback_answer)
                             st.session_state.messages.append({
                                 "role": "assistant",
                                 "content": f"*(Fallback)*\n\n{fallback_answer}",
                             })
                         else:
                             st.error(f"Error: {error_msg[:150]}")
-                            # Remove the failed user message so history stays clean
                             if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
                                 st.session_state.messages.pop()
                             st.session_state.pending_retry = prompt
-    
-        # ── Retry button (outside chat_message block) ──
+
+                if answer:
+                    response_placeholder.markdown(answer)
+                    st.caption(f"⚡ {model_used} | Routed via Interceptor")
+
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": answer,
+                        "model": model_used,
+                    })
+                    if st.session_state.get("pending_portfolio"):
+                        st.rerun()
+
+        # ── Retry button ──
         if st.session_state.get("pending_retry"):
             if st.button("🔄 Retry last query", use_container_width=True):
                 st.session_state.pending_prompt = st.session_state.pop("pending_retry")
                 st.rerun()
+                            # Remove the failed user message so history stays clean
+                            if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+                                st.session_state.messages.pop()
+                            st.session_state.pending_retry = prompt
+
+
 else:
     # ══════════════════════════════════════════════
     # PORTFOLIO DASHBOARD
