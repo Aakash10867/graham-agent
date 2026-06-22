@@ -165,12 +165,14 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None):
         rows = [header]
         total_invested = 0
 
+        cell_style = ParagraphStyle("CellWrap", parent=styles["Normal"], fontSize=9,
+                                     textColor=dark_text, leading=11)
         for h in holdings:
             invested = h.get("sip_amount_inr", 0)
             total_invested += invested
             rows.append([
-                h.get("name", "—"),
-                h.get("ticker", "—"),
+                Paragraph(h.get("name", "—"), cell_style),
+                Paragraph(h.get("ticker", "—"), cell_style),
                 str(h.get("shares", 0)),
                 f"Rs. {h.get('price_at_entry', 0):,.2f}",
                 f"Rs. {invested:,.0f}",
@@ -179,7 +181,7 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None):
 
         rows.append(["", "", "", "", f"Rs. {total_invested:,.0f}", ""])
 
-        col_widths = [40*mm, 28*mm, 18*mm, 28*mm, 28*mm, 18*mm]
+        col_widths = [48*mm, 30*mm, 15*mm, 25*mm, 25*mm, 17*mm]
         holdings_table = Table(rows, colWidths=col_widths)
         holdings_table.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
