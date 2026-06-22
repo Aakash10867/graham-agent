@@ -2864,6 +2864,127 @@ else:
         for port in portfolios:
             with st.container(border=True):
                 st.markdown(f"**{port['name']}**")
+
+                # ── Alert Banner ──
+                try:
+                    alerts_resp = sb.table("portfolio_alerts").select("*").eq(
+                        "portfolio_id", port["id"]
+                    ).eq("is_read", False).order("created_at", desc=True).execute()
+                    port_alerts = alerts_resp.data
+                except Exception:
+                    port_alerts = []
+
+                if port_alerts:
+                    for alert in port_alerts:
+                        a_type = alert["alert_type"]
+                        a_id = alert["id"]
+                        detail = alert.get("detail") or {}
+                        if isinstance(detail, str):
+                            import json as _json
+                            try:
+                                detail = _json.loads(detail)
+                            except Exception:
+                                detail = {}
+
+                        if a_type == "danger":
+                            st.error(f"🛡️ **{alert['headline']}**")
+                            with st.expander("Defend Position"):
+                                ticker = alert.get("ticker", "")
+                                h_match = next((h for h in (holdings_resp.data if 'holdings_resp' not in dir() else []) if h.get("ticker") == ticker and h.get("portfolio_id") == port["id"]), None)
+                                # Fetch holding for this portfolio
+                                try:
+                                    h_resp = sb.table("holdings").select("*").eq("portfolio_id", port["id"]).eq("ticker", ticker).execute()
+                                    h_match = h_resp.data[0] if h_resp.data else None
+                                except Exception:
+                                    h_match = None
+
+                                if h_match:
+                                    max_shares = h_match.get("shares", 0)
+                                    sell_qty = st.number_input(
+                                        f"Shares to sell (of {max_shares})",
+                                        min_value=0, max_value=max_shares, value=max_shares,
+                                        key=f"defend_qty_{a_id}"
+                                    )
+                                    c1, c2 = st.columns(2)
+                                    with c1:
+                                        if st.button("🛡️ Confirm Sell", key=f"defend_confirm_{a_id}", use_container_width=True):
+                                            if sell_qty > 0:
+                                                new_shares = max_shares - sell_qty
+                                                if new_shares <= 0:
+                                                    sb.table("holdings").delete().eq("id", h_match["id"]).execute()
+                                                else:
+                                                    new_invested = new_shares * h_match.get("price_at_entry", 0)
+                                                    sb.table("holdings").update({
+                                                        "shares": new_shares,
+                                                        "sip_amount_inr": round(new_invested, 2)
+                                                    }).eq("id", h_match["id"]).execute()
+                                                sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
+                                                st.success(f"Sold {sell_qty} shares of {ticker}.")
+                                                st.rerun()
+                                    with c2:
+                                        if st.button("Dismiss", key=f"defend_dismiss_{a_id}", use_container_width=True):
+                                            sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
+                                            st.rerun()
+                                else:
+                                    st.caption("Holding not found — may have been sold already.")
+                                    if st.button("Dismiss", key=f"defend_dismiss_nf_{a_id}"):
+                                        sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
+                                        st.rerun()
+
+                        elif a_type == "opportunity":
+                            st.success(f"⚡ **{alert['headline']}**")
+                            with st.expander("Deploy Capital"):
+                                st.caption(
+                                    f"Sector: {detail.get('sector', 'N/A')} · "
+                                    f"Price: ₹{detail.get('price', 'N/A')} · "
+                                    f"P/E: {detail.get('pe', 'N/A')} · "
+                                    f"ROE: {detail.get('roe_pct', 'N/A')}%"
+                                )
+                                opp_ticker = alert.get("ticker", "")
+                                opp_name = detail.get("name", opp_ticker)
+                                buy_qty = st.number_input(
+                                    f"Shares of {opp_name} to buy",
+                                    min_value=0, value=0, key=f"deploy_qty_{a_id}"
+                                )
+                                buy_price = st.number_input(
+                                    f"Price per share (₹)",
+                                    min_value=0.0, value=float(detail.get("price", 0)),
+                                    format="%.2f", key=f"deploy_price_{a_id}"
+                                )
+                                c1, c2 = st.columns(2)
+                                with c1:
+                                    if st.button("⚡ Deploy Capital", key=f"deploy_confirm_{a_id}", use_container_width=True):
+                                        if buy_qty > 0 and buy_price > 0:
+                                            try:
+                                                sb.table("holdings").insert({
+                                                    "portfolio_id": port["id"],
+                                                    "ticker": opp_ticker,
+                                                    "name": opp_name,
+                                                    "sector": detail.get("sector", ""),
+                                                    "allocation_pct": 0,
+                                                    "shares": buy_qty,
+                                                    "sip_amount_inr": round(buy_qty * buy_price, 2),
+                                                    "price_at_entry": round(buy_price, 2),
+                                                    "score_at_entry": detail.get("score"),
+                                                }).execute()
+                                                sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
+                                                st.success(f"Added {buy_qty} shares of {opp_name}.")
+                                                st.rerun()
+                                            except Exception as e:
+                                                st.error(f"Failed: {e}")
+                                        else:
+                                            st.warning("Enter shares and price.")
+                                with c2:
+                                    if st.button("Dismiss", key=f"deploy_dismiss_{a_id}", use_container_width=True):
+                                        sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
+                                        st.rerun()
+
+                        elif a_type == "review_due":
+                            st.warning(f"📅 **{alert['headline']}**")
+                            if st.button("Dismiss", key=f"review_dismiss_{a_id}"):
+                                sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
+                                st.rerun()
+
                 
                 # Check if this specific portfolio is in "SIP edit mode"
                 is_editing_sip = st.session_state.get(f"edit_sip_{port['id']}", False)
