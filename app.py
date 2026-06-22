@@ -2855,7 +2855,37 @@ else:
                     sell_stocks = [(i, r) for i, r in enumerate(review_rows) if "SELL" in r["Action"]]
 
                     st.markdown("---")
-                    st.caption("Update what you actually did at your broker since last review:")
+
+                    # Calculate this cycle's SIP allocation
+                    monthly_sip = port.get("sip_amount", 0)
+                    try:
+                        review_days = int(port.get("review_freq", 30))
+                    except (ValueError, TypeError):
+                        review_days = 30
+                    cycle_amount = round(monthly_sip * review_days / 30)
+
+                    sip_stocks = []
+                    for r in review_rows:
+                        if "SELL" not in r["Action"]:
+                            h_match = next((h for h in rev_holdings if h.get("id") == r["_holding_id"]), {})
+                            alloc = h_match.get("allocation_pct", 0)
+                            non_sell_count = len([x for x in review_rows if "SELL" not in x["Action"]])
+                            if alloc == 0 and non_sell_count > 0:
+                                alloc = 100 / non_sell_count
+                            sip_stocks.append({
+                                "ticker": r["_ticker"], "name": r["Stock"],
+                                "allocation_pct": alloc, "price": r["_now_price"],
+                            })
+                    sip_alloc = {}
+                    if sip_stocks and cycle_amount > 0:
+                        allocated, unallocated = allocate_shares(sip_stocks, cycle_amount)
+                        for a in allocated:
+                            sip_alloc[a["ticker"]] = a["shares"]
+                        st.caption(f"💰 This cycle ({review_days} days): ₹{cycle_amount:,} to invest — suggested shares pre-filled below")
+                        if unallocated > 0:
+                            st.caption(f"₹{unallocated:,.0f} unallocatable (not enough for another share)")
+                    else:
+                        st.caption("Update what you actually did at your broker since last review:")
 
                     for i, r in enumerate(review_rows):
                         h_id = r["_holding_id"]
@@ -2868,9 +2898,10 @@ else:
                         else:
                             c1, c2 = st.columns(2)
                             with c1:
+                                suggested = sip_alloc.get(r["_ticker"], 0)
                                 st.number_input(
                                     f"{'🟢' if 'BUY' in r['Action'] else '📥'} {r['Stock']} — shares bought",
-                                    min_value=0, value=0, key=f"add_qty_{port['id']}_{h_id}"
+                                    min_value=0, value=suggested, key=f"add_qty_{port['id']}_{h_id}"
                                 )
                             with c2:
                                 st.number_input(
