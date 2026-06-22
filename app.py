@@ -3325,6 +3325,22 @@ elif st.session_state.sb_view_mode == "portfolios":
                                             confidence = "medium"
                                             sell_qty = 0
 
+                                    
+                                    # ── DETERMINISTIC RED FLAG OVERRIDE ──
+                                    # The LLM is not trusted on quality failures.
+                                    # If has_red_flags is True, force SELL ALL regardless.
+                                    if h["has_red_flags"] and "SELL ALL" not in action:
+                                        action = f"🔴 SELL ALL ({h['shares']})"
+                                        sell_qty = h["shares"]
+                                        reasoning = (
+                                            f"OVERRIDE: Earnings quality RED FLAGS detected — "
+                                            f"{', '.join(h['quality_flags'])}. "
+                                            f"Graham warns against value traps where reported earnings "
+                                            f"are inflated by non-recurring items. Forced SELL."
+                                        )
+                                        confidence = "high"
+
+                                    
                                     mkt_note = ""
                                     if h["market_relative"] is not None:
                                         if h["market_relative"] > 5:
