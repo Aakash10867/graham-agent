@@ -331,9 +331,12 @@ st.set_page_config(
 for _key in ["sb_access_token", "sb_refresh_token", "sb_user_email", "sb_user_id"]:
     if _key not in st.session_state:
         st.session_state[_key] = None
-
 if "pending_portfolio" not in st.session_state:
     st.session_state.pending_portfolio = None
+
+
+if "sb_view_mode" not in st.session_state:
+    st.session_state.sb_view_mode = "chat"
 
 # ══════════════════════════════════════════════
 # PRESET PROMPTS — reduced to essentials
@@ -670,6 +673,14 @@ with st.sidebar:
                         st.error(f"Sign up failed: {e}")
     else:
         st.caption(f"Logged in as {st.session_state.sb_user_email}")
+        if st.session_state.sb_view_mode == "chat":
+            if st.button("📁 My Portfolios", use_container_width=True):
+                st.session_state.sb_view_mode = "portfolios"
+                st.rerun()
+        else:
+            if st.button("← Back to Chat", use_container_width=True):
+                st.session_state.sb_view_mode = "chat"
+                st.rerun()
         if st.button("Log Out", use_container_width=True):
             try:
                 sb = get_supabase()
@@ -2260,204 +2271,308 @@ if "chat_history" not in st.session_state:
 USER_AVATAR = "👤"
 AGENT_AVATAR = "logo.svg"
 
-# ── Reserve a container for all chat content (renders ABOVE buttons) ──
-chat_area = st.container()
-
-# ── Preset buttons (ALWAYS below all messages) ──
-target = st.session_state.get("target_company", "").strip()
-
-if target:
-    st.markdown("")
-    st.caption(f"Quick analysis for **{target}**")
-    cols_per_row = 3
-    for i in range(0, len(STOCK_PRESETS), cols_per_row):
-        cols = st.columns(cols_per_row)
-        for j in range(cols_per_row):
-            idx = i + j
-            if idx < len(STOCK_PRESETS):
-                label, template = STOCK_PRESETS[idx]
-                with cols[j]:
-                    if st.button(label, key=f"preset_{idx}", use_container_width=True):
-                        st.session_state.pending_prompt = template.format(company=target)
-                        st.rerun()
-
-st.markdown("")
-st.caption("Market screeners")
-scr_cols = st.columns(3)
-for i, (label, template) in enumerate(SCREENER_PRESETS):
-    with scr_cols[i]:
-        if st.button(label, key=f"screener_{i}", use_container_width=True):
-            st.session_state.pending_prompt = template
-            st.rerun()
-
-# ── Chat input (pinned to bottom by Streamlit) ──
-prompt = st.chat_input("Ask about any stock, or type a question...")
-
-if not prompt and "pending_prompt" in st.session_state:
-    prompt = st.session_state.pop("pending_prompt")
-
-# ── All chat content renders inside the container (above buttons) ──
-with chat_area:
-    # Ephemeral Hero State (shown only when chat is empty)
-    # Terminal Ready State (shown only when chat is empty)
-    if not st.session_state.messages:
+if st.session_state.sb_view_mode == "chat":
+    # ── Reserve a container for all chat content (renders ABOVE buttons) ──
+    chat_area = st.container()
+    
+    # ── Preset buttons (ALWAYS below all messages) ──
+    target = st.session_state.get("target_company", "").strip()
+    
+    if target:
         st.markdown("")
-        st.info("Choose a company in the sidebar then select a framework below, or find best stocks by clicking below buttons.")
-
-    # Display past messages
-    for msg in st.session_state.messages:
-        avatar = USER_AVATAR if msg["role"] == "user" else AGENT_AVATAR
-        with st.chat_message(msg["role"], avatar=avatar):
-            st.markdown(msg["content"])
-            if msg.get("model"):
-                st.caption(f"⚡ {msg['model']}")
-
-    # ── Save Portfolio Button ──
-    if st.session_state.get("pending_portfolio"):
-        portfolio = st.session_state.pending_portfolio
-
-        if st.session_state.sb_user_id is None:
-            st.info("💡 Log in to save this portfolio to your account.")
-        else:
-            # Show portfolio summary from structured data
-            st.markdown("### 📋 Your SIP Portfolio")
-            preview_data = []
-            for s in portfolio["stocks"]:
-                preview_data.append({
-                    "Stock": s.get("name", s["ticker"]),
-                    "Ticker": s["ticker"],
-                    "Sector": s.get("sector", "—"),
-                    "Allocation": f"{s.get('allocation_pct', 0)}%",
-                    "Monthly": f"₹{portfolio['sip_amount'] * s.get('allocation_pct', 0) / 100:,.0f}",
-                })
-            st.dataframe(pd.DataFrame(preview_data), hide_index=True, use_container_width=True)
-            st.caption(f"Total SIP: ₹{portfolio['sip_amount']:,}/month · {portfolio.get('investor_type', '')} · {portfolio.get('time_horizon', '')} horizon")
-            if st.button("💾 Save Portfolio", use_container_width=True):
-                try:
-                    sb = get_supabase()
-
-                    freq_days = {
-                        "monthly": 30, "quarterly": 90,
-                        "semi-annually": 180, "annually": 365
-                    }
-                    days = freq_days.get(portfolio.get("review_freq", "quarterly"), 90)
-                    next_review = (datetime.date.today() + datetime.timedelta(days=days)).isoformat()
-
-                    port_resp = sb.table("portfolios").insert({
-                        "user_id": st.session_state.sb_user_id,
-                        "name": portfolio["name"],
-                        "investor_type": portfolio["investor_type"],
-                        "sip_amount": portfolio["sip_amount"],
-                        "time_horizon": portfolio["time_horizon"],
-                        "review_freq": portfolio.get("review_freq", "quarterly"),
-                        "next_review_date": next_review,
-                    }).execute()
-
-                    portfolio_id = port_resp.data[0]["id"]
-
-                    stocks_for_alloc = []
-                    for stock in portfolio["stocks"]:
-                        ticker = stock["ticker"]
-                        try:
-                            info = yf.Ticker(ticker).info
-                            price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
-                        except Exception:
-                            price = 0
-
-                        row = universe_df[universe_df["ticker"] == ticker]
-                        pe = float(row["pe"].iloc[0]) if len(row) and pd.notna(row["pe"].iloc[0]) else None
-                        roe = float(row["roe_y0"].iloc[0]) if len(row) and "roe_y0" in row.columns and pd.notna(row["roe_y0"].iloc[0]) else None
-                        score = int(row["score"].iloc[0]) if len(row) and pd.notna(row["score"].iloc[0]) else None
-                        sector = stock.get("sector", "") or (str(row["sector"].iloc[0]) if len(row) and "sector" in row.columns and pd.notna(row["sector"].iloc[0]) else "")
-
-                        stocks_for_alloc.append({
-                            "ticker": ticker,
-                            "name": stock.get("name", ""),
-                            "sector": sector,
-                            "allocation_pct": stock.get("allocation_pct", 0),
-                            "price": price,
-                            "pe": pe,
-                            "roe": roe,
-                            "score": score,
-                        })
-
-                    allocated, unallocated = allocate_shares(stocks_for_alloc, portfolio["sip_amount"])
-
-                    for s in allocated:
-                        sb.table("holdings").insert({
-                            "portfolio_id": portfolio_id,
-                            "ticker": s["ticker"],
-                            "name": s["name"],
-                            "sector": s["sector"],
-                            "allocation_pct": s["allocation_pct"],
-                            "shares": s["shares"],
-                            "sip_amount_inr": s["actual_amount"],
-                            "price_at_entry": s["price"],
-                            "pe_at_entry": s["pe"],
-                            "roe_at_entry": s["roe"],
-                            "score_at_entry": s["score"],
-                        }).execute()
-
-                    st.success(f"Portfolio saved! Invested ₹{portfolio['sip_amount'] - unallocated:,.0f} of ₹{portfolio['sip_amount']:,}.")
-                    if unallocated > 0:
-                        st.info(f"₹{unallocated:,.0f} unallocated (not enough for another share of any holding).")
-
-                    # Show actual share breakdown
-                    breakdown_data = []
-                    for s in allocated:
-                        breakdown_data.append({
-                            "Stock": s["name"] or s["ticker"],
-                            "Price": f"₹{s['price']:,.2f}",
-                            "Shares": s["shares"],
-                            "Invested": f"₹{s['actual_amount']:,.0f}",
-                            "Target": f"₹{portfolio['sip_amount'] * s['allocation_pct'] / 100:,.0f}",
-                        })
-                    st.dataframe(pd.DataFrame(breakdown_data), hide_index=True, use_container_width=True)
-                    st.session_state.pending_portfolio = None
-
-                except Exception as e:
-                    st.error(f"Save failed: {e}")
-
-    # Handle new input (renders inside container = above buttons)
-    if prompt:
-        st.session_state.messages.append({"role": "user", "content": prompt})
-
-        with st.chat_message("user", avatar=USER_AVATAR):
-            st.markdown(prompt)
-
-        with st.chat_message("assistant", avatar=AGENT_AVATAR):
-            with st.spinner("Routing & Analyzing..."):
-                try:
-                    # Only intercept the first message; follow-ups go direct
-                    if len(st.session_state.messages) <= 1:
-                        rewritten_directive = intercept_and_rewrite_query(prompt)
-                    else:
-                        rewritten_directive = prompt
-                    
-                    answer, model_used = agent_turn(rewritten_directive)
-                    
-                    # 3. RENDER
-                    st.markdown(answer)
-                    st.caption(f"⚡ {model_used} | Routed via Interceptor")
-                    
-                    # Append the true answer to history, but keep the user's original prompt for continuity
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": answer,
-                        "model": model_used,
+        st.caption(f"Quick analysis for **{target}**")
+        cols_per_row = 3
+        for i in range(0, len(STOCK_PRESETS), cols_per_row):
+            cols = st.columns(cols_per_row)
+            for j in range(cols_per_row):
+                idx = i + j
+                if idx < len(STOCK_PRESETS):
+                    label, template = STOCK_PRESETS[idx]
+                    with cols[j]:
+                        if st.button(label, key=f"preset_{idx}", use_container_width=True):
+                            st.session_state.pending_prompt = template.format(company=target)
+                            st.rerun()
+    
+    st.markdown("")
+    st.caption("Market screeners")
+    scr_cols = st.columns(3)
+    for i, (label, template) in enumerate(SCREENER_PRESETS):
+        with scr_cols[i]:
+            if st.button(label, key=f"screener_{i}", use_container_width=True):
+                st.session_state.pending_prompt = template
+                st.rerun()
+    
+    # ── Chat input (pinned to bottom by Streamlit) ──
+    prompt = st.chat_input("Ask about any stock, or type a question...")
+    
+    if not prompt and "pending_prompt" in st.session_state:
+        prompt = st.session_state.pop("pending_prompt")
+    
+    # ── All chat content renders inside the container (above buttons) ──
+    with chat_area:
+        # Ephemeral Hero State (shown only when chat is empty)
+        # Terminal Ready State (shown only when chat is empty)
+        if not st.session_state.messages:
+            st.markdown("")
+            st.info("Choose a company in the sidebar then select a framework below, or find best stocks by clicking below buttons.")
+    
+        # Display past messages
+        for msg in st.session_state.messages:
+            avatar = USER_AVATAR if msg["role"] == "user" else AGENT_AVATAR
+            with st.chat_message(msg["role"], avatar=avatar):
+                st.markdown(msg["content"])
+                if msg.get("model"):
+                    st.caption(f"⚡ {msg['model']}")
+    
+        # ── Save Portfolio Button ──
+        if st.session_state.get("pending_portfolio"):
+            portfolio = st.session_state.pending_portfolio
+    
+            if st.session_state.sb_user_id is None:
+                st.info("💡 Log in to save this portfolio to your account.")
+            else:
+                # Show portfolio summary from structured data
+                st.markdown("### 📋 Your SIP Portfolio")
+                preview_data = []
+                for s in portfolio["stocks"]:
+                    preview_data.append({
+                        "Stock": s.get("name", s["ticker"]),
+                        "Ticker": s["ticker"],
+                        "Sector": s.get("sector", "—"),
+                        "Allocation": f"{s.get('allocation_pct', 0)}%",
+                        "Monthly": f"₹{portfolio['sip_amount'] * s.get('allocation_pct', 0) / 100:,.0f}",
                     })
-                    if st.session_state.get("pending_portfolio"):
-                        st.rerun()
-
-                except Exception as e:
-                    error_msg = str(e)
-                    if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg or "All models rate-limited" in error_msg:
-                        st.warning("API limit reached. Using fallback system...")
-                        fallback_answer = fallback_router(prompt)
-                        st.markdown(fallback_answer)
+                st.dataframe(pd.DataFrame(preview_data), hide_index=True, use_container_width=True)
+                st.caption(f"Total SIP: ₹{portfolio['sip_amount']:,}/month · {portfolio.get('investor_type', '')} · {portfolio.get('time_horizon', '')} horizon")
+                if st.button("💾 Save Portfolio", use_container_width=True):
+                    try:
+                        sb = get_supabase()
+    
+                        freq_days = {
+                            "monthly": 30, "quarterly": 90,
+                            "semi-annually": 180, "annually": 365
+                        }
+                        days = freq_days.get(portfolio.get("review_freq", "quarterly"), 90)
+                        next_review = (datetime.date.today() + datetime.timedelta(days=days)).isoformat()
+    
+                        port_resp = sb.table("portfolios").insert({
+                            "user_id": st.session_state.sb_user_id,
+                            "name": portfolio["name"],
+                            "investor_type": portfolio["investor_type"],
+                            "sip_amount": portfolio["sip_amount"],
+                            "time_horizon": portfolio["time_horizon"],
+                            "review_freq": portfolio.get("review_freq", "quarterly"),
+                            "next_review_date": next_review,
+                        }).execute()
+    
+                        portfolio_id = port_resp.data[0]["id"]
+    
+                        stocks_for_alloc = []
+                        for stock in portfolio["stocks"]:
+                            ticker = stock["ticker"]
+                            try:
+                                info = yf.Ticker(ticker).info
+                                price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
+                            except Exception:
+                                price = 0
+    
+                            row = universe_df[universe_df["ticker"] == ticker]
+                            pe = float(row["pe"].iloc[0]) if len(row) and pd.notna(row["pe"].iloc[0]) else None
+                            roe = float(row["roe_y0"].iloc[0]) if len(row) and "roe_y0" in row.columns and pd.notna(row["roe_y0"].iloc[0]) else None
+                            score = int(row["score"].iloc[0]) if len(row) and pd.notna(row["score"].iloc[0]) else None
+                            sector = stock.get("sector", "") or (str(row["sector"].iloc[0]) if len(row) and "sector" in row.columns and pd.notna(row["sector"].iloc[0]) else "")
+    
+                            stocks_for_alloc.append({
+                                "ticker": ticker,
+                                "name": stock.get("name", ""),
+                                "sector": sector,
+                                "allocation_pct": stock.get("allocation_pct", 0),
+                                "price": price,
+                                "pe": pe,
+                                "roe": roe,
+                                "score": score,
+                            })
+    
+                        allocated, unallocated = allocate_shares(stocks_for_alloc, portfolio["sip_amount"])
+    
+                        for s in allocated:
+                            sb.table("holdings").insert({
+                                "portfolio_id": portfolio_id,
+                                "ticker": s["ticker"],
+                                "name": s["name"],
+                                "sector": s["sector"],
+                                "allocation_pct": s["allocation_pct"],
+                                "shares": s["shares"],
+                                "sip_amount_inr": s["actual_amount"],
+                                "price_at_entry": s["price"],
+                                "pe_at_entry": s["pe"],
+                                "roe_at_entry": s["roe"],
+                                "score_at_entry": s["score"],
+                            }).execute()
+    
+                        st.success(f"Portfolio saved! Invested ₹{portfolio['sip_amount'] - unallocated:,.0f} of ₹{portfolio['sip_amount']:,}.")
+                        if unallocated > 0:
+                            st.info(f"₹{unallocated:,.0f} unallocated (not enough for another share of any holding).")
+    
+                        # Show actual share breakdown
+                        breakdown_data = []
+                        for s in allocated:
+                            breakdown_data.append({
+                                "Stock": s["name"] or s["ticker"],
+                                "Price": f"₹{s['price']:,.2f}",
+                                "Shares": s["shares"],
+                                "Invested": f"₹{s['actual_amount']:,.0f}",
+                                "Target": f"₹{portfolio['sip_amount'] * s['allocation_pct'] / 100:,.0f}",
+                            })
+                        st.dataframe(pd.DataFrame(breakdown_data), hide_index=True, use_container_width=True)
+                        st.session_state.pending_portfolio = None
+    
+                    except Exception as e:
+                        st.error(f"Save failed: {e}")
+    
+        # Handle new input (renders inside container = above buttons)
+        if prompt:
+            st.session_state.messages.append({"role": "user", "content": prompt})
+    
+            with st.chat_message("user", avatar=USER_AVATAR):
+                st.markdown(prompt)
+    
+            with st.chat_message("assistant", avatar=AGENT_AVATAR):
+                with st.spinner("Routing & Analyzing..."):
+                    try:
+                        # Only intercept the first message; follow-ups go direct
+                        if len(st.session_state.messages) <= 1:
+                            rewritten_directive = intercept_and_rewrite_query(prompt)
+                        else:
+                            rewritten_directive = prompt
+                        
+                        answer, model_used = agent_turn(rewritten_directive)
+                        
+                        # 3. RENDER
+                        st.markdown(answer)
+                        st.caption(f"⚡ {model_used} | Routed via Interceptor")
+                        
+                        # Append the true answer to history, but keep the user's original prompt for continuity
                         st.session_state.messages.append({
                             "role": "assistant",
-                            "content": f"*(Fallback)*\n\n{fallback_answer}",
+                            "content": answer,
+                            "model": model_used,
                         })
-                    else:
-                        st.error(f"Error: {error_msg[:150]}")
+                        if st.session_state.get("pending_portfolio"):
+                            st.rerun()
+    
+                    except Exception as e:
+                        error_msg = str(e)
+                        if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg or "All models rate-limited" in error_msg:
+                            st.warning("API limit reached. Using fallback system...")
+                            fallback_answer = fallback_router(prompt)
+                            st.markdown(fallback_answer)
+                            st.session_state.messages.append({
+                                "role": "assistant",
+                                "content": f"*(Fallback)*\n\n{fallback_answer}",
+                            })
+                        else:
+                            st.error(f"Error: {error_msg[:150]}")
+                        else:
+    # ══════════════════════════════════════════════
+    # PORTFOLIO DASHBOARD
+    # ══════════════════════════════════════════════
+    st.markdown("### 📁 My Portfolios")
+
+    sb = get_supabase()
+    try:
+        port_resp = sb.table("portfolios").select("*").eq(
+            "user_id", st.session_state.sb_user_id
+        ).order("created_at", desc=True).execute()
+        portfolios = port_resp.data
+    except Exception as e:
+        st.error(f"Failed to load portfolios: {e}")
+        portfolios = []
+
+    if not portfolios:
+        st.info("No saved portfolios yet. Use the SIP Portfolio builder to create one!")
+    else:
+        for port in portfolios:
+            with st.expander(f"📊 {port['name']}", expanded=False):
+                st.caption(
+                    f"Created: {port['created_at'][:10]} · "
+                    f"{port.get('investor_type', '—')} · "
+                    f"₹{port.get('sip_amount', 0):,}/mo · "
+                    f"{port.get('time_horizon', '—')} horizon · "
+                    f"Next review: {port.get('next_review_date', '—')}"
+                )
+
+                # Fetch holdings
+                try:
+                    hold_resp = sb.table("holdings").select("*").eq(
+                        "portfolio_id", port["id"]
+                    ).execute()
+                    holdings = hold_resp.data
+                except Exception:
+                    holdings = []
+
+                if holdings:
+                    hold_df = pd.DataFrame(holdings)
+                    display_cols = {
+                        "name": "Stock",
+                        "ticker": "Ticker",
+                        "sector": "Sector",
+                        "shares": "Shares",
+                        "price_at_entry": "Entry Price",
+                        "sip_amount_inr": "Invested",
+                        "allocation_pct": "Alloc %",
+                        "score_at_entry": "Score",
+                    }
+                    available = {k: v for k, v in display_cols.items() if k in hold_df.columns}
+                    st.dataframe(
+                        hold_df[list(available.keys())].rename(columns=available),
+                        hide_index=True,
+                        use_container_width=True,
+                    )
+                else:
+                    st.caption("No holdings found.")
+
+                # Rename & Delete
+                col_r, col_d = st.columns([3, 1])
+                with col_r:
+                    new_name = st.text_input(
+                        "Rename", value=port["name"],
+                        key=f"rename_{port['id']}",
+                        label_visibility="collapsed"
+                    )
+                    if new_name != port["name"]:
+                        if st.button("Save Name", key=f"save_name_{port['id']}"):
+                            try:
+                                sb.table("portfolios").update(
+                                    {"name": new_name}
+                                ).eq("id", port["id"]).execute()
+                                st.success("Renamed!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Rename failed: {e}")
+
+                with col_d:
+                    if st.button("🗑️ Delete", key=f"delete_{port['id']}", type="secondary"):
+                        st.session_state[f"confirm_delete_{port['id']}"] = True
+
+                if st.session_state.get(f"confirm_delete_{port['id']}"):
+                    st.warning("Are you sure? This cannot be undone.")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        if st.button("Yes, delete", key=f"confirm_yes_{port['id']}"):
+                            try:
+                                sb.table("holdings").delete().eq(
+                                    "portfolio_id", port["id"]
+                                ).execute()
+                                sb.table("portfolios").delete().eq(
+                                    "id", port["id"]
+                                ).execute()
+                                st.session_state.pop(f"confirm_delete_{port['id']}", None)
+                                st.success("Deleted.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Delete failed: {e}")
+                    with c2:
+                        if st.button("Cancel", key=f"confirm_no_{port['id']}"):
+                            st.session_state.pop(f"confirm_delete_{port['id']}", None)
+                            st.rerun()
