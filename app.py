@@ -2851,111 +2851,123 @@ else:
                             st.success(f"**{r['Stock']}** — {r['Action']}\n\n{r['_reasoning']}")
                         else:
                             st.info(f"**{r['Stock']}** — {r['Action']}\n\n{r['_reasoning']}")
-
-                    # Update form
-                    action_stocks = [(i, r) for i, r in enumerate(review_rows) if "SELL" in r["Action"] or "BUY" in r["Action"]]
+                    # ── Update form — ALL holdings ──
                     sell_stocks = [(i, r) for i, r in enumerate(review_rows) if "SELL" in r["Action"]]
 
-                    if action_stocks:
-                        st.markdown("---")
-                        st.caption("Update what you actually did at your broker:")
-                        for idx, r in action_stocks:
+                    st.markdown("---")
+                    st.caption("Update what you actually did at your broker since last review:")
+
+                    for i, r in enumerate(review_rows):
+                        h_id = r["_holding_id"]
+                        if "SELL" in r["Action"]:
+                            st.number_input(
+                                f"🔴 {r['Stock']} — shares sold (of {r['Shares']})",
+                                min_value=0, max_value=r["Shares"], value=r["_sell_qty"],
+                                key=f"sold_{port['id']}_{h_id}"
+                            )
+                        else:
+                            c1, c2 = st.columns(2)
+                            with c1:
+                                st.number_input(
+                                    f"{'🟢' if 'BUY' in r['Action'] else '📥'} {r['Stock']} — shares bought",
+                                    min_value=0, value=0, key=f"add_qty_{port['id']}_{h_id}"
+                                )
+                            with c2:
+                                st.number_input(
+                                    f"{r['Stock']} — price paid (₹)",
+                                    min_value=0.0, value=0.0, format="%.2f", key=f"add_price_{port['id']}_{h_id}"
+                                )
+
+                    # ── Replacement candidates if sells exist ──
+                    candidates = []
+                    if sell_stocks:
+                        freed = 0
+                        for idx, r in sell_stocks:
+                            sell_qty = st.session_state.get(f"sold_{port['id']}_{r['_holding_id']}", 0)
+                            price = r["_now_price"]
+                            freed += sell_qty * price
+                        remaining_sectors = []
+                        for i, r in enumerate(review_rows):
+                            is_sell = any(si == i for si, _ in sell_stocks)
+                            if not is_sell:
+                                remaining_sectors.append(r.get("_sector", ""))
+                            else:
+                                sold_qty = st.session_state.get(f"sold_{port['id']}_{r['_holding_id']}", 0)
+                                if r["Shares"] - sold_qty > 0:
+                                    remaining_sectors.append(r.get("_sector", ""))
+                        all_tickers = [r["_ticker"] for r in review_rows]
+                        candidates = find_replacement_candidates(
+                            port.get("investor_type", "balanced"), port.get("time_horizon", "medium"),
+                            all_tickers, remaining_sectors
+                        )
+                        if candidates:
+                            st.markdown("---")
+                            st.markdown(f"**Replacement candidates** (≈₹{freed:,.0f} freed from sells)")
+                            cand_df = pd.DataFrame(candidates)
+                            cand_display = cand_df[["name", "ticker", "sector", "price", "score", "pe", "roe_pct"]].rename(columns={
+                                "name": "Stock", "ticker": "Ticker", "sector": "Sector",
+                                "price": "Price", "score": "Score", "pe": "P/E", "roe_pct": "ROE %"
+                            })
+                            st.dataframe(cand_display, hide_index=True, use_container_width=True)
+                            for c in candidates:
+                                col_sel, col_qty, col_px = st.columns([1, 2, 2])
+                                with col_sel:
+                                    st.checkbox(c["name"][:15], key=f"repl_sel_{port['id']}_{c['ticker']}", value=False)
+                                with col_qty:
+                                    st.number_input(f"Shares", min_value=0, value=0, key=f"repl_qty_{port['id']}_{c['ticker']}")
+                                with col_px:
+                                    st.number_input(f"Price (₹)", min_value=0.0, value=float(c["price"]), format="%.2f", key=f"repl_px_{port['id']}_{c['ticker']}")
+
+                    # ── Single update button ──
+                    if st.button("✅ Portfolio Updated", key=f"apply_{port['id']}", use_container_width=True):
+                        for i, r in enumerate(review_rows):
                             h_id = r["_holding_id"]
                             if "SELL" in r["Action"]:
-                                st.number_input(
-                                    f"🔴 {r['Stock']} — shares sold (of {r['Shares']})",
-                                    min_value=0, max_value=r["Shares"], value=r["_sell_qty"],
-                                    key=f"sold_{port['id']}_{h_id}"
-                                )
-                            elif "BUY" in r["Action"]:
-                                c1, c2 = st.columns(2)
-                                with c1:
-                                    st.number_input(f"🟢 {r['Stock']} — shares bought", min_value=0, value=0, key=f"add_qty_{port['id']}_{h_id}")
-                                with c2:
-                                    st.number_input(f"🟢 {r['Stock']} — price paid (₹)", min_value=0.0, value=0.0, format="%.2f", key=f"add_price_{port['id']}_{h_id}")
-
-                        if sell_stocks:
-                            freed = 0
-                            for idx, r in sell_stocks:
-                                sell_qty = st.session_state.get(f"sold_{port['id']}_{r['_holding_id']}", 0)
-                                price = r["_now_price"]
-                                freed += sell_qty * price
-                            remaining_sectors = []
-                            for i, r in enumerate(review_rows):
-                                is_sell = any(si == i for si, _ in sell_stocks)
-                                if not is_sell:
-                                    remaining_sectors.append(r.get("_sector", ""))
-                                else:
-                                    sold_qty = st.session_state.get(f"sold_{port['id']}_{r['_holding_id']}", 0)
-                                    if r["Shares"] - sold_qty > 0:
-                                        remaining_sectors.append(r.get("_sector", ""))
-                            all_tickers = [r["_ticker"] for r in review_rows]
-                            candidates = find_replacement_candidates(
-                                port.get("investor_type", "balanced"), port.get("time_horizon", "medium"),
-                                all_tickers, remaining_sectors
-                            )
-                            if candidates:
-                                st.markdown("---")
-                                st.markdown(f"**Replacement candidates** (≈₹{freed:,.0f} freed from sells)")
-                                cand_df = pd.DataFrame(candidates)
-                                cand_display = cand_df[["name", "ticker", "sector", "price", "score", "pe", "roe_pct"]].rename(columns={
-                                    "name": "Stock", "ticker": "Ticker", "sector": "Sector",
-                                    "price": "Price", "score": "Score", "pe": "P/E", "roe_pct": "ROE %"
-                                })
-                                st.dataframe(cand_display, hide_index=True, use_container_width=True)
-                                for c in candidates:
-                                    col_sel, col_qty, col_px = st.columns([1, 2, 2])
-                                    with col_sel:
-                                        st.checkbox(c["name"][:15], key=f"repl_sel_{port['id']}_{c['ticker']}", value=False)
-                                    with col_qty:
-                                        st.number_input(f"Shares", min_value=0, value=0, key=f"repl_qty_{port['id']}_{c['ticker']}")
-                                    with col_px:
-                                        st.number_input(f"Price (₹)", min_value=0.0, value=float(c["price"]), format="%.2f", key=f"repl_px_{port['id']}_{c['ticker']}")
-
-                        if st.button("✅ Portfolio Updated", key=f"apply_{port['id']}", use_container_width=True):
-                            for i, r in enumerate(review_rows):
-                                h_id = r["_holding_id"]
-                                if "SELL" in r["Action"]:
-                                    sold = st.session_state.get(f"sold_{port['id']}_{h_id}", 0)
-                                    if sold > 0:
-                                        new_shares = r["Shares"] - sold
-                                        if new_shares <= 0:
-                                            sb.table("holdings").delete().eq("id", h_id).execute()
-                                        else:
-                                            new_invested = new_shares * r["_entry_price"]
-                                            sb.table("holdings").update({"shares": new_shares, "sip_amount_inr": round(new_invested, 2)}).eq("id", h_id).execute()
-                                elif "BUY" in r["Action"]:
-                                    new_qty = st.session_state.get(f"add_qty_{port['id']}_{h_id}", 0)
-                                    buy_price = st.session_state.get(f"add_price_{port['id']}_{h_id}", 0.0)
-                                    if new_qty > 0 and buy_price > 0:
-                                        old_shares = r["Shares"]
-                                        old_price = r["_entry_price"]
-                                        total_shares = old_shares + new_qty
-                                        avg_price = ((old_shares * old_price) + (new_qty * buy_price)) / total_shares
-                                        sb.table("holdings").update({"shares": total_shares, "price_at_entry": round(avg_price, 2), "sip_amount_inr": round(total_shares * avg_price, 2)}).eq("id", h_id).execute()
-                            if sell_stocks:
-                                for c in candidates:
-                                    selected = st.session_state.get(f"repl_sel_{port['id']}_{c['ticker']}", False)
-                                    qty = st.session_state.get(f"repl_qty_{port['id']}_{c['ticker']}", 0)
-                                    px = st.session_state.get(f"repl_px_{port['id']}_{c['ticker']}", 0.0)
-                                    if selected and qty > 0 and px > 0:
-                                        urow = universe_df[universe_df["ticker"] == c["ticker"]]
-                                        sc_val = int(urow["score"].iloc[0]) if len(urow) and pd.notna(urow["score"].iloc[0]) else None
-                                        pe_val = float(urow["pe"].iloc[0]) if len(urow) and pd.notna(urow["pe"].iloc[0]) else None
-                                        roe_val = float(urow["roe_y0"].iloc[0]) if len(urow) and "roe_y0" in urow.columns and pd.notna(urow["roe_y0"].iloc[0]) else None
-                                        sb.table("holdings").insert({
-                                            "portfolio_id": port["id"], "ticker": c["ticker"], "name": c["name"],
-                                            "sector": c["sector"], "allocation_pct": 0, "shares": qty,
-                                            "sip_amount_inr": round(qty * px, 2), "price_at_entry": round(px, 2),
-                                            "pe_at_entry": pe_val, "roe_at_entry": roe_val, "score_at_entry": sc_val,
-                                        }).execute()
-                            st.session_state.pop(f"review_data_{port['id']}", None)
-                            st.success("Portfolio updated.")
-                            st.rerun()
+                                sold = st.session_state.get(f"sold_{port['id']}_{h_id}", 0)
+                                if sold > 0:
+                                    new_shares = r["Shares"] - sold
+                                    if new_shares <= 0:
+                                        sb.table("holdings").delete().eq("id", h_id).execute()
+                                    else:
+                                        new_invested = new_shares * r["_entry_price"]
+                                        sb.table("holdings").update({"shares": new_shares, "sip_amount_inr": round(new_invested, 2)}).eq("id", h_id).execute()
+                            else:
+                                new_qty = st.session_state.get(f"add_qty_{port['id']}_{h_id}", 0)
+                                buy_price = st.session_state.get(f"add_price_{port['id']}_{h_id}", 0.0)
+                                if new_qty > 0 and buy_price > 0:
+                                    old_shares = r["Shares"]
+                                    old_price = r["_entry_price"]
+                                    total_shares = old_shares + new_qty
+                                    avg_price = ((old_shares * old_price) + (new_qty * buy_price)) / total_shares
+                                    sb.table("holdings").update({
+                                        "shares": total_shares,
+                                        "price_at_entry": round(avg_price, 2),
+                                        "sip_amount_inr": round(total_shares * avg_price, 2),
+                                    }).eq("id", h_id).execute()
+                        if sell_stocks and candidates:
+                            for c in candidates:
+                                selected = st.session_state.get(f"repl_sel_{port['id']}_{c['ticker']}", False)
+                                qty = st.session_state.get(f"repl_qty_{port['id']}_{c['ticker']}", 0)
+                                px = st.session_state.get(f"repl_px_{port['id']}_{c['ticker']}", 0.0)
+                                if selected and qty > 0 and px > 0:
+                                    urow = universe_df[universe_df["ticker"] == c["ticker"]]
+                                    sc_val = int(urow["score"].iloc[0]) if len(urow) and pd.notna(urow["score"].iloc[0]) else None
+                                    pe_val = float(urow["pe"].iloc[0]) if len(urow) and pd.notna(urow["pe"].iloc[0]) else None
+                                    roe_val = float(urow["roe_y0"].iloc[0]) if len(urow) and "roe_y0" in urow.columns and pd.notna(urow["roe_y0"].iloc[0]) else None
+                                    sb.table("holdings").insert({
+                                        "portfolio_id": port["id"], "ticker": c["ticker"], "name": c["name"],
+                                        "sector": c["sector"], "allocation_pct": 0, "shares": qty,
+                                        "sip_amount_inr": round(qty * px, 2), "price_at_entry": round(px, 2),
+                                        "pe_at_entry": pe_val, "roe_at_entry": roe_val, "score_at_entry": sc_val,
+                                    }).execute()
+                        st.session_state.pop(f"review_data_{port['id']}", None)
+                        st.success("Portfolio updated.")
+                        st.rerun()
 
                     if st.button("✕ Close Review", key=f"close_review_{port['id']}"):
                         st.session_state.pop(f"review_data_{port['id']}", None)
                         st.rerun()
+
 
                 col_r, col_d = st.columns([3, 1])
                 with col_r:
