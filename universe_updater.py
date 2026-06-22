@@ -232,236 +232,230 @@ def combine_and_deduplicate(nse_tickers, bse_tickers):
 # ──────────────────────────────────────────────
 # FUNDAMENTALS FETCHER (per stock)
 # ──────────────────────────────────────────────
-def fetch_fundamentals(ticker):
-    """Fetch all metrics needed for the 4 frameworks. Returns dict or None."""
-    try:
-        stock = yf.Ticker(ticker)
-        info = stock.info
-        if not info or not info.get("regularMarketPrice"):
-            return None
-
-        pe = info.get("trailingPE")
-
-        data = {
-            "ticker": ticker,
-            "name": info.get("longName") or info.get("shortName", ticker),
-            "sector": info.get("sector", ""),
-            "price": info.get("regularMarketPrice") or info.get("currentPrice"),
-            "pe": pe,
-            "pb": info.get("priceToBook"),
-            "roe": info.get("returnOnEquity"),
-            "de": info.get("debtToEquity"),
-            "dividend_yield": info.get("dividendYield"),
-            "eps": info.get("trailingEps"),
-            "earnings_yield": round(1.0 / pe * 100, 2) if pe and pe > 0 else None,
-            "profit_margin": info.get("profitMargins"),
-            "market_cap": info.get("marketCap"),
-            "rev_growth": None,
-            "ni_growth": None,
-            "debt_growth": None,
-            # Daily Tracking & Momentum Metrics
-            "price_1d_pct": None,
-            "price_5d_pct": None,
-            "rsi_14": None,
-            "vol_spike_flag": False,
-            # Historical (y0 = most recent year, y3 = oldest)
-            "years_of_data": 0,
-            "revenue_y0": None, "revenue_y1": None, "revenue_y2": None, "revenue_y3": None,
-            "net_income_y0": None, "net_income_y1": None, "net_income_y2": None, "net_income_y3": None,
-            "total_debt_y0": None, "total_debt_y1": None, "total_debt_y2": None, "total_debt_y3": None,
-            "equity_y0": None, "equity_y1": None, "equity_y2": None, "equity_y3": None,
-            "roe_y0": None, "roe_y1": None, "roe_y2": None, "roe_y3": None,
-            "de_y0": None, "de_y1": None, "de_y2": None, "de_y3": None,
-        }
-
-        # ── Daily Momentum & Tracking Data ──
+# ──────────────────────────────────────────────
+# FUNDAMENTALS FETCHER (per stock)
+# ──────────────────────────────────────────────
+def fetch_fundamentals(ticker, retries=3):
+    """Fetch all metrics needed for the 4 frameworks. Returns dict or None. Includes backoff."""
+    for attempt in range(retries):
         try:
-            hist = stock.history(period="1mo")
-            if not hist.empty and len(hist) >= 2:
-                closes = hist["Close"]
-                vols = hist["Volume"]
+            # 1. CRITICAL: Explicitly pass the global session so Yahoo doesn't block us
+            stock = yf.Ticker(ticker, session=global_session)
+            info = stock.info
+            
+            if not info or not info.get("regularMarketPrice"):
+                return None
 
-                # 1D and 5D Returns
-                data["price_1d_pct"] = round((closes.iloc[-1] / closes.iloc[-2] - 1) * 100, 2)
-                if len(closes) >= 6:
-                    data["price_5d_pct"] = round((closes.iloc[-1] / closes.iloc[-6] - 1) * 100, 2)
-                
-                # Volume Spike (>300% of average)
-                avg_vol = vols.mean()
-                if avg_vol > 0:
-                    data["vol_spike_flag"] = bool(vols.iloc[-1] > (3 * avg_vol))
+            pe = info.get("trailingPE")
 
-                # 14-day RSI
-                if len(closes) > 14:
-                    delta = closes.diff()
-                    gain = delta.clip(lower=0).ewm(span=14, adjust=False).mean()
-                    loss = -1 * delta.clip(upper=0).ewm(span=14, adjust=False).mean()
-                    rs = gain / loss
-                    rsi = 100 - (100 / (1 + rs))
-                    data["rsi_14"] = round(float(rsi.iloc[-1]), 2)
-        except Exception:
-            pass # Fails silently, leaving metrics as None
+            data = {
+                "ticker": ticker,
+                "name": info.get("longName") or info.get("shortName", ticker),
+                "sector": info.get("sector", ""),
+                "price": info.get("regularMarketPrice") or info.get("currentPrice"),
+                "pe": pe,
+                "pb": info.get("priceToBook"),
+                "roe": info.get("returnOnEquity"),
+                "de": info.get("debtToEquity"),
+                "dividend_yield": info.get("dividendYield"),
+                "eps": info.get("trailingEps"),
+                "earnings_yield": round(1.0 / pe * 100, 2) if pe and pe > 0 else None,
+                "profit_margin": info.get("profitMargins"),
+                "market_cap": info.get("marketCap"),
+                "rev_growth": None,
+                "ni_growth": None,
+                "debt_growth": None,
+                # Daily Tracking & Momentum Metrics
+                "price_1d_pct": None,
+                "price_5d_pct": None,
+                "rsi_14": None,
+                "vol_spike_flag": False,
+                # Historical (y0 = most recent year, y3 = oldest)
+                "years_of_data": 0,
+                "revenue_y0": None, "revenue_y1": None, "revenue_y2": None, "revenue_y3": None,
+                "net_income_y0": None, "net_income_y1": None, "net_income_y2": None, "net_income_y3": None,
+                "total_debt_y0": None, "total_debt_y1": None, "total_debt_y2": None, "total_debt_y3": None,
+                "equity_y0": None, "equity_y1": None, "equity_y2": None, "equity_y3": None,
+                "roe_y0": None, "roe_y1": None, "roe_y2": None, "roe_y3": None,
+                "de_y0": None, "de_y1": None, "de_y2": None, "de_y3": None,
+            }
 
-        # Historical data extraction (up to 4 years)
-        try:
-            income_stmt = stock.financials
-            if income_stmt is not None and not income_stmt.empty:
-                cols = sorted(income_stmt.columns)  # chronological, oldest first
-                data["years_of_data"] = len(cols)
+            # ── Daily Momentum & Tracking Data ──
+            try:
+                hist = stock.history(period="1mo")
+                if not hist.empty and len(hist) >= 2:
+                    closes = hist["Close"]
+                    vols = hist["Volume"]
 
-                # Extract revenue and net income for each year
-                for i, col in enumerate(cols[-4:]):  # last 4 years max
-                    idx = len(cols[-4:]) - 1 - i  # y0=newest, y3=oldest
-                    try:
-                        val = income_stmt.loc["Total Revenue", col]
-                        if pd.notna(val):
-                            data[f"revenue_y{idx}"] = round(float(val), 2)
-                    except KeyError:
-                        pass
-                    try:
-                        val = income_stmt.loc["Net Income", col]
-                        if pd.notna(val):
-                            data[f"net_income_y{idx}"] = round(float(val), 2)
-                    except KeyError:
-                        pass
+                    # 1D and 5D Returns
+                    data["price_1d_pct"] = round((closes.iloc[-1] / closes.iloc[-2] - 1) * 100, 2)
+                    if len(closes) >= 6:
+                        data["price_5d_pct"] = round((closes.iloc[-1] / closes.iloc[-6] - 1) * 100, 2)
+                    
+                    # Volume Spike (>300% of average)
+                    avg_vol = vols.mean()
+                    if avg_vol > 0:
+                        data["vol_spike_flag"] = bool(vols.iloc[-1] > (3 * avg_vol))
 
-                # 1-year growth (same as before, from last 2 years)
-                if len(cols) >= 2:
-                    last2 = sorted(cols)[-2:]
-                    try:
-                        rev = [income_stmt.loc["Total Revenue", c] for c in last2]
-                        if all(pd.notna(v) and v > 0 for v in rev):
-                            data["rev_growth"] = round((rev[1] / rev[0] - 1) * 100, 2)
-                    except (KeyError, ZeroDivisionError):
-                        pass
-                    try:
-                        ni = [income_stmt.loc["Net Income", c] for c in last2]
-                        if all(pd.notna(v) for v in ni) and ni[0] != 0:
-                            data["ni_growth"] = round((ni[1] / ni[0] - 1) * 100, 2)
-                    except (KeyError, ZeroDivisionError):
-                        pass
-        except Exception:
-            pass
+                    # 14-day RSI
+                    if len(closes) > 14:
+                        delta = closes.diff()
+                        gain = delta.clip(lower=0).ewm(span=14, adjust=False).mean()
+                        loss = -1 * delta.clip(upper=0).ewm(span=14, adjust=False).mean()
+                        rs = gain / loss
+                        rsi = 100 - (100 / (1 + rs))
+                        data["rsi_14"] = round(float(rsi.iloc[-1]), 2)
+            except Exception:
+                pass 
 
-        try:
-            balance_sheet = stock.balance_sheet
-            if balance_sheet is not None and not balance_sheet.empty:
-                cols = sorted(balance_sheet.columns)
+            # Historical data extraction (up to 4 years)
+            try:
+                income_stmt = stock.financials
+                if income_stmt is not None and not income_stmt.empty:
+                    cols = sorted(income_stmt.columns)  
+                    data["years_of_data"] = len(cols)
 
-                for i, col in enumerate(cols[-4:]):
-                    idx = len(cols[-4:]) - 1 - i
-                    try:
-                        val = balance_sheet.loc["Total Debt", col]
-                        if pd.notna(val):
-                            data[f"total_debt_y{idx}"] = round(float(val), 2)
-                    except KeyError:
-                        pass
-                    try:
-                        eq = balance_sheet.loc["Stockholders Equity", col]
-                        if pd.notna(eq):
-                            data[f"equity_y{idx}"] = round(float(eq), 2)
-                            # Derive ROE for this year
-                            ni_key = f"net_income_y{idx}"
-                            if data.get(ni_key) and float(eq) > 0:
-                                data[f"roe_y{idx}"] = round(data[ni_key] / float(eq) * 100, 2)
-                            # Derive D/E for this year
-                            debt_key = f"total_debt_y{idx}"
-                            if data.get(debt_key) and float(eq) > 0:
-                                data[f"de_y{idx}"] = round(data[debt_key] / float(eq) * 100, 2)
-                    except KeyError:
-                        pass
+                    for i, col in enumerate(cols[-4:]):  
+                        idx = len(cols[-4:]) - 1 - i  
+                        try:
+                            val = income_stmt.loc["Total Revenue", col]
+                            if pd.notna(val): data[f"revenue_y{idx}"] = round(float(val), 2)
+                        except KeyError: pass
+                        try:
+                            val = income_stmt.loc["Net Income", col]
+                            if pd.notna(val): data[f"net_income_y{idx}"] = round(float(val), 2)
+                        except KeyError: pass
 
-                # 1-year debt growth
-                if len(cols) >= 2:
-                    last2 = sorted(cols)[-2:]
-                    try:
-                        debt = [balance_sheet.loc["Total Debt", c] for c in last2]
-                        if all(pd.notna(v) for v in debt) and debt[0] > 0:
-                            data["debt_growth"] = round((debt[1] / debt[0] - 1) * 100, 2)
-                    except (KeyError, ZeroDivisionError):
-                        pass
-        except Exception:
-            pass
+                    if len(cols) >= 2:
+                        last2 = sorted(cols)[-2:]
+                        try:
+                            rev = [income_stmt.loc["Total Revenue", c] for c in last2]
+                            if all(pd.notna(v) and v > 0 for v in rev):
+                                data["rev_growth"] = round((rev[1] / rev[0] - 1) * 100, 2)
+                        except (KeyError, ZeroDivisionError): pass
+                        try:
+                            ni = [income_stmt.loc["Net Income", c] for c in last2]
+                            if all(pd.notna(v) for v in ni) and ni[0] != 0:
+                                data["ni_growth"] = round((ni[1] / ni[0] - 1) * 100, 2)
+                        except (KeyError, ZeroDivisionError): pass
+            except Exception:
+                pass
 
-        # ── Earnings quality checks (label-independent) ──
-        try:
-            ni_y0 = data.get("net_income_y0")
-            ni_y1 = data.get("net_income_y1")
-            ni_y2 = data.get("net_income_y2")
+            try:
+                balance_sheet = stock.balance_sheet
+                if balance_sheet is not None and not balance_sheet.empty:
+                    cols = sorted(balance_sheet.columns)
+                    for i, col in enumerate(cols[-4:]):
+                        idx = len(cols[-4:]) - 1 - i
+                        try:
+                            val = balance_sheet.loc["Total Debt", col]
+                            if pd.notna(val): data[f"total_debt_y{idx}"] = round(float(val), 2)
+                        except KeyError: pass
+                        try:
+                            eq = balance_sheet.loc["Stockholders Equity", col]
+                            if pd.notna(eq):
+                                data[f"equity_y{idx}"] = round(float(eq), 2)
+                                ni_key = f"net_income_y{idx}"
+                                if data.get(ni_key) and float(eq) > 0:
+                                    data[f"roe_y{idx}"] = round(data[ni_key] / float(eq) * 100, 2)
+                                debt_key = f"total_debt_y{idx}"
+                                if data.get(debt_key) and float(eq) > 0:
+                                    data[f"de_y{idx}"] = round(data[debt_key] / float(eq) * 100, 2)
+                        except KeyError: pass
 
-            # Check 1: Cash conversion (OCF / Net Income)
-            cashflow = stock.cashflow
-            if cashflow is not None and not cashflow.empty:
-                cf_cols = sorted(cashflow.columns)
-                ocf = None
-                for row_name in ["Operating Cash Flow", "Total Cash From Operating Activities"]:
-                    if row_name in cashflow.index:
-                        val = cashflow.loc[row_name, cf_cols[-1]]
-                        if pd.notna(val):
-                            ocf = float(val)
-                            break
-                if ocf is not None and ni_y0 and ni_y0 > 0:
-                    data["cash_conversion"] = round(ocf / ni_y0, 2)
+                    if len(cols) >= 2:
+                        last2 = sorted(cols)[-2:]
+                        try:
+                            debt = [balance_sheet.loc["Total Debt", c] for c in last2]
+                            if all(pd.notna(v) for v in debt) and debt[0] > 0:
+                                data["debt_growth"] = round((debt[1] / debt[0] - 1) * 100, 2)
+                        except (KeyError, ZeroDivisionError): pass
+            except Exception:
+                pass
+
+            # ── Earnings quality checks ──
+            try:
+                ni_y0 = data.get("net_income_y0")
+                ni_y1 = data.get("net_income_y1")
+                ni_y2 = data.get("net_income_y2")
+
+                cashflow = stock.cashflow
+                if cashflow is not None and not cashflow.empty:
+                    cf_cols = sorted(cashflow.columns)
+                    ocf = None
+                    for row_name in ["Operating Cash Flow", "Total Cash From Operating Activities"]:
+                        if row_name in cashflow.index:
+                            val = cashflow.loc[row_name, cf_cols[-1]]
+                            if pd.notna(val):
+                                ocf = float(val)
+                                break
+                    if ocf is not None and ni_y0 and ni_y0 > 0:
+                        data["cash_conversion"] = round(ocf / ni_y0, 2)
+                    else:
+                        data["cash_conversion"] = None
                 else:
                     data["cash_conversion"] = None
-            else:
-                data["cash_conversion"] = None
 
-            # Check 2: Earnings spike (current vs avg of prior years)
-            prior_ni = [v for v in [ni_y1, ni_y2] if v is not None and v > 0]
-            if ni_y0 and len(prior_ni) >= 1:
-                prior_avg = sum(prior_ni) / len(prior_ni)
-                if prior_avg > 0:
-                    data["earnings_spike"] = round(ni_y0 / prior_avg, 2)
+                prior_ni = [v for v in [ni_y1, ni_y2] if v is not None and v > 0]
+                if ni_y0 and len(prior_ni) >= 1:
+                    prior_avg = sum(prior_ni) / len(prior_ni)
+                    if prior_avg > 0:
+                        data["earnings_spike"] = round(ni_y0 / prior_avg, 2)
+                    else:
+                        data["earnings_spike"] = None
                 else:
                     data["earnings_spike"] = None
-            else:
-                data["earnings_spike"] = None
 
-            # Check 3: Non-operating income gap
-            if income_stmt is not None and not income_stmt.empty:
-                latest_col = sorted(income_stmt.columns)[-1]
-                op_income = None
-                for row_name in ["Operating Income", "EBIT"]:
-                    if row_name in income_stmt.index:
-                        val = income_stmt.loc[row_name, latest_col]
-                        if pd.notna(val):
-                            op_income = float(val)
-                            break
-                if op_income and op_income > 0 and ni_y0 and ni_y0 > 0:
-                    data["non_op_pct"] = round((ni_y0 - op_income) / ni_y0 * 100, 2)
+                if income_stmt is not None and not income_stmt.empty:
+                    latest_col = sorted(income_stmt.columns)[-1]
+                    op_income = None
+                    for row_name in ["Operating Income", "EBIT"]:
+                        if row_name in income_stmt.index:
+                            val = income_stmt.loc[row_name, latest_col]
+                            if pd.notna(val):
+                                op_income = float(val)
+                                break
+                    if op_income and op_income > 0 and ni_y0 and ni_y0 > 0:
+                        data["non_op_pct"] = round((ni_y0 - op_income) / ni_y0 * 100, 2)
+                    else:
+                        data["non_op_pct"] = None
                 else:
                     data["non_op_pct"] = None
-            else:
+
+                quality_pass = True
+                cc = data.get("cash_conversion")
+                spike = data.get("earnings_spike")
+                non_op = data.get("non_op_pct")
+
+                if cc is not None and cc < 0.5 and ni_y0 and ni_y0 > 0: quality_pass = False
+                if spike is not None and spike > 3.0: quality_pass = False
+                if non_op is not None and non_op > 40: quality_pass = False
+
+                data["quality_pass"] = quality_pass
+
+            except Exception:
+                data["cash_conversion"] = None
+                data["earnings_spike"] = None
                 data["non_op_pct"] = None
+                data["quality_pass"] = True  
 
-            # Composite quality flag
-            quality_pass = True
-            cc = data.get("cash_conversion")
-            spike = data.get("earnings_spike")
-            non_op = data.get("non_op_pct")
+            # 2. Be nice to Yahoo: Small delay between successful requests
+            time.sleep(0.5) 
+            return data
 
-            if cc is not None and cc < 0.5 and ni_y0 and ni_y0 > 0:
-                quality_pass = False
-            if spike is not None and spike > 3.0:
-                quality_pass = False
-            if non_op is not None and non_op > 40:
-                quality_pass = False
-
-            data["quality_pass"] = quality_pass
-
-        except Exception:
-            data["cash_conversion"] = None
-            data["earnings_spike"] = None
-            data["non_op_pct"] = None
-            data["quality_pass"] = True  # assume clean if we can't check
-
-        return data
-
-    except Exception as e:
-        # Stop swallowing exceptions so we can see if we get blocked
-        print(f"[{ticker}] Failed: {e}")
-        return None
+        except Exception as e:
+            error_str = str(e)
+            if "429" in error_str or "Too Many Requests" in error_str:
+                # 3. EXPONENTIAL BACKOFF: If blocked, sleep for 5s, 10s, 20s
+                sleep_time = (2 ** attempt) * 5
+                print(f"[{ticker}] Rate limited. Sleeping {sleep_time}s...")
+                time.sleep(sleep_time)
+            else:
+                print(f"[{ticker}] Failed: {e}")
+                return None
+            
+    # Failed all retries
+    return None
 
 
 # ──────────────────────────────────────────────
