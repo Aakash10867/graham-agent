@@ -2640,7 +2640,47 @@ else:
                                 except Exception:
                                     pass
 
-                
+                                # ── Apply Changes Button ──
+                                has_actions = any("SELL" in r["Action"] or "BUY" in r["Action"] for r in review_rows)
+
+                                if has_actions:
+                                    st.markdown("---")
+                                    st.caption("⚠️ You still need to execute trades at your broker (Zerodha, Groww, etc.). This button updates your portfolio records to match.")
+
+                                    if st.button("✅ Apply Changes to Portfolio", key=f"apply_{port['id']}", use_container_width=True):
+                                        applied = []
+                                        for i, r in enumerate(review_rows):
+                                            h = holdings[i]
+
+                                            if "SELL ALL" in r["Action"]:
+                                                sb.table("holdings").delete().eq("id", h["id"]).execute()
+                                                applied.append(f"Removed {r['Stock']}")
+
+                                            elif "SELL" in r["Action"] and "of" in r["Action"]:
+                                                parts = r["Action"].split("SELL")[1].split("of")
+                                                sell_n = int(parts[0].strip())
+                                                new_shares = max(0, (h.get("shares") or 0) - sell_n)
+                                                new_price = float(r["Now"].replace("₹", "").replace(",", ""))
+                                                new_invested = new_shares * (h.get("price_at_entry") or new_price)
+
+                                                if new_shares == 0:
+                                                    sb.table("holdings").delete().eq("id", h["id"]).execute()
+                                                    applied.append(f"Removed {r['Stock']} (all shares sold)")
+                                                else:
+                                                    sb.table("holdings").update({
+                                                        "shares": new_shares,
+                                                        "sip_amount_inr": round(new_invested, 2),
+                                                    }).eq("id", h["id"]).execute()
+                                                    applied.append(f"{r['Stock']}: {h.get('shares')}→{new_shares} shares")
+
+                                            elif "BUY" in r["Action"]:
+                                                applied.append(f"{r['Stock']}: Buy more at your broker, then update manually")
+
+                                        if applied:
+                                            for a in applied:
+                                                st.write(f"• {a}")
+                                            st.success("Portfolio records updated.")
+                                            st.rerun()
 
                 # Rename & Delete
                 col_r, col_d = st.columns([3, 1])
