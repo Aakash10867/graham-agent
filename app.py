@@ -2888,25 +2888,29 @@ elif st.session_state.sb_view_mode == "import":
                 for _, row in universe_df.iterrows()
             ]
             
-            # Streamlit's selectbox is searchable by default when you click and type!
+
             selected_stock = st.selectbox("🔍 Search & Select Company (Type to filter)", stock_options)
-            shares_to_add = st.number_input("Number of Shares Owned", min_value=1, value=10, step=1)
+            
+            # Preview CSV price as default, but let user override with actual buy price
+            _ticker_preview = selected_stock.split("(")[-1].replace(")", "").strip()
+            _row_preview = universe_df[universe_df["ticker"] == _ticker_preview]
+            _default_price = float(_row_preview["price"].iloc[0]) if len(_row_preview) and pd.notna(_row_preview["price"].iloc[0]) else 0.0
+            
+            col_sh, col_px = st.columns(2)
+            with col_sh:
+                shares_to_add = st.number_input("Shares Owned", min_value=1, value=10, step=1)
+            with col_px:
+                price_paid = st.number_input("Avg Buy Price (₹)", min_value=0.01, value=_default_price, format="%.2f")
             
             if st.button("➕ Add to List", use_container_width=True):
-                # Extract the ticker from inside the parentheses: e.g., "Reliance (RELIANCE.NS)" -> "RELIANCE.NS"
-                ticker_resolved = selected_stock.split("(")[-1].replace(")", "").strip()
+                ticker_resolved = _ticker_preview
                 company_name = selected_stock.split(" (")[0]
                 
-                # Fetch current market price from the local CSV to avoid slow API calls
-                row = universe_df[universe_df["ticker"] == ticker_resolved]
-                px = float(row["price"].iloc[0]) if len(row) and pd.notna(row["price"].iloc[0]) else 0
-                
-                # Append to state pool
                 st.session_state.import_holding_pool.append({
                     "ticker": ticker_resolved,
                     "name": company_name,
                     "shares": shares_to_add,
-                    "price": px
+                    "price": price_paid
                 })
                 st.success(f"Added {ticker_resolved} to your staging list.")
                 st.rerun()
@@ -2965,8 +2969,8 @@ elif st.session_state.sb_view_mode == "import":
                             }).execute()
                         
                         st.session_state.import_holding_pool = []
-                        st.session_state.sb_view_mode = "portfolios"
                         st.session_state[f"auto_trigger_review_{portfolio_id}"] = True
+                        st.session_state.sb_view_mode = "portfolios"
                         st.rerun()
                         
                     except Exception as e:
@@ -3229,6 +3233,8 @@ elif st.session_state.sb_view_mode == "portfolios":
                     pass  # Fail silently if history table doesn't exist yet
 
                 today = datetime.date.today()
+                _auto_key = f"auto_trigger_review_{port['id']}"
+                _auto_run = st.session_state.pop(_auto_key, False)
                 review_date = None
                 if port.get("next_review_date"):
                     try:
@@ -3236,19 +3242,21 @@ elif st.session_state.sb_view_mode == "portfolios":
                     except (ValueError, TypeError):
                         review_date = None
 
-                if review_date and holdings:
-                    days_until = (review_date - today).days
-                    if days_until > 7:
+                if holdings and (review_date or _auto_run):
+                    days_until = (review_date - today).days if review_date else 0
+                    if days_until > 7 and not _auto_run:
                         st.caption(f"📅 Next review in {days_until} days ({review_date.isoformat()})")
                     else:
-                        if days_until > 0:
-                            st.warning(f"📅 Review due in {days_until} days!")
-                        elif days_until == 0:
-                            st.warning("📅 Review due today!")
-                        else:
-                            st.error(f"📅 Review overdue by {abs(days_until)} days!")
+                        if not _auto_run:
+                            if days_until > 0:
+                                st.warning(f"📅 Review due in {days_until} days!")
+                            elif days_until == 0:
+                                st.warning("📅 Review due today!")
+                            else:
+                                st.error(f"📅 Review overdue by {abs(days_until)} days!")
 
-                        if st.button("🔄 Review Portfolio", key=f"review_{port['id']}", use_container_width=True):
+                        _review_clicked = st.button("🔄 Review Portfolio", key=f"review_{port['id']}", use_container_width=True)
+                        if _review_clicked or _auto_run:
                             with st.spinner("Analyzing holdings with market context and book philosophy..."):
                                 enriched = build_review_context(holdings, port)
                                 llm_recs = generate_review_recommendations(
