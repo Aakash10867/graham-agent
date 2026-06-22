@@ -1,5 +1,5 @@
 """
-ALPHACONSENSUS TERMINAL
+DeepMoat
 ========================
 Quantitative Multi-Agent Investment Committee.
 Operating on Graham, Greenblatt, Dorsey, and Trajectory frameworks.
@@ -267,7 +267,7 @@ def generate_review_recommendations(enriched_holdings, investor_type, time_horiz
         )
 
     review_prompt = (
-        f"You are the AlphaConsensus Investment Committee reviewing a {investor_type} investor's "
+        f"You are the DeepMoat Investment Committee reviewing a {investor_type} investor's "
         f"portfolio with a {time_horizon}-term horizon.\n\n"
         f"For each stock below, provide a recommendation.\n\n"
         f"DECISION FRAMEWORK (apply in order):\n"
@@ -543,7 +543,7 @@ def _resolve_ticker(query):
 # PAGE CONFIG
 # ══════════════════════════════════════════════
 st.set_page_config(
-    page_title="AlphaConsensus Terminal",
+    page_title="DeepMoat",
     page_icon="logo.svg",
     layout="centered",
 )
@@ -968,7 +968,7 @@ with h_col1:
     st.image("logo.svg", width=54) # Precise, discrete sizing
 
 with h_col2:
-    st.markdown("<h1 style='margin-top: -15px; padding-bottom: 0px;'>AlphaConsensus</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='margin-top: -15px; padding-bottom: 0px;'>DeepMoat</h1>", unsafe_allow_html=True)
 
 st.caption("Quantitative investment analysis — Graham, Greenblatt, Dorsey, and Trajectory frameworks.")
 st.markdown("---")
