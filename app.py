@@ -1070,14 +1070,15 @@ with st.sidebar:
 
     else:
         st.caption(f"Logged in as {st.session_state.sb_user_email}")
-    
-    if st.button("📥 Import Existing Portfolio", use_container_width=True):
-        st.session_state.sb_view_mode = "import"
-        st.rerun()
         
-    if st.button("📁 My Portfolios", use_container_width=True):
-        st.session_state.sb_view_mode = "portfolios"
-        st.rerun()
+        # --- NEW IMPORT BUTTON ---
+        if st.button("📥 Import Existing Portfolio", use_container_width=True):
+            st.session_state.sb_view_mode = "import"
+            st.rerun()
+            
+        if st.button("📁 My Portfolios", use_container_width=True):
+            st.session_state.sb_view_mode = "portfolios"
+            st.rerun()
         else:
             if st.button("← Back to Chat", use_container_width=True):
                 st.session_state.sb_view_mode = "chat"
@@ -2846,125 +2847,7 @@ if st.session_state.sb_view_mode == "chat":
                 st.session_state.pending_prompt = st.session_state.pop("pending_retry")
                 st.rerun()
 
-
-
-elif st.session_state.sb_view_mode == "import":
-    st.markdown("### 📥 Import Your Existing Portfolio")
-    st.caption("Onboard your current holdings to analyze them using the DeepMoat framework.")
-    
-    if st.session_state.sb_user_id is None:
-        st.warning("Please log in via the sidebar to save and analyze an existing portfolio.")
-    else:
-        # 1. Meta Information Gathering
-        with st.container(border=True):
-            st.markdown("#### ⚙️ Portfolio Metadata & Goals")
-            p_name = st.text_input("Portfolio Name", placeholder="e.g., My Main Brokerage")
-            col_m1, col_m2 = st.columns(2)
-            with col_m1:
-                total_invested = st.number_input("Total Amount Invested Till Date (INR)", min_value=0, value=100000, step=5000)
-                sip_amt = st.number_input("Current Monthly SIP Amount (INR)", min_value=0, value=10000, step=1000)
-            with col_m2:
-                inv_type = st.selectbox("Investment Goal Profile", ["defensive", "balanced", "enterprising"], index=1)
-                horizon = st.selectbox("Time Horizon", ["short", "medium", "long"], index=1)
-        
-        # 2. Dynamic Asset Adder (Searchable Dropdown)
-        if "import_holding_pool" not in st.session_state:
-            st.session_state.import_holding_pool = []
-
-        with st.container(border=True):
-            st.markdown("#### 📊 Add Your Stock Holdings")
-            
-            # Create a list of "Company Name (TICKER)" from your existing universe_df
-            stock_options = [
-                f"{row.get('name', row['ticker'])} ({row['ticker']})" 
-                for _, row in universe_df.iterrows()
-            ]
-            
-            # Streamlit's selectbox is searchable by default when you click and type!
-            selected_stock = st.selectbox("🔍 Search & Select Company (Type to filter)", stock_options)
-            shares_to_add = st.number_input("Number of Shares Owned", min_value=1, value=10, step=1)
-            
-            if st.button("➕ Add to List", use_container_width=True):
-                # Extract the ticker from inside the parentheses: e.g., "Reliance (RELIANCE.NS)" -> "RELIANCE.NS"
-                ticker_resolved = selected_stock.split("(")[-1].replace(")", "").strip()
-                company_name = selected_stock.split(" (")[0]
-                
-                # Fetch current market price from the local CSV to avoid slow API calls
-                row = universe_df[universe_df["ticker"] == ticker_resolved]
-                px = float(row["price"].iloc[0]) if len(row) and pd.notna(row["price"].iloc[0]) else 0
-                
-                # Append to state pool
-                st.session_state.import_holding_pool.append({
-                    "ticker": ticker_resolved,
-                    "name": company_name,
-                    "shares": shares_to_add,
-                    "price": px
-                })
-                st.success(f"Added {ticker_resolved} to your staging list.")
-                st.rerun()
-
-        # 3. Present Staging List Table
-        if st.session_state.import_holding_pool:
-            st.markdown("#### Staging Review Table")
-            staging_df = pd.DataFrame(st.session_state.import_holding_pool)
-            st.dataframe(staging_df[["name", "ticker", "shares", "price"]], hide_index=True, use_container_width=True)
-            
-            if st.button("🗑️ Clear List"):
-                st.session_state.import_holding_pool = []
-                st.rerun()
-                
-            # 4. Save and Trigger Instant Review
-            if st.button("💾 Save & Run Instant Analysis", use_container_width=True):
-                if not p_name:
-                    st.error("Please provide a name for this portfolio.")
-                else:
-                    try:
-                        sb = get_supabase()
-                        review_days = 90 if horizon == "medium" else (180 if horizon == "long" else 30)
-                        next_review = (datetime.date.today() + datetime.timedelta(days=review_days)).isoformat()
-                        
-                        port_resp = sb.table("portfolios").insert({
-                            "user_id": st.session_state.sb_user_id,
-                            "name": p_name,
-                            "investor_type": inv_type,
-                            "sip_amount": sip_amt,
-                            "time_horizon": horizon,
-                            "review_freq": str(review_days),
-                            "next_review_date": next_review,
-                        }).execute()
-                        
-                        portfolio_id = port_resp.data[0]["id"]
-                        
-                        for s in st.session_state.import_holding_pool:
-                            row = universe_df[universe_df["ticker"] == s["ticker"]]
-                            pe = float(row["pe"].iloc[0]) if len(row) and pd.notna(row["pe"].iloc[0]) else None
-                            roe = float(row["roe_y0"].iloc[0]) if len(row) and "roe_y0" in row.columns and pd.notna(row["roe_y0"].iloc[0]) else None
-                            score = int(row["score"].iloc[0]) if len(row) and pd.notna(row["score"].iloc[0]) else None
-                            sect = str(row["sector"].iloc[0]) if len(row) and "sector" in row.columns and pd.notna(row["sector"].iloc[0]) else "Unknown"
-                            
-                            sb.table("holdings").insert({
-                                "portfolio_id": portfolio_id, 
-                                "ticker": s["ticker"], 
-                                "name": s["name"],
-                                "sector": sect, 
-                                "allocation_pct": 0, 
-                                "shares": s["shares"],
-                                "sip_amount_inr": round(s["shares"] * s["price"], 2), 
-                                "price_at_entry": s["price"],
-                                "pe_at_entry": pe, 
-                                "roe_at_entry": roe, 
-                                "score_at_entry": score
-                            }).execute()
-                        
-                        st.session_state.import_holding_pool = []
-                        st.session_state.sb_view_mode = "portfolios"
-                        st.rerun()
-                        
-                    except Exception as e:
-                        st.error(f"Failed to onboard portfolio: {e}")
-
-
-elif st.session_state.sb_view_mode == "portfolios":
+else:
     st.markdown("### 📁 My Portfolios")
     sb = get_supabase()
     try:
