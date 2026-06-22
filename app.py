@@ -2684,96 +2684,6 @@ def agent_turn(user_message):
 
     raise Exception(f"All models rate-limited. Last error: {last_error}")
 
-import time
-
-@st.dialog("Create Active Portfolio")
-def add_portfolio_modal():
-    st.markdown("Enter your current holdings to establish a cost-basis for real-time tracking.")
-    
-    # 1. Top-Level Portfolio Metadata
-    portfolio_name = st.text_input("Portfolio Name", placeholder="e.g., Core Retirement Fund")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        monthly_sip = st.number_input("Monthly SIP (₹)", min_value=0, step=1000)
-    with col2:
-        time_horizon = st.selectbox("Investment Horizon", ["Short-term", "Medium-term", "Long-term"])
-    
-    st.divider()
-    
-    # 2. Asset Selection
-    available_tickers = universe_df['ticker'].tolist() if 'universe_df' in globals() else []
-    selected_tickers = st.multiselect("Select Assets", options=available_tickers)
-    
-    # 3. Dynamic Cost-Basis Inputs
-    holdings_data = {}
-    if selected_tickers:
-        st.markdown("**Holdings Details**")
-        for ticker in selected_tickers:
-            st.markdown(f"**{ticker}**")
-            h_col1, h_col2 = st.columns(2)
-            with h_col1:
-                shares = st.number_input(f"Shares", min_value=1, step=1, key=f"shares_{ticker}")
-            with h_col2:
-                avg_price = st.number_input(f"Avg Buy Price", min_value=0.01, step=10.0, key=f"price_{ticker}")
-            
-            holdings_data[ticker] = {
-                "shares": shares,
-                "avg_buy_price": avg_price
-            }
-            st.write("") # Spacing
-    
-    # 4. Save & Calculate Engine
-    if st.button("Save & Initialize", use_container_width=True):
-        if not portfolio_name or not selected_tickers:
-            st.error("Please provide a name and select at least one asset.")
-            return
-            
-        with st.spinner("Calculating live cost-basis and initializing portfolio..."):
-            sb = get_supabase()
-            
-            # Create Portfolio Entry First
-            next_review = (datetime.date.today() + datetime.timedelta(days=90)).isoformat()
-            new_port = {
-                "user_id": st.session_state.sb_user_id,
-                "name": portfolio_name,
-                "investor_type": "active",
-                "time_horizon": time_horizon.lower().split('-')[0],
-                "sip_amount": monthly_sip,
-                "review_freq": "90",
-                "next_review_date": next_review,
-                "initial_audit_done": False
-            }
-            
-            port_resp = sb.table("portfolios").insert(new_port).execute()
-            new_port_id = port_resp.data[0]["id"]
-            
-            # Process Holdings into Database
-            for ticker, data in holdings_data.items():
-                row = universe_df[universe_df["ticker"] == ticker]
-                pe = float(row["pe"].iloc[0]) if len(row) and pd.notna(row["pe"].iloc[0]) else None
-                roe = float(row["roe_y0"].iloc[0]) if len(row) and "roe_y0" in row.columns and pd.notna(row["roe_y0"].iloc[0]) else None
-                score = int(row["score"].iloc[0]) if len(row) and pd.notna(row["score"].iloc[0]) else None
-                sector = str(row["sector"].iloc[0]) if len(row) and "sector" in row.columns and pd.notna(row["sector"].iloc[0]) else ""
-                name = str(row["name"].iloc[0]) if len(row) and "name" in row.columns and pd.notna(row["name"].iloc[0]) else ticker
-
-                sb.table("holdings").insert({
-                    "portfolio_id": new_port_id,
-                    "ticker": ticker,
-                    "name": name,
-                    "sector": sector,
-                    "allocation_pct": 0, # Manual input, so baseline allocation isn't derived yet
-                    "shares": data["shares"],
-                    "sip_amount_inr": data["shares"] * data["avg_buy_price"], # Stores actual cost basis
-                    "price_at_entry": data["avg_buy_price"],
-                    "pe_at_entry": pe,
-                    "roe_at_entry": roe,
-                    "score_at_entry": score
-                }).execute()
-            
-            st.success(f"Portfolio '{portfolio_name}' successfully initialized.")
-            time.sleep(1)
-            st.rerun()
 
 
 # ══════════════════════════════════════════════
@@ -2951,11 +2861,6 @@ if st.session_state.sb_view_mode == "chat":
 
 else:
     st.markdown("### 📁 My Portfolios")
-    
-    if st.button("➕ Add Active Portfolio"):
-        add_portfolio_modal()
-    st.write("")
-    
     sb = get_supabase()
     try:
         port_resp = sb.table("portfolios").select("*").eq(
