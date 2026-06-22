@@ -2875,7 +2875,7 @@ else:
                             with c2:
                                 st.number_input(
                                     f"{r['Stock']} — price paid (₹)",
-                                    min_value=0.0, value=0.0, format="%.2f", key=f"add_price_{port['id']}_{h_id}"
+                                    min_value=0.0, value=float(r["_now_price"]), format="%.2f", key=f"add_price_{port['id']}_{h_id}"
                                 )
 
                     # ── Replacement candidates if sells exist ──
