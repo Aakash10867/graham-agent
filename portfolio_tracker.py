@@ -24,6 +24,17 @@ def run_daily_tracker():
 
     holdings_resp = supabase.table("holdings").select("*").execute()
     holdings = holdings_resp.data
+
+    # ── Fetch Nifty 50 close price once for the entire run ──
+    nifty_close = None
+    try:
+        nifty = yf.Ticker("^NSEI")
+        hist = nifty.history(period="5d")
+        if not hist.empty:
+            nifty_close = round(float(hist["Close"].iloc[-1]), 2)
+            print(f"Nifty 50 close: ₹{nifty_close:,.2f}")
+    except Exception as e:
+        print(f"Warning: Could not fetch Nifty 50: {e}")
     
     price_cache = {}
     today_str = date.today().isoformat()
@@ -69,13 +80,19 @@ def run_daily_tracker():
             "current_return_pct": round(return_pct, 2)
         }).eq("id", port_id).execute()
         
-        # 2. Log History (Time Series)
-        supabase.table("portfolio_history").insert({
+        # 2. Log History (Time Series) — with Nifty for comparison chart
+        history_row = {
             "portfolio_id": port_id,
             "date": today_str,
             "total_value": round(current_total_value, 2),
-            "daily_return_pct": round(return_pct, 2)
-        }).execute()
+            "daily_return_pct": round(return_pct, 2),
+        }
+        if nifty_close is not None:
+            history_row["nifty_value"] = nifty_close
+
+        supabase.table("portfolio_history").upsert(
+            history_row, on_conflict="portfolio_id,date"
+        ).execute()
         
         print(f"Updated [{port['name']}]: Value ₹{current_total_value:,.2f} | Return {return_pct:+.2f}%")
 
