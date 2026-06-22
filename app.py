@@ -1696,7 +1696,7 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
             "name": row.get("name", "N/A") if pd.notna(row.get("name")) else "N/A",
             "sector": row.get("sector", "N/A") if pd.notna(row.get("sector")) else "N/A",
             "price": round(row["price"], 2) if pd.notna(row.get("price")) else "N/A",
-            "market_cap": row.get("market_cap", "N/A"),
+            "market_cap": round(float(row["market_cap"]), 0) if pd.notna(row.get("market_cap")) else "N/A",
             "pe": round(row["pe"], 2) if pd.notna(row.get("pe")) else "N/A",
             "pb": round(row["pb"], 2) if pd.notna(row.get("pb")) else "N/A",
             "roe_pct": round(row["roe_pct"], 2) if pd.notna(row.get("roe_pct")) else "N/A",
@@ -1708,10 +1708,10 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
             "debt_growth": round(row["debt_growth"], 2) if pd.notna(row.get("debt_growth")) else "N/A",
             "years_of_data": int(row["years_of_data"]) if pd.notna(row.get("years_of_data")) else 0,
             "score": int(row["score"]),
-            "graham_pass": bool(row.get("graham_pass")),
-            "greenblatt_pass": bool(row.get("greenblatt_pass")),
-            "dorsey_pass": bool(row.get("dorsey_pass")),
-            "trajectory_pass": bool(row.get("trajectory_pass")),
+            "graham_pass": bool(row.get("graham_pass")) if pd.notna(row.get("graham_pass")) else False,
+            "greenblatt_pass": bool(row.get("greenblatt_pass")) if pd.notna(row.get("greenblatt_pass")) else False,
+            "dorsey_pass": bool(row.get("dorsey_pass")) if pd.notna(row.get("dorsey_pass")) else False,
+            "trajectory_pass": bool(row.get("trajectory_pass")) if pd.notna(row.get("trajectory_pass")) else False,
             # Historical trends for qualitative LLM assessment
             "roe_y0": round(row["roe_y0"], 2) if pd.notna(row.get("roe_y0")) else None,
             "roe_y1": round(row["roe_y1"], 2) if pd.notna(row.get("roe_y1")) else None,
@@ -1721,6 +1721,18 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
             "revenue_y1": row.get("revenue_y1") if pd.notna(row.get("revenue_y1")) else None,
         }
         candidates.append(candidate)
+
+    # Sanitize: replace any NaN/inf values that would break JSON serialization
+    def _sanitize(obj):
+        if isinstance(obj, float) and (pd.isna(obj) or np.isinf(obj)):
+            return None
+        if isinstance(obj, dict):
+            return {k: _sanitize(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_sanitize(v) for v in obj]
+        return obj
+
+    candidates = _sanitize(candidates)
 
     return {
         "investor_profile": {
