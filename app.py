@@ -1071,23 +1071,35 @@ with st.sidebar:
     else:
         st.caption(f"Logged in as {st.session_state.sb_user_email}")
         
-        # 1. Only show "Import" if we are NOT on the import page
         if st.session_state.sb_view_mode != "import":
             if st.button("📥 Import Existing Portfolio", use_container_width=True):
                 st.session_state.sb_view_mode = "import"
                 st.rerun()
                 
-        # 2. Only show "My Portfolios" if we are NOT on the portfolios page
         if st.session_state.sb_view_mode != "portfolios":
             if st.button("📁 My Portfolios", use_container_width=True):
                 st.session_state.sb_view_mode = "portfolios"
                 st.rerun()
                 
-        # 3. Only show "Back to Chat" if we are NOT on the chat page
         if st.session_state.sb_view_mode != "chat":
             if st.button("← Back to Chat", use_container_width=True):
                 st.session_state.sb_view_mode = "chat"
                 st.rerun()
+
+        st.divider()
+
+        if st.button("Log Out", use_container_width=True, key="logout_btn"):
+            try:
+                sb = get_supabase()
+                sb.auth.sign_out()
+            except Exception:
+                pass
+            st.session_state.sb_access_token = None
+            st.session_state.sb_refresh_token = None
+            st.session_state.sb_user_email = None
+            st.session_state.sb_user_id = None
+            st.session_state.sb_view_mode = "chat" # Resets view on logout
+            st.rerun()
 
         # (Keep your existing Log Out button right here)
         if st.button("Log Out", use_container_width=True):
