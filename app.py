@@ -631,28 +631,6 @@ st.markdown("""
     border-color: #1D4ED8 !important;
 }
 
-/* ── Fix 4: Kill the Base Web Red Focus Ring ── */
-[data-testid="stChatInput"] > div:focus-within,
-[data-testid="stChatInputContainer"] > div:focus-within,
-[data-baseweb="base-input"]:focus-within,
-[data-baseweb="textarea"]:focus-within {
-    outline: none !important;
-    box-shadow: none !important;
-}
-
-/* Force the Trust Blue border when actually typing */
-[data-testid="stChatInput"] [data-baseweb="base-input"]:focus-within {
-    border-color: #1D4ED8 !important;
-    box-shadow: 0 0 0 1px rgba(29, 78, 216, 0.2) !important;
-}
-
-/* Strip any leftover red outlines from all generic focus states */
-*:focus, *:active, *:focus-visible { 
-    outline: none !important; 
-}
-div[data-baseweb] [aria-invalid] { 
-    box-shadow: none !important; 
-}
 
 /* ── Base ── */
 .stApp {
@@ -757,26 +735,53 @@ div[data-baseweb] [aria-invalid] {
     background: #F8F9FA !important;
 }
 
-/* ── Chat input ── */
+/* ── Chat input: Institutional Single-Box Design ── */
 [data-testid="stChatInput"],
 [data-testid="stChatInputContainer"] {
     background: transparent !important;
 }
 
-[data-testid="stChatInput"] textarea,
-[data-testid="stChatInputContainer"] textarea {
+/* 1. Nuke the outer Streamlit wrapper and its red focus ring */
+[data-testid="stChatInput"] > div,
+[data-testid="stChatInput"] > div:focus-within {
+    border: none !important;
+    box-shadow: none !important;
+    outline: none !important;
+    background-color: transparent !important;
+}
+
+/* 2. Style the Base Web input container to act as the main box */
+[data-testid="stChatInput"] [data-baseweb="base-input"] {
     background: #FFFFFF !important;
     border: 1px solid #D1D5DB !important;
     border-radius: 4px !important;
-    color: #111827 !important;
-    font-size: 0.95rem !important;
-    padding: 12px 16px !important;
+    box-shadow: 2px 2px 0px rgba(0,0,0,0.05) !important;
+    padding: 4px !important; /* Space for the button */
+    transition: all 0.2s ease;
 }
 
-[data-testid="stChatInput"] textarea:focus,
-[data-testid="stChatInputContainer"] textarea:focus {
+/* Trust Blue focus state for the whole container */
+[data-testid="stChatInput"] [data-baseweb="base-input"]:focus-within {
     border-color: #1D4ED8 !important;
     box-shadow: 0 0 0 1px rgba(29, 78, 216, 0.2) !important;
+    outline: none !important;
+}
+
+/* 3. Strip all borders from the raw textarea so it blends in */
+[data-testid="stChatInput"] textarea,
+[data-testid="stChatInputContainer"] textarea {
+    background: transparent !important;
+    border: none !important; /* Removes the inner blue box */
+    box-shadow: none !important;
+    outline: none !important;
+    color: #111827 !important;
+    font-size: 0.95rem !important;
+    padding: 8px 12px !important;
+}
+
+[data-testid="stChatInput"] textarea:focus {
+    border: none !important;
+    box-shadow: none !important;
     outline: none !important;
 }
 
@@ -784,41 +789,27 @@ div[data-baseweb] [aria-invalid] {
     color: #9CA3AF !important;
 }
 
-[data-testid="stChatInput"] button,
-[data-testid="stChatInputContainer"] button {
-    background: #111827 !important; /* Solid dark button */
+/* 4. Button styling to match */
+[data-testid="stChatInput"] button {
+    background: #111827 !important;
     color: #FFFFFF !important;
     border: none !important;
     border-radius: 4px !important;
+    margin-top: 4px !important;
 }
 
-[data-testid="stChatInput"] button:hover,
-[data-testid="stChatInputContainer"] button:hover {
+[data-testid="stChatInput"] button:hover {
     background: #374151 !important;
 }
 
-/* ── Buttons — Brutalist/Institutional ── */
-.stButton > button {
-    background: #FFFFFF !important;
-    border: 1px solid #D1D5DB !important;
-    border-radius: 4px !important;
-    color: #374151 !important;
-    font-size: 0.85rem !important;
-    font-weight: 600 !important;
-    padding: 8px 20px !important;
-    box-shadow: 2px 2px 0px #E5E7EB !important; /* Physical button weight */
-    transition: all 0.1s ease !important;
+[data-testid="stChatInput"] button svg {
+    fill: #FFFFFF !important;
 }
 
-.stButton > button:hover {
-    border-color: #9CA3AF !important;
-    color: #111827 !important;
-}
+/* Kill generic focus outlines */
+*:focus, *:active, *:focus-visible { outline: none !important; }
+div[data-baseweb] [aria-invalid] { box-shadow: none !important; }
 
-.stButton > button:active {
-    box-shadow: 0px 0px 0px #E5E7EB !important;
-    transform: translate(2px, 2px) !important;
-}
 
 /* ── Text input ── */
 .stTextInput > div > div > input {
