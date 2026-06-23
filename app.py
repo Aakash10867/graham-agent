@@ -597,7 +597,19 @@ Write a diagnostic with these sections:
 3. RISKS (what could go wrong — cite book warnings, be specific about which holdings)
 4. ACTION ITEMS (2-3 specific, actionable recommendations grounded in the books)
 
-Be direct and specific. Reference actual holdings by name. Under 300 words total."""
+Be direct and specific. Reference actual holdings by name. Under 300 words total.
+
+After the narrative, on a new line, output a JSON block starting with ACTIONS_JSON: followed by a JSON array.
+Each action object must have:
+- "type": one of "sell", "reduce", "investigate"
+- "ticker": the stock ticker
+- "reason": one line explanation
+- For "reduce": include "target_alloc_pct" (the new target allocation percentage)
+- For "sell": include "shares" (number of shares to sell, 0 means all)
+
+Example: ACTIONS_JSON: [{{"type": "reduce", "ticker": "CHENNPETRO.NS", "target_alloc_pct": 10, "reason": "Trim cyclical concentration"}}]
+
+Only include actions for holdings that need changes. Do not include "investigate" for more than 2 stocks."""
 
     narrative = None
     try:
@@ -607,7 +619,20 @@ Be direct and specific. Reference actual holdings by name. Under 300 words total
         for model in models:
             try:
                 response = client.models.generate_content(model=model, contents=prompt)
-                narrative = response.text
+                raw_text = response.text
+                # Parse structured actions from LLM response
+                actions = []
+                narrative = raw_text
+                if "ACTIONS_JSON:" in raw_text:
+                    parts = raw_text.split("ACTIONS_JSON:", 1)
+                    narrative = parts[0].strip()
+                    try:
+                        actions_str = parts[1].strip()
+                        # Handle markdown code fences
+                        actions_str = actions_str.replace("```json", "").replace("```", "").strip()
+                        actions = json.loads(actions_str)
+                    except Exception:
+                        actions = []
                 st.session_state.last_working_model = model
                 break
             except Exception as e:
@@ -618,6 +643,7 @@ Be direct and specific. Reference actual holdings by name. Under 300 words total
         pass
 
     metrics["narrative"] = narrative
+    metrics["actions"] = actions if 'actions' in dir() else []
     return metrics
 
 
@@ -3863,7 +3889,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                     hc_key = f"health_check_{port['id']}"
                     if st.session_state.get(hc_key):
                         hc = st.session_state[hc_key]
-                        with st.expander("🏥 Health Check Results", expanded=True):
+                        with st.expander("Health Check Results", expanded=True):
                             d_score = hc["diversification_score"]
                             d_color = "🟢" if d_score >= 70 else "🟡" if d_score >= 40 else "🔴"
                             st.metric("Diversification Score", f"{d_color} {d_score}/100")
@@ -3888,13 +3914,83 @@ elif st.session_state.sb_view_mode == "portfolios":
                             for w in hc.get("warnings", []):
                                 st.warning(w)
                             if hc.get("narrative"):
-                                st.markdown("---")
-                                st.markdown(hc["narrative"])
+                            st.markdown("---")
+                            st.markdown(hc["narrative"])
+
+                        # ── Actionable recommendations ──
+                        hc_actions = hc.get("actions", [])
+                        if hc_actions:
+                            st.markdown("---")
+                            st.markdown("**Execute Recommendations**")
+                            for ai, act in enumerate(hc_actions):
+                                act_type = act.get("type", "")
+                                act_ticker = act.get("ticker", "")
+                                act_reason = act.get("reason", "")
+
+                                if act_type == "reduce":
+                                    target_pct = act.get("target_alloc_pct", 0)
+                                    if st.button(
+                                        f"📉 Reduce {act_ticker} to {target_pct}% — {act_reason}",
+                                        key=f"hc_reduce_{port['id']}_{ai}",
+                                        use_container_width=True
+                                    ):
+                                        try:
+                                            sb.table("holdings").update(
+                                                {"allocation_pct": target_pct}
+                                            ).eq("portfolio_id", port["id"]).eq("ticker", act_ticker).execute()
+                                            st.success(f"Updated {act_ticker} allocation to {target_pct}%.")
+                                            st.rerun()
+                                        except Exception as e:
+                                            st.error(f"Failed: {e}")
+
+                                elif act_type == "sell":
+                                    sell_shares = act.get("shares", 0)
+                                    label = f"🔴 Sell all {act_ticker}" if sell_shares == 0 else f"🔴 Sell {sell_shares} shares of {act_ticker}"
+                                    if st.button(
+                                        f"{label} — {act_reason}",
+                                        key=f"hc_sell_{port['id']}_{ai}",
+                                        use_container_width=True
+                                    ):
+                                        try:
+                                            if sell_shares == 0:
+                                                sb.table("holdings").delete().eq(
+                                                    "portfolio_id", port["id"]
+                                                ).eq("ticker", act_ticker).execute()
+                                                st.success(f"Removed {act_ticker} from portfolio.")
+                                            else:
+                                                h_resp = sb.table("holdings").select("*").eq(
+                                                    "portfolio_id", port["id"]
+                                                ).eq("ticker", act_ticker).execute()
+                                                if h_resp.data:
+                                                    h = h_resp.data[0]
+                                                    new_shares = max(0, h["shares"] - sell_shares)
+                                                    if new_shares == 0:
+                                                        sb.table("holdings").delete().eq("id", h["id"]).execute()
+                                                    else:
+                                                        new_invested = new_shares * h.get("price_at_entry", 0)
+                                                        sb.table("holdings").update({
+                                                            "shares": new_shares,
+                                                            "sip_amount_inr": round(new_invested, 2)
+                                                        }).eq("id", h["id"]).execute()
+                                                st.success(f"Sold {sell_shares} shares of {act_ticker}.")
+                                            st.rerun()
+                                        except Exception as e:
+                                            st.error(f"Failed: {e}")
+
+                                elif act_type == "investigate":
+                                    if st.button(
+                                        f"🔍 Investigate {act_ticker} — {act_reason}",
+                                        key=f"hc_investigate_{port['id']}_{ai}",
+                                        use_container_width=True
+                                    ):
+                                        st.session_state.show_portfolios = False
+                                        st.session_state.pending_prompt = f"Deep analysis of {act_ticker}: {act_reason}"
+                                        st.rerun()
                         if st.button("✕ Close", key=f"hc_close_{port['id']}"):
                             del st.session_state[hc_key]
                             st.rerun()
                     else:
-                        if st.button("🏥 Health Check", key=f"hc_btn_{port['id']}", use_container_width=True):
+                        if st.button("Health Check", key=f"hc_btn_{port['id']}", use_container_width=True):
                             with st.spinner("Diagnosing portfolio against book principles..."):
                                 try:
                                     hc_holdings = sb.table("holdings").select("*").eq("portfolio_id", port["id"]).execute().data or []
@@ -4136,7 +4232,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                     # ── Health Check (inline during review) ──
                     hc = review_state.get("health_check")
                     if hc:
-                        with st.expander("🏥 Portfolio Health Check", expanded=False):
+                        with st.expander("Portfolio Health Check", expanded=False):
                             d_score = hc["diversification_score"]
                             d_color = "🟢" if d_score >= 70 else "🟡" if d_score >= 40 else "🔴"
                             st.metric("Diversification Score", f"{d_color} {d_score}/100")
@@ -4165,8 +4261,78 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 st.warning(w)
 
                             if hc.get("narrative"):
-                                st.markdown("---")
-                                st.markdown(hc["narrative"])
+                            st.markdown("---")
+                            st.markdown(hc["narrative"])
+
+                        # ── Actionable recommendations ──
+                        hc_actions = hc.get("actions", [])
+                        if hc_actions:
+                            st.markdown("---")
+                            st.markdown("**Execute Recommendations**")
+                            for ai, act in enumerate(hc_actions):
+                                act_type = act.get("type", "")
+                                act_ticker = act.get("ticker", "")
+                                act_reason = act.get("reason", "")
+
+                                if act_type == "reduce":
+                                    target_pct = act.get("target_alloc_pct", 0)
+                                    if st.button(
+                                        f"📉 Reduce {act_ticker} to {target_pct}% — {act_reason}",
+                                        key=f"hc_reduce_{port['id']}_{ai}",
+                                        use_container_width=True
+                                    ):
+                                        try:
+                                            sb.table("holdings").update(
+                                                {"allocation_pct": target_pct}
+                                            ).eq("portfolio_id", port["id"]).eq("ticker", act_ticker).execute()
+                                            st.success(f"Updated {act_ticker} allocation to {target_pct}%.")
+                                            st.rerun()
+                                        except Exception as e:
+                                            st.error(f"Failed: {e}")
+
+                                elif act_type == "sell":
+                                    sell_shares = act.get("shares", 0)
+                                    label = f"🔴 Sell all {act_ticker}" if sell_shares == 0 else f"🔴 Sell {sell_shares} shares of {act_ticker}"
+                                    if st.button(
+                                        f"{label} — {act_reason}",
+                                        key=f"hc_sell_{port['id']}_{ai}",
+                                        use_container_width=True
+                                    ):
+                                        try:
+                                            if sell_shares == 0:
+                                                sb.table("holdings").delete().eq(
+                                                    "portfolio_id", port["id"]
+                                                ).eq("ticker", act_ticker).execute()
+                                                st.success(f"Removed {act_ticker} from portfolio.")
+                                            else:
+                                                h_resp = sb.table("holdings").select("*").eq(
+                                                    "portfolio_id", port["id"]
+                                                ).eq("ticker", act_ticker).execute()
+                                                if h_resp.data:
+                                                    h = h_resp.data[0]
+                                                    new_shares = max(0, h["shares"] - sell_shares)
+                                                    if new_shares == 0:
+                                                        sb.table("holdings").delete().eq("id", h["id"]).execute()
+                                                    else:
+                                                        new_invested = new_shares * h.get("price_at_entry", 0)
+                                                        sb.table("holdings").update({
+                                                            "shares": new_shares,
+                                                            "sip_amount_inr": round(new_invested, 2)
+                                                        }).eq("id", h["id"]).execute()
+                                                st.success(f"Sold {sell_shares} shares of {act_ticker}.")
+                                            st.rerun()
+                                        except Exception as e:
+                                            st.error(f"Failed: {e}")
+
+                                elif act_type == "investigate":
+                                    if st.button(
+                                        f"🔍 Investigate {act_ticker} — {act_reason}",
+                                        key=f"hc_investigate_{port['id']}_{ai}",
+                                        use_container_width=True
+                                    ):
+                                        st.session_state.show_portfolios = False
+                                        st.session_state.pending_prompt = f"Deep analysis of {act_ticker}: {act_reason}"
+                                        st.rerun()
 
                     # ── Update form — ALL holdings ──
                     sell_stocks = [(i, r) for i, r in enumerate(review_rows) if "SELL" in r["Action"]]
