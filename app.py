@@ -3861,7 +3861,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                                     "ticker": ticker,
                                                     "name": opp_name,
                                                     "sector": detail.get("sector", ""),
-                                                    "allocation_pct": 0, # Tactical add, calculated in total value later
+                                                    "allocation_pct": 0, 
                                                     "shares": buy_qty,
                                                     "sip_amount_inr": invested,
                                                     "price_at_entry": round(buy_price, 2),
