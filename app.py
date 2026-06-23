@@ -1738,6 +1738,9 @@ with st.sidebar:
     if st.button("🔄 New Chat", use_container_width=True):
         st.session_state.messages = []
         st.session_state.chat_history = []
+        st.session_state.sb_view_mode = "chat" 
+        if "pending_portfolio" in st.session_state:
+            st.session_state.pending_portfolio = None
         st.rerun()
 
 
