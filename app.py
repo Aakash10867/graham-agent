@@ -1378,9 +1378,21 @@ div[data-testid="stAlert"] > div {
     background-color: #F8F9FA !important; /* Concrete Off-White */
 }
 
-.stApp, .stApp * {
+.stApp {
     font-family: 'Inter', sans-serif !important;
     color: #374151 !important; /* Dark Slate */
+}
+
+/* Exclude icons and code blocks from the universal font override */
+.stApp *:not(code):not(.material-symbols-rounded):not(i):not(svg) {
+    font-family: 'Inter', sans-serif !important;
+}
+
+/* Explicitly protect the expander toggle icons */
+[data-testid="stExpanderToggleIcon"], 
+.material-symbols-rounded {
+    font-family: "Material Symbols Rounded" !important;
+    color: #6B7280 !important;
 }
 
 [data-testid="stAppViewContainer"] {
@@ -3795,42 +3807,75 @@ elif st.session_state.sb_view_mode == "portfolios":
                         elif a_type == "opportunity":
                             st.success(f"⚡ **{alert['headline']}**")
                             with st.expander("Deploy Capital"):
-                                st.caption(
-                                    f"Sector: {detail.get('sector', 'N/A')} · "
-                                    f"Price: ₹{detail.get('price', 'N/A')} · "
-                                    f"P/E: {detail.get('pe', 'N/A')} · "
-                                    f"ROE: {detail.get('roe_pct', 'N/A')}%"
-                                )
-                                opp_ticker = alert.get("ticker", "")
-                                opp_name = detail.get("name", opp_ticker)
-                                buy_qty = st.number_input(
-                                    f"Shares of {opp_name} to buy",
-                                    min_value=0, value=0, key=f"deploy_qty_{a_id}"
-                                )
-                                buy_price = st.number_input(
-                                    f"Price per share (₹)",
-                                    min_value=0.0, value=float(detail.get("price", 0)),
-                                    format="%.2f", key=f"deploy_price_{a_id}"
-                                )
+                                ticker = alert.get("ticker", "")
+                                opp_name = detail.get("name", ticker)
+                                live_price = float(detail.get("price", 0)) if detail.get("price") else 0.0
+                                
+                                # Fetch user constraints
+                                monthly_sip = float(port.get("sip_amount", 0))
+                                
+                                # Calculate tactical expandable budget (e.g., 30% of their monthly SIP)
+                                tactical_budget = monthly_sip * 0.30
+                                
+                                # Calculate max affordable shares within this conservative tranche
+                                suggested_qty = 0
+                                if live_price > 0:
+                                    suggested_qty = int(tactical_budget // live_price)
+                                
+                                st.markdown(f"""
+                                **Tactical Allocation Framework:**
+                                *   **Monthly SIP Commitment:** ₹{monthly_sip:,.0f}
+                                *   **Estimated Off-Cycle Expandable Capital (30% of SIP):** ₹{tactical_budget:,.0f}
+                                *   **Current Market Price:** ₹{live_price:,.2f}
+                                """)
+                                
+                                # Safeguard for expensive stocks
+                                if live_price > tactical_budget:
+                                    st.warning(f"⚠️ **Liquidity Notice:** A single share of {opp_name} (₹{live_price:,.2f}) exceeds your estimated tactical budget tranche (₹{tactical_budget:,.0f}). Consider waiting for your structural review date to alter your core asset weights rather than deploying ad-hoc capital.")
+                                elif suggested_qty == 0:
+                                    st.info("Tactical capital allocation is too low to acquire a full share at this price.")
+                                else:
+                                    st.info(f"💡 **Committee Recommendation:** Deploy a micro-tranche of **{suggested_qty} shares** (Total: ~₹{suggested_qty * live_price:,.0f}) to accumulate a position smoothly without altering your monthly baseline liquidity.")
+
+                                col_sh, col_px = st.columns(2)
+                                with col_sh:
+                                    buy_qty = st.number_input(
+                                        "Shares to buy",
+                                        min_value=0, value=suggested_qty, key=f"deploy_qty_{a_id}"
+                                    )
+                                with col_px:
+                                    buy_price = st.number_input(
+                                        "Price per share (₹)",
+                                        min_value=0.0, value=live_price,
+                                        format="%.2f", key=f"deploy_price_{a_id}"
+                                    )
+                                    
                                 c1, c2 = st.columns(2)
                                 with c1:
                                     if st.button("⚡ Deploy Capital", key=f"deploy_confirm_{a_id}", width="stretch"):
                                         if buy_qty > 0 and buy_price > 0:
                                             try:
+                                                invested = round(buy_qty * buy_price, 2)
                                                 sb.table("holdings").insert({
                                                     "portfolio_id": port["id"],
-                                                    "ticker": opp_ticker,
+                                                    "ticker": ticker,
                                                     "name": opp_name,
                                                     "sector": detail.get("sector", ""),
-                                                    "allocation_pct": 0,
+                                                    "allocation_pct": 0, # Tactical add, calculated in total value later
                                                     "shares": buy_qty,
-                                                    "sip_amount_inr": round(buy_qty * buy_price, 2),
+                                                    "sip_amount_inr": invested,
                                                     "price_at_entry": round(buy_price, 2),
                                                     "score_at_entry": detail.get("score"),
                                                 }).execute()
                                                 sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
-                                                st.success(f"Added {buy_qty} shares of {opp_name}.")
+                                                st.success(f"Successfully tracked {buy_qty} shares of {opp_name}!")
                                                 st.rerun()
+                                            except Exception as e:
+                                                st.error(f"Failed to deploy capital: {e}")
+                                with c2:
+                                    if st.button("Dismiss", key=f"deploy_dismiss_{a_id}", width="stretch"):
+                                        sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
+                                        st.rerun()
                                             except Exception as e:
                                                 st.error(f"Failed: {e}")
                                         else:
