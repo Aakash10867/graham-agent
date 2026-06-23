@@ -450,7 +450,8 @@ FORMAT RULES (follow exactly):
                 )
                 return response.text
             except Exception as e:
-                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                error_msg = str(e).upper()
+                if any(err in error_msg for err in ["429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "500"]):
                     continue
                 raise e
         return "Analysis unavailable — all models rate-limited."
@@ -636,7 +637,8 @@ Only include actions for holdings that need changes. Do not include "investigate
                 st.session_state.last_working_model = model
                 break
             except Exception as e:
-                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                error_msg = str(e).upper()
+                if any(err in error_msg for err in ["429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "500"]):
                     continue
                 break
     except Exception:
@@ -875,8 +877,11 @@ def generate_review_recommendations(enriched_holdings, investor_type, time_horiz
             if text.startswith("json"):
                 text = text[4:].strip()
             return json.loads(text)
+        except json.JSONDecodeError:
+            continue
         except Exception as e:
-            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+            error_msg = str(e).upper()
+            if any(err in error_msg for err in ["429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "500"]):
                 continue
             break
     return None
@@ -3154,7 +3159,8 @@ def intercept_and_rewrite_query(user_query: str) -> str:
                 )
                 return f"SYSTEM DIRECTIVE (Translated Intent): {response.text}"
             except Exception as inner_e:
-                if "429" in str(inner_e) or "RESOURCE_EXHAUSTED" in str(inner_e):
+                error_msg = str(inner_e).upper()
+                if any(err in error_msg for err in ["429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "500"]):
                     continue
                 raise inner_e
         return user_query
@@ -3288,7 +3294,8 @@ def agent_turn(user_message):
 
         except Exception as e:
             last_error = str(e)
-            if "429" in last_error or "RESOURCE_EXHAUSTED" in last_error:
+            error_upper = last_error.upper()
+            if any(err in error_upper for err in ["429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "500"]):
                 continue
             raise e
 
@@ -3447,8 +3454,9 @@ if st.session_state.sb_view_mode == "chat":
                         answer, model_used = agent_turn(rewritten_directive)
                     except Exception as e:
                         error_msg = str(e)
-                        if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg or "All models rate-limited" in error_msg:
-                            st.warning("API limit reached. Using fallback system...")
+                        error_upper = error_msg.upper()
+                        if any(err in error_upper for err in ["429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "ALL MODELS RATE-LIMITED"]):
+                            st.warning("API experiencing high demand. Using fallback system...")
                             fallback_answer = fallback_router(prompt)
                             response_placeholder.markdown(fallback_answer)
                             st.session_state.messages.append({"role": "assistant", "content": f"*(Fallback)*\n\n{fallback_answer}"})
