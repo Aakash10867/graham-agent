@@ -1374,33 +1374,13 @@ div[data-testid="stAlert"] > div {
 
 
 /* ── Base ── */
-@import url('https://fonts.googleapis.com/icon?family=Material+Icons|Material+Symbols+Rounded');
-
 .stApp {
     background-color: #F8F9FA !important; /* Concrete Off-White */
 }
 
-/* Target specific text elements instead of using the nuclear '*' wildcard */
-.stApp, .stApp p, .stApp span, .stApp div, .stApp label, .stApp li, .stApp td, .stApp th {
-    font-family: 'Inter', sans-serif;
+.stApp, .stApp * {
+    font-family: 'Inter', sans-serif !important;
     color: #374151 !important; /* Dark Slate */
-}
-
-/* Force Streamlit icons to render as graphics, not raw text */
-.material-icons, .material-symbols-rounded, [data-testid="stExpanderToggleIcon"], [data-testid="stIconMaterial"] {
-    font-family: 'Material Symbols Rounded', 'Material Icons' !important;
-    font-weight: normal !important;
-    font-style: normal !important;
-    line-height: 1 !important;
-    letter-spacing: normal !important;
-    text-transform: none !important;
-    display: inline-block !important;
-    white-space: nowrap !important;
-    word-wrap: normal !important;
-    direction: ltr !important;
-    font-feature-settings: 'liga' !important;
-    -webkit-font-feature-settings: 'liga' !important;
-    -webkit-font-smoothing: antialiased !important;
 }
 
 /* Exclude icons and code blocks from the universal font override */
@@ -1665,19 +1645,6 @@ div[data-baseweb] [aria-invalid] { box-shadow: none !important; }
     .stApp h1 { font-size: 1.8rem !important; }
 }
 
-/* ── Fix: Eradicate icon text overlap (keyboard_arrow_right, etc) ── */
-[data-testid="stExpanderToggleIcon"],
-[data-testid="stIconMaterial"],
-.material-symbols-rounded,
-.material-icons,
-.stIcon {
-    font-family: "Material Symbols Rounded", "Material Icons" !important;
-    font-feature-settings: "liga" !important;
-    -webkit-font-feature-settings: "liga" !important;
-    letter-spacing: normal !important;
-    text-transform: none !important;
-    color: inherit !important;
-}
 </style>
 """, unsafe_allow_html=True)
 
@@ -3797,7 +3764,11 @@ elif st.session_state.sb_view_mode == "portfolios":
 
                         if a_type == "danger":
                             st.error(f"🛡️ **{alert['headline']}**")
-                            with st.expander("Defend Position"):
+                            
+                            # Replaced expander with a permanently open, bordered container
+                            with st.container(border=True):
+                                st.markdown("##### Defend Position")
+                                
                                 ticker = alert.get("ticker", "")
                                 # Fetch holding for this portfolio directly from Supabase
                                 try:
@@ -3805,6 +3776,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                     h_match = h_resp.data[0] if h_resp.data else None
                                 except Exception:
                                     h_match = None
+
                                 if h_match:
                                     max_shares = h_match.get("shares", 0)
                                     sell_qty = st.number_input(
@@ -3840,7 +3812,11 @@ elif st.session_state.sb_view_mode == "portfolios":
 
                         elif a_type == "opportunity":
                             st.success(f"⚡ **{alert['headline']}**")
-                            with st.expander("Deploy Capital"):
+                            
+                            # Replaced expander with a permanently open, bordered container
+                            with st.container(border=True):
+                                st.markdown("##### Deploy Capital")
+                                
                                 ticker = alert.get("ticker", "")
                                 opp_name = detail.get("name", ticker)
                                 live_price = float(detail.get("price", 0)) if detail.get("price") else 0.0
@@ -3858,9 +3834,9 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 
                                 st.markdown(f"""
                                 **Tactical Allocation Framework:**
-                                *   **Monthly SIP Commitment:** ₹{monthly_sip:,.0f}
-                                *   **Estimated Off-Cycle Expandable Capital (30% of SIP):** ₹{tactical_budget:,.0f}
-                                *   **Current Market Price:** ₹{live_price:,.2f}
+                                * **Monthly SIP Commitment:** ₹{monthly_sip:,.0f}
+                                * **Estimated Off-Cycle Expandable Capital (30% of SIP):** ₹{tactical_budget:,.0f}
+                                * **Current Market Price:** ₹{live_price:,.2f}
                                 """)
                                 
                                 # Safeguard for expensive stocks
@@ -3914,6 +3890,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                         sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
                                         st.rerun()
 
+                        
                         elif a_type == "review_due":
                             st.warning(f"📅 **{alert['headline']}**")
                             if st.button("Dismiss", key=f"review_dismiss_{a_id}"):
