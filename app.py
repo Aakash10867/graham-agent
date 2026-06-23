@@ -630,7 +630,7 @@ Write a diagnostic with these sections:
 1. VERDICT (one line: is this portfolio healthy, needs attention, or at risk?)
 2. STRENGTHS (what's working well — cite book principles)
 3. RISKS (what could go wrong — cite book warnings, be specific about which holdings)
-4. ACTION ITEMS (2-3 specific, actionable recommendations grounded in the books)
+4. ACTION ITEMS — ONLY if the portfolio has real problems. If diversification score is above 80, no sector exceeds 30%, and quality scores are 3+, then state "Portfolio is well-constructed. No changes recommended." and output ACTIONS_JSON: []. Do NOT recommend changes just to have something to say. A good portfolio deserves acknowledgment, not perpetual tinkering. Graham explicitly warns against excessive trading and over-optimization.
 
 Be direct and specific. Reference actual holdings by name. Under 300 words total.
 
@@ -4116,6 +4116,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                                     st.rerun()
 
                                 elif act_type == "investigate":
+                                    btn_key = f"hc_action_{port['id']}_{ai}"
                                     inv_key = f"hc_inv_result_{port['id']}_{ai}"
                                     if st.button(
                                         f"Investigate {act_ticker} — {act_reason}",
@@ -4497,6 +4498,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                             st.error(f"Failed: {e}")
 
                                 elif act_type == "investigate":
+                                    btn_key = f"hc_action_{port['id']}_{ai}"
                                     inv_key = f"hc_inv_result_{port['id']}_{ai}"
                                     if st.button(
                                         f"Investigate {act_ticker} — {act_reason}",
