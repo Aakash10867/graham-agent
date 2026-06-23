@@ -4030,6 +4030,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                             st.error(f"Failed: {e}")
 
                                 elif act_type == "add":
+                                    btn_key = f"hc_action_{port['id']}_{ai}"
                                     act_name = act.get("name", act_ticker)
                                     act_sector = act.get("sector", "")
                                     act_score = act.get("score", 0)
