@@ -601,6 +601,7 @@ def generate_health_check(portfolio, holdings, universe_df, collection):
                 "pe": round(float(r["pe"]), 2) if pd.notna(r.get("pe")) else None,
                 "roe_pct": round(float(r["roe_pct"]), 2) if pd.notna(r.get("roe_pct")) else None,
                 "pct_from_high": round(float(r["pct_from_high"]), 2) if pd.notna(r.get("pct_from_high")) else None,
+                "price": round(float(r["price"]), 2) if pd.notna(r.get("price")) else None,
             })
     except Exception:
         pass
@@ -4031,6 +4032,7 @@ elif st.session_state.sb_view_mode == "portfolios":
 
                                 elif act_type == "add":
                                     btn_key = f"hc_action_{port['id']}_{ai}"
+                                    action_msg_key = f"hc_action_msg_{port['id']}"
                                     act_name = act.get("name", act_ticker)
                                     act_sector = act.get("sector", "")
                                     act_score = act.get("score", 0)
@@ -4045,17 +4047,33 @@ elif st.session_state.sb_view_mode == "portfolios":
 
                                     if st.session_state.get(add_state_key):
                                         with st.container(border=True):
-                                            st.caption(f"Sector: {act_sector} · Score: {act_score}/4 · PE: {act.get('pe', 'N/A')}")
+                                            # Fetch live price
+                                            try:
+                                                _live = yf.Ticker(act_ticker).fast_info
+                                                _live_price = round(float(_live.last_price), 2)
+                                            except Exception:
+                                                _live_price = 100.0
+
+                                            # Suggest shares from SIP and allocation
+                                            _sip = port.get("sip_amount", 10000)
+                                            _budget = _sip * suggested_pct / 100
+                                            _suggested_qty = max(1, int(_budget / _live_price)) if _live_price > 0 else 1
+
+                                            st.caption(
+                                                f"Sector: {act_sector} · Score: {act_score}/4 · "
+                                                f"PE: {act.get('pe', 'N/A')} · Price: ₹{_live_price:,.2f} · "
+                                                f"Budget ({suggested_pct}% of ₹{_sip:,}): ₹{_budget:,.0f}"
+                                            )
                                             ac1, ac2 = st.columns(2)
                                             with ac1:
                                                 add_qty = st.number_input(
-                                                    "Shares to buy", min_value=1, value=1,
+                                                    "Shares to buy", min_value=1, value=_suggested_qty,
                                                     key=f"hc_add_qty_{port['id']}_{ai}"
                                                 )
                                             with ac2:
                                                 add_price = st.number_input(
                                                     "Price per share (₹)", min_value=0.01,
-                                                    value=float(act.get("pe", 100)),
+                                                    value=_live_price,
                                                     format="%.2f", key=f"hc_add_price_{port['id']}_{ai}"
                                                 )
                                             bc1, bc2 = st.columns(2)
