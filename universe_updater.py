@@ -249,7 +249,6 @@ def fetch_fundamentals(ticker, retries=3):
             pe = info.get("trailingPE")
 
             data = {
-                data = {
                 "ticker": ticker,
                 "name": info.get("longName") or info.get("shortName", ticker),
                 "sector": info.get("sector", ""),
