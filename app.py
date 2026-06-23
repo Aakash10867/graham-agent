@@ -3872,14 +3872,9 @@ elif st.session_state.sb_view_mode == "portfolios":
                                                 st.rerun()
                                             except Exception as e:
                                                 st.error(f"Failed to deploy capital: {e}")
-                                with c2:
-                                    if st.button("Dismiss", key=f"deploy_dismiss_{a_id}", width="stretch"):
-                                        sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
-                                        st.rerun()
-                                            except Exception as e:
-                                                st.error(f"Failed: {e}")
                                         else:
                                             st.warning("Enter shares and price.")
+                                            
                                 with c2:
                                     if st.button("Dismiss", key=f"deploy_dismiss_{a_id}", width="stretch"):
                                         sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
