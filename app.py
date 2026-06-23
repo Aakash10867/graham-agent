@@ -1644,6 +1644,17 @@ div[data-baseweb] [aria-invalid] { box-shadow: none !important; }
 @media (max-width: 768px) {
     .stApp h1 { font-size: 1.8rem !important; }
 }
+
+/* ── Fix: Eradicate "arrow_drop_down" text overlap ── */
+[data-testid="stExpanderToggleIcon"],
+.material-symbols-rounded,
+.stIcon {
+    font-family: "Material Symbols Rounded" !important;
+    font-feature-settings: "liga" !important;
+    -webkit-font-feature-settings: "liga" !important;
+    letter-spacing: normal !important;
+    color: #6B7280 !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
