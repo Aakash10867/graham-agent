@@ -4097,13 +4097,22 @@ elif st.session_state.sb_view_mode == "portfolios":
                                                         all_h = sb.table("holdings").select("id, allocation_pct").eq(
                                                             "portfolio_id", port["id"]
                                                         ).execute().data or []
-                                                        raw_total = sum(h["allocation_pct"] for h in all_h)
-                                                        if raw_total > 0:
-                                                            for h in all_h:
-                                                                normalized = round(h["allocation_pct"] / raw_total * 100, 1)
-                                                                sb.table("holdings").update(
-                                                                    {"allocation_pct": normalized}
-                                                                ).eq("id", h["id"]).execute()
+                                                        if all_h:
+                                                            raw_total = sum(h["allocation_pct"] for h in all_h)
+                                                            non_zero = [h for h in all_h if h["allocation_pct"] > 0]
+                                                            if len(non_zero) < len(all_h) / 2:
+                                                                # Most are zero — reset to equal allocation
+                                                                equal_pct = round(100 / len(all_h), 1)
+                                                                for h in all_h:
+                                                                    sb.table("holdings").update(
+                                                                        {"allocation_pct": equal_pct}
+                                                                    ).eq("id", h["id"]).execute()
+                                                            elif raw_total > 0:
+                                                                for h in all_h:
+                                                                    normalized = round(h["allocation_pct"] / raw_total * 100, 1)
+                                                                    sb.table("holdings").update(
+                                                                        {"allocation_pct": normalized}
+                                                                    ).eq("id", h["id"]).execute()
 
                                                         st.session_state[action_msg_key] = f"Added {act_name}. All allocations normalized to 100%."
                                                         del st.session_state[add_state_key]
