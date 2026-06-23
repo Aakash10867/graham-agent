@@ -3335,7 +3335,17 @@ def agent_turn(user_message):
             final_chunk = _extract_text(analyst_response)
             if final_chunk:
                 all_text_parts.append(final_chunk)
-            draft_text = "\n\n".join(all_text_parts)
+            
+            clean_parts = [p.strip() for p in all_text_parts if p.strip()]
+            draft_text = "\n\n".join(clean_parts).strip()
+
+            if not draft_text:
+                recovery_prompt = "You successfully executed your tools, but provided no text to the user. Write out the final portfolio table and explain your choices."
+                recovery_response = analyst_chat.send_message(recovery_prompt)
+                draft_text = _extract_text(recovery_response).strip()
+
+            # --- PHASE 2: AUDITOR REVIEWS DRAFT (with independent data) ---
+            # ... existing code below ...
 
             # --- PHASE 2: AUDITOR REVIEWS DRAFT (with independent data) ---
             # Extract tickers mentioned in draft and run quality checks
