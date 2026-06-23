@@ -4261,8 +4261,8 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 st.warning(w)
 
                             if hc.get("narrative"):
-                            st.markdown("---")
-                            st.markdown(hc["narrative"])
+                                st.markdown("---")
+                                st.markdown(hc["narrative"])
 
                         # ── Actionable recommendations ──
                         hc_actions = hc.get("actions", [])
