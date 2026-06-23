@@ -1664,6 +1664,20 @@ div[data-baseweb] [aria-invalid] { box-shadow: none !important; }
 @media (max-width: 768px) {
     .stApp h1 { font-size: 1.8rem !important; }
 }
+
+/* ── Fix: Eradicate icon text overlap (keyboard_arrow_right, etc) ── */
+[data-testid="stExpanderToggleIcon"],
+[data-testid="stIconMaterial"],
+.material-symbols-rounded,
+.material-icons,
+.stIcon {
+    font-family: "Material Symbols Rounded", "Material Icons" !important;
+    font-feature-settings: "liga" !important;
+    -webkit-font-feature-settings: "liga" !important;
+    letter-spacing: normal !important;
+    text-transform: none !important;
+    color: inherit !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
