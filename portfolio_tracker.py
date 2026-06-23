@@ -1,12 +1,89 @@
 import os
+import re
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import yfinance as yf
 import pandas as pd
+import pymupdf
+from google import genai
 from supabase import create_client, Client
 from datetime import date
 from collections import Counter
+
+
+# ══════════════════════════════════════════════
+# LIGHTWEIGHT BOOK RAG (no ChromaDB needed)
+# ══════════════════════════════════════════════
+def load_books_simple():
+    """Load investment books into text chunks for keyword search."""
+    books = {
+        "Graham": "The Intelligent Investor.pdf",
+        "Greenblatt": "The Little Book That Still Beats the Market.pdf",
+        "Dorsey": "The Five Rules for Successful Stock Investing.pdf",
+    }
+    chunks = []
+    for author, filename in books.items():
+        if not os.path.exists(filename):
+            print(f"Warning: {filename} not found. Skipping.")
+            continue
+        try:
+            doc = pymupdf.open(filename)
+            full_text = "\n".join(page.get_text() for page in doc)
+            doc.close()
+
+            paragraphs = full_text.split("\n\n")
+            current = ""
+            for para in paragraphs:
+                para = para.strip()
+                if not para or len(para) < 50:
+                    continue
+                if len(current) + len(para) < 1200:
+                    current = current + "\n" + para if current else para
+                else:
+                    if len(current) >= 100:
+                        chunks.append({"author": author, "text": current})
+                    current = para
+            if current and len(current) >= 100:
+                chunks.append({"author": author, "text": current})
+        except Exception as e:
+            print(f"Warning: Could not load {filename}: {e}")
+
+    print(f"Loaded {len(chunks)} book passages from {len(books)} books.")
+    return chunks
+
+
+def search_passages(chunks, query, n=3):
+    """Simple keyword search over book chunks. Returns top N passages."""
+    stop_words = {"the", "a", "an", "is", "are", "was", "were", "be", "been",
+                  "have", "has", "do", "does", "did", "will", "would", "could",
+                  "should", "may", "might", "shall", "can", "to", "of", "in",
+                  "for", "on", "with", "at", "by", "from", "and", "or", "not",
+                  "but", "if", "that", "this", "it", "its", "as", "about"}
+
+    keywords = [w.lower() for w in re.split(r'\W+', query) if w.lower() not in stop_words and len(w) > 2]
+    if not keywords:
+        return []
+
+    scored = []
+    for chunk in chunks:
+        text_lower = chunk["text"].lower()
+        score = sum(text_lower.count(kw) for kw in keywords)
+        if score > 0:
+            scored.append((score, chunk))
+
+    scored.sort(key=lambda x: -x[0])
+    return [s[1] for s in scored[:n]]
+
+
+# Alert type → book search query mapping
+ALERT_BOOK_QUERIES = {
+    "score_drop": "deteriorating fundamentals declining competitive position when to sell warning signs",
+    "quality_fail": "earnings quality non-recurring income value traps artificial profits cash flow",
+    "price_crash": "Mr Market irrational prices holding through declines margin of safety buying opportunity panic",
+    "opportunity": "buying undervalued stocks discount intrinsic value margin of safety quality companies",
+    "review_due": "periodic review discipline portfolio maintenance rebalancing intelligent investor patience",
+}
 
 
 def run_daily_tracker():
@@ -14,21 +91,25 @@ def run_daily_tracker():
 
     url = os.environ.get("SUPABASE_URL")
     key = os.environ.get("SUPABASE_KEY")
+    gemini_key = os.environ.get("GEMINI_API_KEY")
 
     if not url or not key:
         raise ValueError("Missing SUPABASE_URL or SUPABASE_KEY environment variables.")
 
     supabase: Client = create_client(url, key)
 
-    # ── Load fresh universe CSV (updated in prior workflow step) ──
+    # ── Load books for RAG ──
+    book_chunks = load_books_simple()
+
+    # ── Load fresh universe CSV ──
     universe_df = None
     if os.path.exists("universe_scored.csv"):
         universe_df = pd.read_csv("universe_scored.csv")
         print(f"Loaded universe: {len(universe_df)} stocks")
     else:
-        print("Warning: universe_scored.csv not found. Score checks disabled.")
+        print("Warning: universe_scored.csv not found.")
 
-    # ── Fetch all portfolios and holdings ──
+    # ── Fetch portfolios, holdings, profiles ──
     portfolios_resp = supabase.table("portfolios").select("*").execute()
     portfolios = portfolios_resp.data
 
@@ -39,7 +120,6 @@ def run_daily_tracker():
     holdings_resp = supabase.table("holdings").select("*").execute()
     holdings = holdings_resp.data
 
-    # ── Fetch user emails from profiles table ──
     profiles_resp = supabase.table("profiles").select("id, email").execute()
     profiles = {p["id"]: p.get("email", "") for p in profiles_resp.data}
 
@@ -111,8 +191,27 @@ def run_daily_tracker():
         print(f"Updated [{port['name']}]: Value {current_total_value:,.2f} | Return {return_pct:+.2f}%")
 
         # ══════════════════════════════════════
-        # 3. ALERT DETECTION
+        # 3. ALERT DETECTION (with book passages)
         # ══════════════════════════════════════
+
+        def make_alert(alert_type, ticker, headline, detail, book_query_key=None):
+            """Helper to build alert dict with book passage attached."""
+            passages = []
+            if book_chunks and book_query_key:
+                query = ALERT_BOOK_QUERIES.get(book_query_key, "")
+                if query:
+                    results = search_passages(book_chunks, query, n=2)
+                    passages = [{"author": r["author"], "text": r["text"][:400]} for r in results]
+
+            return {
+                "portfolio_id": port_id,
+                "user_id": user_id,
+                "alert_type": alert_type,
+                "ticker": ticker,
+                "headline": headline,
+                "detail": {**detail, "book_passages": passages},
+                "alert_date": today_str,
+            }
 
         # ── 3a. Review due ──
         review_date = port.get("next_review_date")
@@ -120,15 +219,12 @@ def run_daily_tracker():
             try:
                 rd = date.fromisoformat(str(review_date))
                 if rd <= date.today():
-                    all_alerts.append({
-                        "portfolio_id": port_id,
-                        "user_id": user_id,
-                        "alert_type": "review_due",
-                        "ticker": "_review",
-                        "headline": f"Portfolio review overdue — was due {review_date}",
-                        "detail": {"days_overdue": (date.today() - rd).days},
-                        "alert_date": today_str,
-                    })
+                    all_alerts.append(make_alert(
+                        "review_due", "_review",
+                        f"Portfolio review overdue — was due {review_date}",
+                        {"days_overdue": (date.today() - rd).days},
+                        "review_due"
+                    ))
             except (ValueError, TypeError):
                 pass
 
@@ -154,57 +250,34 @@ def run_daily_tracker():
             current_score = int(row["score"].iloc[0]) if pd.notna(row["score"].iloc[0]) else 0
             quality_pass = bool(row["quality_pass"].iloc[0]) if "quality_pass" in row.columns and pd.notna(row["quality_pass"].iloc[0]) else True
 
-            # Score dropped by 2+
             if entry_score - current_score >= 2:
-                all_alerts.append({
-                    "portfolio_id": port_id,
-                    "user_id": user_id,
-                    "alert_type": "danger",
-                    "ticker": ticker,
-                    "headline": f"{holding.get('name', ticker)} score dropped {entry_score} -> {current_score}",
-                    "detail": {
-                        "name": holding.get("name", ticker),
-                        "entry_score": entry_score,
-                        "current_score": current_score,
-                        "reason": "score_drop",
-                    },
-                    "alert_date": today_str,
-                })
+                all_alerts.append(make_alert(
+                    "danger", ticker,
+                    f"{holding.get('name', ticker)} score dropped {entry_score} -> {current_score}",
+                    {"name": holding.get("name", ticker), "entry_score": entry_score,
+                     "current_score": current_score, "reason": "score_drop"},
+                    "score_drop"
+                ))
 
-            # Quality trap
             if not quality_pass:
-                all_alerts.append({
-                    "portfolio_id": port_id,
-                    "user_id": user_id,
-                    "alert_type": "danger",
-                    "ticker": ticker,
-                    "headline": f"{holding.get('name', ticker)} flagged as potential value trap",
-                    "detail": {
-                        "name": holding.get("name", ticker),
-                        "reason": "quality_fail",
-                    },
-                    "alert_date": today_str,
-                })
+                all_alerts.append(make_alert(
+                    "danger", ticker,
+                    f"{holding.get('name', ticker)} flagged as potential value trap",
+                    {"name": holding.get("name", ticker), "reason": "quality_fail"},
+                    "quality_fail"
+                ))
 
-            # Price crash > 20%
             if entry_price > 0:
                 stock_return = ((live_price - entry_price) / entry_price) * 100
                 if stock_return < -20:
-                    all_alerts.append({
-                        "portfolio_id": port_id,
-                        "user_id": user_id,
-                        "alert_type": "danger",
-                        "ticker": ticker,
-                        "headline": f"{holding.get('name', ticker)} down {stock_return:.0f}% from entry",
-                        "detail": {
-                            "name": holding.get("name", ticker),
-                            "reason": "price_crash",
-                            "entry_price": entry_price,
-                            "current_price": round(live_price, 2),
-                            "return_pct": round(stock_return, 1),
-                        },
-                        "alert_date": today_str,
-                    })
+                    all_alerts.append(make_alert(
+                        "danger", ticker,
+                        f"{holding.get('name', ticker)} down {stock_return:.0f}% from entry",
+                        {"name": holding.get("name", ticker), "reason": "price_crash",
+                         "entry_price": entry_price, "current_price": round(live_price, 2),
+                         "return_pct": round(stock_return, 1)},
+                        "price_crash"
+                    ))
 
         # ── 3c. Opportunity alerts ──
         investor_type = port.get("investor_type", "balanced")
@@ -232,22 +305,17 @@ def run_daily_tracker():
         opps = opps.sort_values("pe").head(3)
 
         for _, opp_row in opps.iterrows():
-            all_alerts.append({
-                "portfolio_id": port_id,
-                "user_id": user_id,
-                "alert_type": "opportunity",
-                "ticker": opp_row["ticker"],
-                "headline": f"{opp_row.get('name', opp_row['ticker'])} hit 4/4 — fits your {investor_type} profile",
-                "detail": {
-                    "name": str(opp_row.get("name", opp_row["ticker"])),
-                    "sector": str(opp_row.get("sector", "N/A")),
-                    "price": round(float(opp_row["price"]), 2) if pd.notna(opp_row.get("price")) else 0,
-                    "pe": round(float(opp_row["pe"]), 2) if pd.notna(opp_row.get("pe")) else 0,
-                    "roe_pct": round(float(opp_row["roe_pct"]), 2) if pd.notna(opp_row.get("roe_pct")) else 0,
-                    "score": 4,
-                },
-                "alert_date": today_str,
-            })
+            all_alerts.append(make_alert(
+                "opportunity", opp_row["ticker"],
+                f"{opp_row.get('name', opp_row['ticker'])} hit 4/4 — fits your {investor_type} profile",
+                {"name": str(opp_row.get("name", opp_row["ticker"])),
+                 "sector": str(opp_row.get("sector", "N/A")),
+                 "price": round(float(opp_row["price"]), 2) if pd.notna(opp_row.get("price")) else 0,
+                 "pe": round(float(opp_row["pe"]), 2) if pd.notna(opp_row.get("pe")) else 0,
+                 "roe_pct": round(float(opp_row["roe_pct"]), 2) if pd.notna(opp_row.get("roe_pct")) else 0,
+                 "score": 4},
+                "opportunity"
+            ))
 
     # ══════════════════════════════════════
     # 4. WRITE ALERTS TO SUPABASE
@@ -271,91 +339,199 @@ def run_daily_tracker():
     print(f"Wrote {written} alerts.")
 
     # ══════════════════════════════════════
-    # 5. SEND EMAIL ALERTS
+    # 5. LLM-WRITTEN EMAIL ALERTS
     # ══════════════════════════════════════
     smtp_user = os.environ.get("ALERT_EMAIL")
     smtp_pass = os.environ.get("ALERT_EMAIL_PASSWORD")
 
     if not smtp_user or not smtp_pass:
-        print("Email credentials not configured. Skipping email alerts.")
+        print("Email credentials not configured. Skipping.")
     elif not all_alerts:
         print("No alerts to email.")
+    elif not gemini_key:
+        print("GEMINI_API_KEY not set. Sending plain email fallback.")
+        _send_plain_emails(all_alerts, profiles, smtp_user, smtp_pass)
     else:
-        user_alerts = {}
-        for alert in all_alerts:
-            uid = alert["user_id"]
-            if uid not in user_alerts:
-                user_alerts[uid] = []
-            user_alerts[uid].append(alert)
-
-        for uid, alerts in user_alerts.items():
-            recipient = profiles.get(uid)
-            if not recipient:
-                print(f"No email found for user {uid}. Skipping.")
-                continue
-
-            danger_alerts = [a for a in alerts if a["alert_type"] == "danger"]
-            opp_alerts = [a for a in alerts if a["alert_type"] == "opportunity"]
-            review_alerts = [a for a in alerts if a["alert_type"] == "review_due"]
-
-            body_parts = ["DeepMoat Daily Alert\n" + "=" * 40 + "\n"]
-
-            if danger_alerts:
-                body_parts.append("DANGER ALERTS\n")
-                for a in danger_alerts:
-                    body_parts.append(f"  >> {a['headline']}\n")
-                body_parts.append("")
-
-            if opp_alerts:
-                body_parts.append("OPPORTUNITIES\n")
-                for a in opp_alerts:
-                    d = a.get("detail", {})
-                    body_parts.append(
-                        f"  >> {a['headline']}\n"
-                        f"     Price: {d.get('price', 'N/A')} | "
-                        f"P/E: {d.get('pe', 'N/A')} | "
-                        f"ROE: {d.get('roe_pct', 'N/A')}%\n"
-                    )
-                body_parts.append("")
-
-            if review_alerts:
-                body_parts.append("REVIEW DUE\n")
-                for a in review_alerts:
-                    body_parts.append(f"  >> {a['headline']}\n")
-                body_parts.append("")
-
-            body_parts.append(
-                "--\n"
-                "Log in to DeepMoat to take action.\n"
-                "This is an automated alert, not financial advice."
-            )
-
-            subject = "DeepMoat: "
-            parts = []
-            if danger_alerts:
-                parts.append(f"{len(danger_alerts)} danger")
-            if opp_alerts:
-                parts.append(f"{len(opp_alerts)} opportunity")
-            if review_alerts:
-                parts.append("review due")
-            subject += ", ".join(parts)
-
-            try:
-                msg = MIMEMultipart()
-                msg["From"] = smtp_user
-                msg["To"] = recipient
-                msg["Subject"] = subject
-                msg.attach(MIMEText("\n".join(body_parts), "plain"))
-
-                with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-                    server.login(smtp_user, smtp_pass)
-                    server.send_message(msg)
-
-                print(f"Email sent to {recipient}: {subject}")
-            except Exception as e:
-                print(f"Email failed for {recipient}: {e}")
+        _send_llm_emails(all_alerts, profiles, smtp_user, smtp_pass, gemini_key)
 
     print("DeepMoat Daily Audit Complete.")
+
+
+def _build_llm_email(alerts, gemini_key):
+    """Use Gemini to write a cohesive, book-grounded email from raw alerts."""
+    client = genai.Client(api_key=gemini_key)
+
+    # Build context block with alerts and their book passages
+    alerts_block = ""
+    for a in alerts:
+        detail = a.get("detail", {})
+        passages = detail.get("book_passages", [])
+        passage_text = ""
+        if passages:
+            passage_text = "\n".join(
+                f"  [{p['author']}]: {p['text']}" for p in passages
+            )
+
+        alerts_block += f"""
+ALERT: {a['headline']}
+Type: {a['alert_type']} | Ticker: {a.get('ticker', 'N/A')}
+Data: {', '.join(f'{k}={v}' for k, v in detail.items() if k != 'book_passages')}
+Book context:
+{passage_text}
+---
+"""
+
+    prompt = f"""You are DeepMoat's Chief Investment Analyst writing a daily email alert.
+
+Today's date: {date.today().strftime('%B %d, %Y')}
+
+ALERTS TO COVER:
+{alerts_block}
+
+Write a professional, concise investment note email. Rules:
+1. Open with a one-line summary of the day's findings
+2. Group by priority: dangers first, then opportunities, then review reminders
+3. For each alert, explain what happened AND what the investment books say about it
+4. Reference specific authors and concepts naturally (e.g., "Graham's margin of safety principle suggests..." or "Dorsey would flag this as potential moat erosion because...")
+5. End with a clear action summary: what the investor should consider doing
+6. Keep the entire email under 500 words
+7. Use plain text formatting, no HTML or markdown
+8. Sign off as "DeepMoat Daily Intelligence"
+
+Do NOT be generic. Use the actual book passages provided to make specific, grounded recommendations."""
+
+    models = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"]
+    for model in models:
+        try:
+            response = client.models.generate_content(model=model, contents=prompt)
+            return response.text
+        except Exception as e:
+            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                continue
+            print(f"Gemini error: {e}")
+            return None
+    return None
+
+
+def _send_llm_emails(all_alerts, profiles, smtp_user, smtp_pass, gemini_key):
+    """Group alerts by user, generate LLM narrative, send email."""
+    user_alerts = {}
+    for alert in all_alerts:
+        uid = alert["user_id"]
+        if uid not in user_alerts:
+            user_alerts[uid] = []
+        user_alerts[uid].append(alert)
+
+    for uid, alerts in user_alerts.items():
+        recipient = profiles.get(uid)
+        if not recipient:
+            print(f"No email for user {uid}. Skipping.")
+            continue
+
+        # Generate narrative via Gemini
+        narrative = _build_llm_email(alerts, gemini_key)
+
+        if not narrative:
+            print(f"LLM failed for {recipient}. Falling back to plain.")
+            _send_single_plain_email(alerts, recipient, smtp_user, smtp_pass)
+            continue
+
+        # Subject line
+        danger_count = sum(1 for a in alerts if a["alert_type"] == "danger")
+        opp_count = sum(1 for a in alerts if a["alert_type"] == "opportunity")
+        parts = []
+        if danger_count:
+            parts.append(f"{danger_count} danger")
+        if opp_count:
+            parts.append(f"{opp_count} opportunity")
+        if any(a["alert_type"] == "review_due" for a in alerts):
+            parts.append("review due")
+        subject = f"DeepMoat Daily: {', '.join(parts)}" if parts else "DeepMoat Daily Intelligence"
+
+        try:
+            msg = MIMEMultipart()
+            msg["From"] = smtp_user
+            msg["To"] = recipient
+            msg["Subject"] = subject
+            msg.attach(MIMEText(narrative, "plain"))
+
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+                server.login(smtp_user, smtp_pass)
+                server.send_message(msg)
+
+            print(f"LLM email sent to {recipient}: {subject}")
+        except Exception as e:
+            print(f"Email failed for {recipient}: {e}")
+
+
+def _send_plain_emails(all_alerts, profiles, smtp_user, smtp_pass):
+    """Fallback: plain text emails without LLM."""
+    user_alerts = {}
+    for alert in all_alerts:
+        uid = alert["user_id"]
+        if uid not in user_alerts:
+            user_alerts[uid] = []
+        user_alerts[uid].append(alert)
+
+    for uid, alerts in user_alerts.items():
+        recipient = profiles.get(uid)
+        if not recipient:
+            continue
+        _send_single_plain_email(alerts, recipient, smtp_user, smtp_pass)
+
+
+def _send_single_plain_email(alerts, recipient, smtp_user, smtp_pass):
+    """Send a single plain text email for one user."""
+    danger_alerts = [a for a in alerts if a["alert_type"] == "danger"]
+    opp_alerts = [a for a in alerts if a["alert_type"] == "opportunity"]
+    review_alerts = [a for a in alerts if a["alert_type"] == "review_due"]
+
+    body_parts = [f"DeepMoat Daily Alert — {date.today().strftime('%B %d, %Y')}\n{'=' * 40}\n"]
+
+    if danger_alerts:
+        body_parts.append("DANGER ALERTS\n")
+        for a in danger_alerts:
+            body_parts.append(f"  >> {a['headline']}\n")
+        body_parts.append("")
+
+    if opp_alerts:
+        body_parts.append("OPPORTUNITIES\n")
+        for a in opp_alerts:
+            d = a.get("detail", {})
+            body_parts.append(f"  >> {a['headline']}\n")
+        body_parts.append("")
+
+    if review_alerts:
+        body_parts.append("REVIEW DUE\n")
+        for a in review_alerts:
+            body_parts.append(f"  >> {a['headline']}\n")
+        body_parts.append("")
+
+    body_parts.append("--\nLog in to DeepMoat to take action.\nNot financial advice.")
+
+    parts = []
+    if danger_alerts:
+        parts.append(f"{len(danger_alerts)} danger")
+    if opp_alerts:
+        parts.append(f"{len(opp_alerts)} opportunity")
+    if review_alerts:
+        parts.append("review due")
+    subject = f"DeepMoat: {', '.join(parts)}" if parts else "DeepMoat Daily"
+
+    try:
+        msg = MIMEMultipart()
+        msg["From"] = smtp_user
+        msg["To"] = recipient
+        msg["Subject"] = subject
+        msg.attach(MIMEText("\n".join(body_parts), "plain"))
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(smtp_user, smtp_pass)
+            server.send_message(msg)
+
+        print(f"Plain email sent to {recipient}: {subject}")
+    except Exception as e:
+        print(f"Email failed for {recipient}: {e}")
 
 
 if __name__ == "__main__":
