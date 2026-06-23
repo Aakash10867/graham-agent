@@ -3851,7 +3851,15 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 st.error(f"Report generation failed: {e}")
 
                 # ── Standalone Health Check (when not in review) ──
-                if not st.session_state.get(f"review_data_{port['id']}"):
+                _review_imminent = False
+                if port.get("next_review_date"):
+                    try:
+                        _rd = datetime.date.fromisoformat(str(port["next_review_date"]))
+                        _review_imminent = (_rd - datetime.date.today()).days <= 7
+                    except (ValueError, TypeError):
+                        pass
+
+                if not st.session_state.get(f"review_data_{port['id']}") and not _review_imminent:
                     hc_key = f"health_check_{port['id']}"
                     if st.session_state.get(hc_key):
                         hc = st.session_state[hc_key]
