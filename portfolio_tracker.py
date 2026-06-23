@@ -316,7 +316,34 @@ def run_daily_tracker():
                  "score": 4},
                 "opportunity"
             ))
+        # ── 3d. Portfolio-level health warnings ──
+        if len(port_holdings) >= 3:
+            # Sector concentration
+            sector_weights = Counter(held_sectors)
+            total_h = len(held_sectors)
+            for sector, count in sector_weights.items():
+                weight = count / total_h
+                if weight > 0.4:
+                    all_alerts.append(make_alert(
+                        "danger", "_portfolio",
+                        f"Portfolio {port['name']}: {sector} is {weight*100:.0f}% of holdings (>40%)",
+                        {"reason": "sector_concentration", "sector": sector, "weight_pct": round(weight * 100)},
+                        "review_due"
+                    ))
 
+            # Diversification score (HHI)
+            weights = [count / total_h for count in sector_weights.values()]
+            hhi = sum(w ** 2 for w in weights)
+            div_score = round((1 - hhi) * 100)
+            if div_score < 50:
+                all_alerts.append(make_alert(
+                    "danger", "_portfolio",
+                    f"Portfolio {port['name']}: diversification score is {div_score}/100 (critical)",
+                    {"reason": "low_diversification", "score": div_score},
+                    "review_due"
+                ))
+
+    
     # ══════════════════════════════════════
     # 4. WRITE ALERTS TO SUPABASE
     # ══════════════════════════════════════
