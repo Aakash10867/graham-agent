@@ -571,6 +571,39 @@ def generate_health_check(portfolio, holdings, universe_df, collection):
         f"From 52w High: {e['pct_from_high'] or 'N/A'}%, Score: {e['score']}/4"
         for e in enriched
     )
+    # ── Find complementary stocks from universe ──
+    complement_candidates = []
+    try:
+        overweight_sectors = [s for s, w in sector_weights.items() if w > 0.25]
+        candidates = universe_df[
+            (universe_df["score"] >= 3) &
+            (universe_df["quality_pass"] == True) &
+            (~universe_df["ticker"].isin([h.get("ticker") for h in holdings])) &
+            (universe_df["pe"] > 0) &
+            (pd.notna(universe_df["pe"]))
+        ].copy()
+
+        # Prefer sectors not already overweight
+        if overweight_sectors:
+            underweight = candidates[~candidates["sector"].isin(overweight_sectors)]
+            if len(underweight) >= 5:
+                candidates = underweight
+
+        # Top 5 by score then lowest PE
+        candidates = candidates.sort_values(["score", "pe"], ascending=[False, True]).head(5)
+
+        for _, r in candidates.iterrows():
+            complement_candidates.append({
+                "ticker": r["ticker"],
+                "name": str(r.get("name", r["ticker"])),
+                "sector": str(r.get("sector", "N/A")),
+                "score": int(r["score"]),
+                "pe": round(float(r["pe"]), 2) if pd.notna(r.get("pe")) else None,
+                "roe_pct": round(float(r["roe_pct"]), 2) if pd.notna(r.get("roe_pct")) else None,
+                "pct_from_high": round(float(r["pct_from_high"]), 2) if pd.notna(r.get("pct_from_high")) else None,
+            })
+    except Exception:
+        pass
 
     prompt = f"""You are DeepMoat's Chief Risk Officer diagnosing a portfolio's health.
 
@@ -600,6 +633,10 @@ Write a diagnostic with these sections:
 
 Be direct and specific. Reference actual holdings by name. Under 300 words total.
 
+COMPLEMENTARY CANDIDATES (stocks not in portfolio that could improve diversification):
+{chr(10).join(f"  {c['ticker']} — {c['name']} | Sector: {c['sector']} | Score: {c['score']}/4 | PE: {c['pe']} | ROE: {c['roe_pct']}%" for c in complement_candidates) if complement_candidates else "None available"}
+If the portfolio needs more holdings or sector diversity, recommend specific stocks from the candidates above in your ACTION ITEMS.
+
 After the narrative, on a new line, output a JSON block starting with ACTIONS_JSON: followed by a JSON array.
 Each action object must have:
 - "type": one of "sell", "reduce", "investigate"
@@ -607,8 +644,9 @@ Each action object must have:
 - "reason": one line explanation
 - For "reduce": include "target_alloc_pct" (the new target allocation percentage)
 - For "sell": include "shares" (number of shares to sell, 0 means all)
+- For "add": include "name", "sector", "score", "pe", and "suggested_alloc_pct"
 
-Example: ACTIONS_JSON: [{{"type": "reduce", "ticker": "CHENNPETRO.NS", "target_alloc_pct": 10, "reason": "Trim cyclical concentration"}}]
+Example: ACTIONS_JSON: [{{"type": "reduce", "ticker": "CHENNPETRO.NS", "target_alloc_pct": 10, "reason": "Trim cyclical concentration"}}, {{"type": "add", "ticker": "HDFCBANK.NS", "name": "HDFC Bank", "sector": "Financial Services", "score": 4, "pe": 18.5, "suggested_alloc_pct": 10, "reason": "Adds financial sector exposure, improves diversification"}}]
 
 Only include actions for holdings that need changes. Do not include "investigate" for more than 2 stocks."""
 
@@ -646,6 +684,7 @@ Only include actions for holdings that need changes. Do not include "investigate
 
     metrics["narrative"] = narrative
     metrics["actions"] = actions if 'actions' in dir() else []
+    metrics["complement_candidates"] = complement_candidates
     return metrics
 
 
@@ -2788,6 +2827,10 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
             f"Use beta to assess how much each stock moves with the market — relevant for portfolio-level risk. "
             f"Apply qualitative moat assessment (Dorsey) — check ROE trends to see if moat is stable or eroding. "
             f"Enforce max 2 stocks per sector for diversification. "
+            f"Before finalizing, compute: (1) how many sectors you cover — aim for at least 4, "
+            f"(2) whether any single sector exceeds 30% allocation — if so, rebalance, "
+            f"(3) whether the portfolio beta is balanced — avoid loading up on all high-beta or all low-beta stocks. "
+            f"If the portfolio fails these checks, revise your selection before outputting. "
             f"Allocate the monthly SIP of INR {sip_amount} across selected stocks. "
             f"For each pick, explain WHY it fits this investor using book philosophy. "
             f"Output the final portfolio as a clean table with: ticker, name, sector, allocation_pct, sip_amount_inr, score, and a one-line thesis."
@@ -3986,15 +4029,115 @@ elif st.session_state.sb_view_mode == "portfolios":
                                         except Exception as e:
                                             st.error(f"Failed: {e}")
 
-                                elif act_type == "investigate":
+                                elif act_type == "add":
+                                    act_name = act.get("name", act_ticker)
+                                    act_sector = act.get("sector", "")
+                                    act_score = act.get("score", 0)
+                                    suggested_pct = act.get("suggested_alloc_pct", 10)
+                                    add_state_key = f"hc_add_form_{port['id']}_{ai}"
+
                                     if st.button(
-                                        f"🔍 Investigate {act_ticker} — {act_reason}",
-                                        key=f"hc_investigate_{port['id']}_{ai}",
-                                        use_container_width=True
+                                        f"Add {act_name} ({act_ticker}) — {act_reason}",
+                                        key=btn_key, use_container_width=True
                                     ):
-                                        st.session_state.show_portfolios = False
-                                        st.session_state.pending_prompt = f"Deep analysis of {act_ticker}: {act_reason}"
+                                        st.session_state[add_state_key] = True
+
+                                    if st.session_state.get(add_state_key):
+                                        with st.container(border=True):
+                                            st.caption(f"Sector: {act_sector} · Score: {act_score}/4 · PE: {act.get('pe', 'N/A')}")
+                                            ac1, ac2 = st.columns(2)
+                                            with ac1:
+                                                add_qty = st.number_input(
+                                                    "Shares to buy", min_value=1, value=1,
+                                                    key=f"hc_add_qty_{port['id']}_{ai}"
+                                                )
+                                            with ac2:
+                                                add_price = st.number_input(
+                                                    "Price per share (₹)", min_value=0.01,
+                                                    value=float(act.get("pe", 100)),
+                                                    format="%.2f", key=f"hc_add_price_{port['id']}_{ai}"
+                                                )
+                                            bc1, bc2 = st.columns(2)
+                                            with bc1:
+                                                if st.button("Confirm Add", key=f"hc_add_confirm_{port['id']}_{ai}", use_container_width=True):
+                                                    try:
+                                                        invested = round(add_qty * add_price, 2)
+                                                        sb.table("holdings").insert({
+                                                            "portfolio_id": port["id"],
+                                                            "ticker": act_ticker,
+                                                            "name": act_name,
+                                                            "sector": act_sector,
+                                                            "allocation_pct": suggested_pct,
+                                                            "shares": add_qty,
+                                                            "sip_amount_inr": invested,
+                                                            "price_at_entry": round(add_price, 2),
+                                                            "score_at_entry": act_score,
+                                                        }).execute()
+
+                                                        # Normalize all allocations to sum to 100%
+                                                        all_h = sb.table("holdings").select("id, allocation_pct").eq(
+                                                            "portfolio_id", port["id"]
+                                                        ).execute().data or []
+                                                        raw_total = sum(h["allocation_pct"] for h in all_h)
+                                                        if raw_total > 0:
+                                                            for h in all_h:
+                                                                normalized = round(h["allocation_pct"] / raw_total * 100, 1)
+                                                                sb.table("holdings").update(
+                                                                    {"allocation_pct": normalized}
+                                                                ).eq("id", h["id"]).execute()
+
+                                                        st.session_state[action_msg_key] = f"Added {act_name}. All allocations normalized to 100%."
+                                                        del st.session_state[add_state_key]
+                                                        st.rerun()
+                                                    except Exception as e:
+                                                        st.error(f"Failed: {e}")
+                                            with bc2:
+                                                if st.button("Cancel", key=f"hc_add_cancel_{port['id']}_{ai}", use_container_width=True):
+                                                    del st.session_state[add_state_key]
+                                                    st.rerun()
+
+                                elif act_type == "investigate":
+                                    inv_key = f"hc_inv_result_{port['id']}_{ai}"
+                                    if st.button(
+                                        f"Investigate {act_ticker} — {act_reason}",
+                                        key=btn_key, use_container_width=True
+                                    ):
+                                        with st.spinner(f"Investigating {act_ticker}..."):
+                                            try:
+                                                client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+                                                stock_data = get_stock_data(act_ticker)
+                                                book_data = search_book(f"{act_reason} investment risk")
+                                                inv_prompt = (
+                                                    f"You are DeepMoat's analyst investigating a specific concern about {act_ticker}.\n\n"
+                                                    f"CONCERN: {act_reason}\n\n"
+                                                    f"STOCK DATA:\n{json.dumps(stock_data, indent=2, default=str)}\n\n"
+                                                    f"BOOK CONTEXT:\n{book_data.get('passages', '')[:800]}\n\n"
+                                                    f"Write a focused 150-word investigation: what does the data show about this concern? "
+                                                    f"Is the concern valid? What should the investor do? Cite book principles."
+                                                )
+                                                last_good = st.session_state.get("last_working_model")
+                                                models = [last_good] + [m for m in FREE_MODELS if m != last_good] if last_good else FREE_MODELS
+                                                for model in models:
+                                                    try:
+                                                        resp = client.models.generate_content(model=model, contents=inv_prompt)
+                                                        st.session_state[inv_key] = resp.text
+                                                        st.session_state.last_working_model = model
+                                                        break
+                                                    except Exception as e:
+                                                        error_msg = str(e).upper()
+                                                        if any(err in error_msg for err in ["429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "500"]):
+                                                            continue
+                                                        break
+                                            except Exception as e:
+                                                st.session_state[inv_key] = f"Investigation failed: {e}"
                                         st.rerun()
+
+                                    if st.session_state.get(inv_key):
+                                        with st.container(border=True):
+                                            st.markdown(st.session_state[inv_key])
+                                            if st.button("Dismiss", key=f"inv_dismiss_{port['id']}_{ai}"):
+                                                del st.session_state[inv_key]
+                                                st.rerun()
                         if st.button("✕ Close", key=f"hc_close_{port['id']}"):
                             del st.session_state[hc_key]
                             st.rerun()
@@ -4335,14 +4478,47 @@ elif st.session_state.sb_view_mode == "portfolios":
                                             st.error(f"Failed: {e}")
 
                                 elif act_type == "investigate":
+                                    inv_key = f"hc_inv_result_{port['id']}_{ai}"
                                     if st.button(
-                                        f"🔍 Investigate {act_ticker} — {act_reason}",
-                                        key=f"hc_investigate_{port['id']}_{ai}",
-                                        use_container_width=True
+                                        f"Investigate {act_ticker} — {act_reason}",
+                                        key=btn_key, use_container_width=True
                                     ):
-                                        st.session_state.show_portfolios = False
-                                        st.session_state.pending_prompt = f"Deep analysis of {act_ticker}: {act_reason}"
+                                        with st.spinner(f"Investigating {act_ticker}..."):
+                                            try:
+                                                client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+                                                stock_data = get_stock_data(act_ticker)
+                                                book_data = search_book(f"{act_reason} investment risk")
+                                                inv_prompt = (
+                                                    f"You are DeepMoat's analyst investigating a specific concern about {act_ticker}.\n\n"
+                                                    f"CONCERN: {act_reason}\n\n"
+                                                    f"STOCK DATA:\n{json.dumps(stock_data, indent=2, default=str)}\n\n"
+                                                    f"BOOK CONTEXT:\n{book_data.get('passages', '')[:800]}\n\n"
+                                                    f"Write a focused 150-word investigation: what does the data show about this concern? "
+                                                    f"Is the concern valid? What should the investor do? Cite book principles."
+                                                )
+                                                last_good = st.session_state.get("last_working_model")
+                                                models = [last_good] + [m for m in FREE_MODELS if m != last_good] if last_good else FREE_MODELS
+                                                for model in models:
+                                                    try:
+                                                        resp = client.models.generate_content(model=model, contents=inv_prompt)
+                                                        st.session_state[inv_key] = resp.text
+                                                        st.session_state.last_working_model = model
+                                                        break
+                                                    except Exception as e:
+                                                        error_msg = str(e).upper()
+                                                        if any(err in error_msg for err in ["429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "500"]):
+                                                            continue
+                                                        break
+                                            except Exception as e:
+                                                st.session_state[inv_key] = f"Investigation failed: {e}"
                                         st.rerun()
+
+                                    if st.session_state.get(inv_key):
+                                        with st.container(border=True):
+                                            st.markdown(st.session_state[inv_key])
+                                            if st.button("Dismiss", key=f"inv_dismiss_{port['id']}_{ai}"):
+                                                del st.session_state[inv_key]
+                                                st.rerun()
 
                     # ── Update form — ALL holdings ──
                     sell_stocks = [(i, r) for i, r in enumerate(review_rows) if "SELL" in r["Action"]]
