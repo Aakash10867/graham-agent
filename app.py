@@ -3889,7 +3889,8 @@ elif st.session_state.sb_view_mode == "portfolios":
                     hc_key = f"health_check_{port['id']}"
                     if st.session_state.get(hc_key):
                         hc = st.session_state[hc_key]
-                        with st.expander("Health Check Results", expanded=True):
+                        with st.container(border=True):
+                        st.markdown("**Health Check Results**")
                             d_score = hc["diversification_score"]
                             d_color = "🟢" if d_score >= 70 else "🟡" if d_score >= 40 else "🔴"
                             st.metric("Diversification Score", f"{d_color} {d_score}/100")
@@ -4232,7 +4233,8 @@ elif st.session_state.sb_view_mode == "portfolios":
                     # ── Health Check (inline during review) ──
                     hc = review_state.get("health_check")
                     if hc:
-                        with st.expander("Portfolio Health Check", expanded=False):
+                        with st.container(border=True):
+                        st.markdown("**Health Check Results**")
                             d_score = hc["diversification_score"]
                             d_color = "🟢" if d_score >= 70 else "🟡" if d_score >= 40 else "🔴"
                             st.metric("Diversification Score", f"{d_color} {d_score}/100")
