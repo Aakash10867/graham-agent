@@ -3082,9 +3082,9 @@ Message 4 (after they answer): Ask ONLY "How often do you want to check on your 
 
 NEVER ask more than one question in a single message. If the user gives multiple answers at once, accept them and skip ahead.
 
-After selecting your final stocks (count determined by the portfolio_sizing range in the get_sip_candidates response, NOT a fixed number), call register_portfolio with the structured data. Write your analysis and reasoning about the picks in the same response. Do NOT ask the user for permission to save — just call the tool.
+After selecting your final stocks, you MUST write out your stock-by-stock analysis and reasoning FIRST. Explain why each pick fits the investor's profile using the Graham/Greenblatt/Dorsey frameworks. 
 
-CRITICAL: Frame question 3 around GOALS, never around LOSSES or RISK. Do NOT mention portfolio drops, drawdowns, or volatility in the question itself.
+CRITICAL: You must generate this textual explanation BEFORE calling the `register_portfolio` tool. If you output the tool call first, your explanation will be truncated. Once your analysis is written, call register_portfolio with the structured data. Do NOT ask the user for permission to save — just call the tool.
 
 After all 4 answers are collected, map them:
 - Goal answer 1 → investor_type="defensive"
@@ -3340,7 +3340,11 @@ def agent_turn(user_message):
             draft_text = "\n\n".join(clean_parts).strip()
 
             if not draft_text:
-                recovery_prompt = "You successfully executed your tools, but provided no text to the user. Write out the final portfolio table and explain your choices."
+                recovery_prompt = (
+                    "You successfully executed the register_portfolio tool, but you provided zero text to the user. "
+                    "You MUST reply now with a stock-by-stock explanation of why you selected each company, "
+                    "grounding your reasoning in the Graham, Greenblatt, and Dorsey frameworks. Do not output any more tool calls."
+                )
                 recovery_response = analyst_chat.send_message(recovery_prompt)
                 draft_text = _extract_text(recovery_response).strip()
 
