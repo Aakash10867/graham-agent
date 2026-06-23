@@ -457,6 +457,169 @@ FORMAT RULES (follow exactly):
     except Exception as e:
         return f"Analysis unavailable: {e}"
 
+def generate_health_check(portfolio, holdings, universe_df, collection):
+    """Portfolio-level diagnostic: diversification, risk, valuation, book-grounded assessment."""
+    if not holdings:
+        return None
+
+    # ── Look up each holding in universe CSV ──
+    enriched = []
+    sectors = []
+    betas = []
+    pe_vs_avgs = []
+    pct_from_highs = []
+    scores = []
+
+    for h in holdings:
+        ticker = h.get("ticker", "")
+        alloc = h.get("allocation_pct", 0)
+        row = universe_df[universe_df["ticker"] == ticker]
+
+        sector = h.get("sector", "Unknown")
+        beta = None
+        pe_vs_avg = None
+        pct_from_high = None
+        score = h.get("score_at_entry", 0)
+
+        if not row.empty:
+            r = row.iloc[0]
+            sector = r.get("sector", sector) if pd.notna(r.get("sector")) else sector
+            beta = round(float(r["beta"]), 2) if pd.notna(r.get("beta")) else None
+            pe_vs_avg = round(float(r["pe_vs_avg"]), 2) if pd.notna(r.get("pe_vs_avg")) else None
+            pct_from_high = round(float(r["pct_from_high"]), 2) if pd.notna(r.get("pct_from_high")) else None
+            score = int(r["score"]) if pd.notna(r.get("score")) else score
+
+        sectors.append(sector)
+        if beta is not None:
+            betas.append((beta, alloc))
+        if pe_vs_avg is not None:
+            pe_vs_avgs.append(pe_vs_avg)
+        if pct_from_high is not None:
+            pct_from_highs.append(pct_from_high)
+        scores.append(score)
+
+        enriched.append({
+            "name": h.get("name", ticker), "ticker": ticker, "sector": sector,
+            "alloc": alloc, "beta": beta, "pe_vs_avg": pe_vs_avg,
+            "pct_from_high": pct_from_high, "score": score,
+        })
+
+    # ── Sector concentration (HHI) ──
+    from collections import Counter
+    sector_counts = Counter(sectors)
+    total = len(sectors)
+    sector_weights = {s: c / total for s, c in sector_counts.items()}
+    hhi = sum(w ** 2 for w in sector_weights.values())
+    diversification_score = round((1 - hhi) * 100)
+
+    # ── Weighted average beta ──
+    if betas:
+        total_alloc = sum(a for _, a in betas)
+        avg_beta = round(sum(b * a for b, a in betas) / total_alloc, 2) if total_alloc > 0 else None
+    else:
+        avg_beta = None
+
+    # ── Valuation positioning ──
+    avg_pe_vs_avg = round(sum(pe_vs_avgs) / len(pe_vs_avgs), 1) if pe_vs_avgs else None
+    avg_pct_from_high = round(sum(pct_from_highs) / len(pct_from_highs), 1) if pct_from_highs else None
+
+    # ── Quality distribution ──
+    score_dist = Counter(scores)
+
+    # ── Concentration warnings ──
+    warnings = []
+    for sector, weight in sector_weights.items():
+        if weight > 0.3:
+            warnings.append(f"{sector} is {weight*100:.0f}% of portfolio (>30%)")
+    if avg_beta and avg_beta > 1.3:
+        warnings.append(f"High portfolio beta ({avg_beta}) — amplifies market swings")
+    if avg_pe_vs_avg and avg_pe_vs_avg > 20:
+        warnings.append(f"Holdings trading {avg_pe_vs_avg}% above their historical PE — possible overvaluation")
+
+    metrics = {
+        "diversification_score": diversification_score,
+        "sector_distribution": dict(sector_counts),
+        "avg_beta": avg_beta,
+        "avg_pe_vs_historical": avg_pe_vs_avg,
+        "avg_pct_from_52w_high": avg_pct_from_high,
+        "score_distribution": dict(score_dist),
+        "warnings": warnings,
+        "holdings_detail": enriched,
+    }
+
+    # ── LLM narrative ──
+    investor_type = portfolio.get("investor_type", "balanced")
+    time_horizon = portfolio.get("time_horizon", "medium")
+
+    # Book passages for portfolio construction
+    try:
+        passages = collection.query(
+            query_texts=[
+                f"{investor_type} portfolio construction sector diversification concentration risk",
+                "margin of safety portfolio level risk management number of holdings",
+            ],
+            n_results=3
+        )
+        book_text = "\n".join(passages["documents"][0][:2]) if passages["documents"] else ""
+    except Exception:
+        book_text = ""
+
+    holdings_summary = "\n".join(
+        f"  {e['name']} ({e['ticker']}) — Sector: {e['sector']}, Alloc: {e['alloc']}%, "
+        f"Beta: {e['beta'] or 'N/A'}, PE vs Avg: {e['pe_vs_avg'] or 'N/A'}%, "
+        f"From 52w High: {e['pct_from_high'] or 'N/A'}%, Score: {e['score']}/4"
+        for e in enriched
+    )
+
+    prompt = f"""You are DeepMoat's Chief Risk Officer diagnosing a portfolio's health.
+
+Portfolio: {portfolio.get('name')} | Type: {investor_type} | Horizon: {time_horizon}
+Holdings: {total} stocks
+
+PORTFOLIO METRICS:
+Diversification Score: {diversification_score}/100 (based on sector HHI)
+Sector Distribution: {dict(sector_counts)}
+Average Beta: {avg_beta or 'N/A'}
+Average PE vs Historical Average: {avg_pe_vs_avg or 'N/A'}% (negative = discount, positive = premium)
+Average Distance from 52-Week High: {avg_pct_from_high or 'N/A'}%
+Score Distribution: {dict(score_dist)}
+Warnings: {warnings if warnings else 'None'}
+
+HOLDINGS:
+{holdings_summary}
+
+BOOK CONTEXT:
+{book_text[:800]}
+
+Write a diagnostic with these sections:
+1. VERDICT (one line: is this portfolio healthy, needs attention, or at risk?)
+2. STRENGTHS (what's working well — cite book principles)
+3. RISKS (what could go wrong — cite book warnings, be specific about which holdings)
+4. ACTION ITEMS (2-3 specific, actionable recommendations grounded in the books)
+
+Be direct and specific. Reference actual holdings by name. Under 300 words total."""
+
+    narrative = None
+    try:
+        client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+        last_good = st.session_state.get("last_working_model")
+        models = [last_good] + [m for m in FREE_MODELS if m != last_good] if last_good else FREE_MODELS
+        for model in models:
+            try:
+                response = client.models.generate_content(model=model, contents=prompt)
+                narrative = response.text
+                st.session_state.last_working_model = model
+                break
+            except Exception as e:
+                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                    continue
+                break
+    except Exception:
+        pass
+
+    metrics["narrative"] = narrative
+    return metrics
+
 
 def find_replacement_candidates(investor_type, time_horizon, exclude_tickers, current_sectors):
     """Find replacement stocks when review flags sells."""
@@ -3687,6 +3850,54 @@ elif st.session_state.sb_view_mode == "portfolios":
                             except Exception as e:
                                 st.error(f"Report generation failed: {e}")
 
+                # ── Standalone Health Check (when not in review) ──
+                if not st.session_state.get(f"review_data_{port['id']}"):
+                    hc_key = f"health_check_{port['id']}"
+                    if st.session_state.get(hc_key):
+                        hc = st.session_state[hc_key]
+                        with st.expander("🏥 Health Check Results", expanded=True):
+                            d_score = hc["diversification_score"]
+                            d_color = "🟢" if d_score >= 70 else "🟡" if d_score >= 40 else "🔴"
+                            st.metric("Diversification Score", f"{d_color} {d_score}/100")
+                            m1, m2, m3 = st.columns(3)
+                            with m1:
+                                st.metric("Avg Beta", hc["avg_beta"] or "N/A")
+                            with m2:
+                                pe_val = hc["avg_pe_vs_historical"]
+                                pe_label = f"{pe_val:+.1f}%" if pe_val is not None else "N/A"
+                                st.metric("PE vs History", pe_label)
+                            with m3:
+                                high_val = hc["avg_pct_from_52w_high"]
+                                high_label = f"{high_val:.1f}%" if high_val is not None else "N/A"
+                                st.metric("From 52w High", high_label)
+                            sector_dist = hc["sector_distribution"]
+                            if sector_dist:
+                                sector_df = pd.DataFrame([
+                                    {"Sector": s, "Stocks": c, "Weight": f"{c/sum(sector_dist.values())*100:.0f}%"}
+                                    for s, c in sorted(sector_dist.items(), key=lambda x: -x[1])
+                                ])
+                                st.dataframe(sector_df, hide_index=True, use_container_width=True)
+                            for w in hc.get("warnings", []):
+                                st.warning(w)
+                            if hc.get("narrative"):
+                                st.markdown("---")
+                                st.markdown(hc["narrative"])
+                        if st.button("✕ Close", key=f"hc_close_{port['id']}"):
+                            del st.session_state[hc_key]
+                            st.rerun()
+                    else:
+                        if st.button("🏥 Health Check", key=f"hc_btn_{port['id']}", use_container_width=True):
+                            with st.spinner("Diagnosing portfolio against book principles..."):
+                                try:
+                                    hc_holdings = sb.table("holdings").select("*").eq("portfolio_id", port["id"]).execute().data or []
+                                    hc_result = generate_health_check(port, hc_holdings, universe_df, collection)
+                                    if hc_result:
+                                        st.session_state[hc_key] = hc_result
+                                        st.rerun()
+                                except Exception as e:
+                                    st.error(f"Health check failed: {e}")
+
+                
                 today = datetime.date.today()
                 _auto_key = f"auto_trigger_review_{port['id']}"
                 _auto_run = st.session_state.pop(_auto_key, False)
@@ -3846,10 +4057,13 @@ elif st.session_state.sb_view_mode == "portfolios":
                                         "_entry_price": h["entry_price"], "_now_price": h["now_price"],
                                     })
 
+                                # Auto-run health check during review
+                                hc_result = generate_health_check(port, holdings, universe_df, collection)
+
                                 st.session_state[f"review_data_{port['id']}"] = {
                                     "rows": review_rows, "total_entry": total_entry,
                                     "total_current": total_current, "holdings": holdings,
-                                    "enriched": enriched,
+                                    "enriched": enriched, "health_check": hc_result,
                                 }
 
                                 try:
@@ -3910,6 +4124,42 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 f"ROE trend: {roe_t}</p></details>",
                                 unsafe_allow_html=True
                             )
+
+                    # ── Health Check (inline during review) ──
+                    hc = review_state.get("health_check")
+                    if hc:
+                        with st.expander("🏥 Portfolio Health Check", expanded=False):
+                            d_score = hc["diversification_score"]
+                            d_color = "🟢" if d_score >= 70 else "🟡" if d_score >= 40 else "🔴"
+                            st.metric("Diversification Score", f"{d_color} {d_score}/100")
+
+                            m1, m2, m3 = st.columns(3)
+                            with m1:
+                                st.metric("Avg Beta", hc["avg_beta"] or "N/A")
+                            with m2:
+                                pe_val = hc["avg_pe_vs_historical"]
+                                pe_label = f"{pe_val:+.1f}%" if pe_val is not None else "N/A"
+                                st.metric("PE vs History", pe_label)
+                            with m3:
+                                high_val = hc["avg_pct_from_52w_high"]
+                                high_label = f"{high_val:.1f}%" if high_val is not None else "N/A"
+                                st.metric("From 52w High", high_label)
+
+                            sector_dist = hc["sector_distribution"]
+                            if sector_dist:
+                                sector_df = pd.DataFrame([
+                                    {"Sector": s, "Stocks": c, "Weight": f"{c/sum(sector_dist.values())*100:.0f}%"}
+                                    for s, c in sorted(sector_dist.items(), key=lambda x: -x[1])
+                                ])
+                                st.dataframe(sector_df, hide_index=True, use_container_width=True)
+
+                            for w in hc.get("warnings", []):
+                                st.warning(w)
+
+                            if hc.get("narrative"):
+                                st.markdown("---")
+                                st.markdown(hc["narrative"])
+
                     # ── Update form — ALL holdings ──
                     sell_stocks = [(i, r) for i, r in enumerate(review_rows) if "SELL" in r["Action"]]
 
