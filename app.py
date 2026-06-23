@@ -1212,7 +1212,7 @@ STOCK_PRESETS = [
 ]
 
 SCREENER_PRESETS = [
-    ("🇮🇳 Screen Indian Stocks",
+    ("🔎 Screen Indian Stocks",
      "Find the best Indian stocks to invest in right now. Show me which stocks pass all 4 frameworks and which pass 3 out of 4 and which pass 2 out of 4, with upto top 10 from each tier. Explain why each tier is a good investment using the book philosophies."),
     ("💎 Find Hidden Gems",
      "Find hidden gem stocks — small and mid cap Indian companies outside the Nifty 50 that pass at least 3 out of 4 frameworks. Show top 10 with key metrics. Explain why each is a good investment using book philosophies."),
@@ -4236,7 +4236,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                             del st.session_state[hc_key]
                             st.rerun()
                     else:
-                        if st.button("Health Check", key=f"hc_btn_{port['id']}", use_container_width=True):
+                        if st.button("🩺 Health Check", key=f"hc_btn_{port['id']}", use_container_width=True):
                             with st.spinner("Diagnosing portfolio against book principles..."):
                                 try:
                                     hc_holdings = sb.table("holdings").select("*").eq("portfolio_id", port["id"]).execute().data or []
