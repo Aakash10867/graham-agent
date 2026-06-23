@@ -343,12 +343,63 @@ def run_daily_tracker():
                     "review_due"
                 ))
 
-    
+    # ══════════════════════════════════════
+    # 3e. SCORE HISTORY TRACKING
+    # ══════════════════════════════════════
+    if universe_df is not None:
+        all_held = set()
+        for port in portfolios:
+            port_holdings = [h for h in holdings if h["portfolio_id"] == port["id"]]
+            for h in port_holdings:
+                all_held.add(h["ticker"])
+
+        trackable = universe_df[
+            (universe_df["ticker"].isin(all_held)) |
+            (universe_df["score"] >= 3)
+        ].copy()
+
+        score_rows = []
+        for _, row in trackable.iterrows():
+            score_rows.append({
+                "ticker": row["ticker"],
+                "date": today_str,
+                "score": int(row["score"]) if pd.notna(row.get("score")) else 0,
+                "graham_pass": bool(row["graham_pass"]) if pd.notna(row.get("graham_pass")) else None,
+                "greenblatt_pass": bool(row["greenblatt_pass"]) if pd.notna(row.get("greenblatt_pass")) else None,
+                "dorsey_pass": bool(row["dorsey_pass"]) if pd.notna(row.get("dorsey_pass")) else None,
+                "trajectory_pass": bool(row["trajectory_pass"]) if pd.notna(row.get("trajectory_pass")) else None,
+                "pe": round(float(row["pe"]), 2) if pd.notna(row.get("pe")) else None,
+                "roe_pct": round(float(row["roe_pct"]), 2) if pd.notna(row.get("roe_pct")) else None,
+                "quality_pass": bool(row["quality_pass"]) if pd.notna(row.get("quality_pass")) else None,
+            })
+
+        written_scores = 0
+        for i in range(0, len(score_rows), 100):
+            batch = score_rows[i:i+100]
+            try:
+                supabase.table("score_history").upsert(
+                    batch, on_conflict="ticker,date"
+                ).execute()
+                written_scores += len(batch)
+            except Exception as e:
+                print(f"Score history batch failed: {e}")
+
+        # Clean up rows older than 90 days
+        try:
+            from datetime import timedelta
+            cutoff_90 = (date.today() - timedelta(days=90))
+            supabase.table("score_history").delete().lt("date", cutoff_90.isoformat()).execute()
+        except Exception as e:
+            print(f"Score history cleanup failed: {e}")
+
+        print(f"Logged {written_scores} score history rows. Cleaned >90 days.")
+ 
     # ══════════════════════════════════════
     # 4. WRITE ALERTS TO SUPABASE
     # ══════════════════════════════════════
     try:
-        cutoff = date.today().replace(day=max(1, date.today().day - 7)).isoformat()
+        from datetime import timedelta
+        cutoff = (date.today() - timedelta(days=7)).isoformat()
         supabase.table("portfolio_alerts").delete().lt("alert_date", cutoff).eq("is_read", False).execute()
     except Exception as e:
         print(f"Warning: Could not clean old alerts: {e}")
