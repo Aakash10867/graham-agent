@@ -2599,8 +2599,10 @@ def find_investments(market: str) -> dict:
         t["_pe_sort"] = t["pe"].apply(lambda x: x if pd.notna(x) else 9999)
         t["_roe_sort"] = t["roe_pct"].apply(lambda x: -x if pd.notna(x) else 9999)
         t["_rev_sort"] = t["rev_growth"].apply(lambda x: -x if pd.notna(x) else 9999)
-        t = t.sort_values(["_pe_sort", "_roe_sort", "_rev_sort"])
-        return t.drop(columns=["_pe_sort", "_roe_sort", "_rev_sort"])
+        # Stocks near 52-week lows rank higher (more negative pct_from_high = better value)
+        t["_high_sort"] = t["pct_from_high"].apply(lambda x: x if pd.notna(x) else 0)
+        t = t.sort_values(["_pe_sort", "_high_sort", "_roe_sort", "_rev_sort"])
+        return t.drop(columns=["_pe_sort", "_roe_sort", "_rev_sort", "_high_sort"])
 
     tier_4 = apply_rank_sort(tier_4)
     tier_3 = apply_rank_sort(tier_3)
@@ -2629,6 +2631,10 @@ def find_investments(market: str) -> dict:
                 "failed": [f for f in ["Graham", "Greenblatt", "Dorsey", "Trajectory"]
                            if pd.notna(row.get(f"{f.lower()}_pass")) and not row.get(f"{f.lower()}_pass")],
                 "years_of_data": int(row["years_of_data"]) if pd.notna(row.get("years_of_data")) else 0,
+                "pct_from_52w_high": round(row["pct_from_high"], 1) if pd.notna(row.get("pct_from_high")) else "N/A",
+                "pct_from_52w_low": round(row["pct_from_low"], 1) if pd.notna(row.get("pct_from_low")) else "N/A",
+                "pe_vs_historical": round(row["pe_vs_avg"], 1) if pd.notna(row.get("pe_vs_avg")) else "N/A",
+                "beta": round(row["beta"], 2) if pd.notna(row.get("beta")) else "N/A",
             })
         return entries
 
@@ -2865,30 +2871,75 @@ def get_csv_financial_data(ticker: str) -> dict:
 
 def get_macro_context(ticker: str) -> dict:
     """
-    Uses Yahoo Finance to return the company's sector and the 5-day 
-    performance of the broader market index (Nifty 50: ^NSEI) to gauge macro momentum.
+    Returns macro context: sector, Nifty 5-day performance, India VIX (fear gauge),
+    and sector-level index performance where available.
     """
     resolved = _resolve_ticker(ticker)
     try:
         stock = yf.Ticker(resolved)
         sector = stock.info.get('sector', 'Unknown Sector')
         
-        # Get Nifty 50 momentum
-        nifty = yf.Ticker("^NSEI")
-        hist = nifty.history(period="5d")
-        
-        if not hist.empty and len(hist) >= 1:
-            start_price = float(hist['Close'].iloc[0])
-            end_price = float(hist['Close'].iloc[-1])
-            pct_change = ((end_price - start_price) / start_price) * 100
-        else:
-            pct_change = None
-            
-        return {
-            "ticker": resolved,
-            "sector": sector,
-            "nifty_50_5d_performance_pct": round(pct_change, 2) if pct_change is not None else "N/A"
+        result = {"ticker": resolved, "sector": sector}
+
+        # Nifty 50 momentum
+        try:
+            nifty = yf.Ticker("^NSEI")
+            hist = nifty.history(period="1mo")
+            if not hist.empty and len(hist) >= 2:
+                result["nifty_50_1d_pct"] = round(((hist['Close'].iloc[-1] / hist['Close'].iloc[-2]) - 1) * 100, 2)
+                result["nifty_50_5d_pct"] = round(((hist['Close'].iloc[-1] / hist['Close'].iloc[-6 if len(hist) >= 6 else 0]) - 1) * 100, 2)
+                result["nifty_50_1mo_pct"] = round(((hist['Close'].iloc[-1] / hist['Close'].iloc[0]) - 1) * 100, 2)
+                result["nifty_50_close"] = round(float(hist['Close'].iloc[-1]), 2)
+        except Exception:
+            result["nifty_50_5d_pct"] = "N/A"
+
+        # India VIX (fear gauge)
+        try:
+            vix = yf.Ticker("^INDIAVIX")
+            vix_hist = vix.history(period="5d")
+            if not vix_hist.empty:
+                vix_val = round(float(vix_hist['Close'].iloc[-1]), 2)
+                result["india_vix"] = vix_val
+                if vix_val < 13:
+                    result["vix_interpretation"] = "Low fear — market is complacent, potential for sudden correction"
+                elif vix_val < 20:
+                    result["vix_interpretation"] = "Normal range — market pricing moderate uncertainty"
+                elif vix_val < 30:
+                    result["vix_interpretation"] = "Elevated fear — market expects significant moves"
+                else:
+                    result["vix_interpretation"] = "Panic levels — historically a contrarian buy signal per Graham"
+        except Exception:
+            result["india_vix"] = "N/A"
+
+        # Sector-specific index (map common sectors to Nifty sector indices)
+        SECTOR_INDICES = {
+            "Technology": "^CNXIT",
+            "Financial Services": "^CNXFIN",
+            "Energy": "^CNXENERGY",
+            "Consumer Cyclical": "^CNXCONSUMER",
+            "Healthcare": "^CNXPHARMA",
+            "Basic Materials": "^CNXMETAL",
+            "Industrials": "^CNXINFRA",
+            "Consumer Defensive": "^CNXFMCG",
+            "Real Estate": "^CNXREALTY",
+            "Utilities": "^CNXPSUBANK",
         }
+
+        sector_idx = SECTOR_INDICES.get(sector)
+        if sector_idx:
+            try:
+                sidx = yf.Ticker(sector_idx)
+                sidx_hist = sidx.history(period="1mo")
+                if not sidx_hist.empty and len(sidx_hist) >= 2:
+                    result["sector_index"] = sector_idx
+                    result["sector_1d_pct"] = round(((sidx_hist['Close'].iloc[-1] / sidx_hist['Close'].iloc[-2]) - 1) * 100, 2)
+                    result["sector_5d_pct"] = round(((sidx_hist['Close'].iloc[-1] / sidx_hist['Close'].iloc[-6 if len(sidx_hist) >= 6 else 0]) - 1) * 100, 2)
+                    result["sector_1mo_pct"] = round(((sidx_hist['Close'].iloc[-1] / sidx_hist['Close'].iloc[0]) - 1) * 100, 2)
+            except Exception:
+                pass
+
+        return result
+
     except Exception as e:
         return {"error": f"Error fetching macro context: {str(e)}"}
 
@@ -4334,7 +4385,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                         "Stock": h["name"], "Shares": h["shares"],
                                         "Entry": f"₹{h['entry_price']:,.2f}", "Now": f"₹{h['now_price']:,.2f}",
                                         "P&L": f"₹{h['pnl']:,.0f}", "Return": f"{h['stock_return']:+.1f}%",
-                                        "Score": f"{h['entry_score']}→{h['now_score']}", "Action": action,
+                                        "Score": f"{h['entry_score']}→{h['now_score']}", "Trend": h.get("score_trend", "—"), "Action": action,
                                         "_reasoning": reasoning, "_confidence": confidence,
                                         "_market_note": mkt_note, "_book_passage": h["book_passage"],
                                         "_sell_qty": sell_qty, "_holding_id": h["holding_id"],
