@@ -2421,7 +2421,8 @@ def find_investments(market: str) -> dict:
 
 def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, review_freq: str) -> dict:
     """Filter the pre-scored universe to 30-50 SIP-suitable candidates based on investor profile.
-    The LLM then selects the final 5-8 stocks using book wisdom and qualitative judgment.
+    Returns a min/max stock count range computed from the SIP amount. The LLM decides the
+    exact count within that range based on candidate quality, not a hardcoded number.
 
     Use this when the user wants to build a SIP portfolio. First collect the 4 inputs
     through natural conversation, then call this tool.
@@ -2539,6 +2540,15 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
             "roe_y3": round(row["roe_y3"], 2) if pd.notna(row.get("roe_y3")) else None,
             "revenue_y0": row.get("revenue_y0") if pd.notna(row.get("revenue_y0")) else None,
             "revenue_y1": row.get("revenue_y1") if pd.notna(row.get("revenue_y1")) else None,
+            # Enriched columns for LLM judgment
+            "pe_4y_avg": round(row["pe_4y_avg"], 2) if pd.notna(row.get("pe_4y_avg")) else None,
+            "pe_vs_avg": round(row["pe_vs_avg"], 2) if pd.notna(row.get("pe_vs_avg")) else None,
+            "pct_from_high": round(row["pct_from_high"], 2) if pd.notna(row.get("pct_from_high")) else None,
+            "pct_from_low": round(row["pct_from_low"], 2) if pd.notna(row.get("pct_from_low")) else None,
+            "current_ratio": round(row["current_ratio"], 2) if pd.notna(row.get("current_ratio")) else None,
+            "beta": round(row["beta"], 2) if pd.notna(row.get("beta")) else None,
+            "revenue_cagr_3y": round(row["revenue_cagr_3y"], 2) if pd.notna(row.get("revenue_cagr_3y")) else None,
+            "ni_cagr_3y": round(row["ni_cagr_3y"], 2) if pd.notna(row.get("ni_cagr_3y")) else None,
         }
         candidates.append(candidate)
 
@@ -2554,6 +2564,10 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
 
     candidates = _sanitize(candidates)
 
+    # ── Hard constraints only — LLM decides the count ──
+    max_stocks = min(20, sip_amount // 750)
+    min_stocks = max(5, max_stocks // 3)
+
     return {
         "investor_profile": {
             "sip_amount_inr": sip_amount,
@@ -2561,12 +2575,23 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
             "investor_type": investor_type,
             "review_frequency": review_freq,
         },
+        "portfolio_sizing": {
+            "min_stocks": min_stocks,
+            "max_stocks": max_stocks,
+            "note": "These are hard bounds from the SIP amount. You decide the exact count based on candidate quality.",
+        },
         "candidates_count": len(candidates),
         "candidates": candidates,
         "selection_instruction": (
             f"You have {len(candidates)} pre-filtered candidates. "
-            f"Select 5-8 stocks for this {investor_type} investor with a {time_horizon}-term horizon. "
-            f"Use search_book to pull Graham/Greenblatt/Dorsey wisdom relevant to this profile. "
+            f"Pick between {min_stocks} and {max_stocks} stocks. YOU decide the exact count — "
+            f"it depends on how many candidates are genuinely strong, not a formula. "
+            f"Research shows ~15 stocks eliminates ~85% of unsystematic risk. But 8 excellent picks beat 15 mediocre ones. Never pad. "
+            f"Use search_book to pull Graham/Greenblatt/Dorsey wisdom relevant to this {investor_type} profile with {time_horizon}-term horizon. "
+            f"Use pe_vs_avg to check if a stock is cheap relative to its own history (negative = discount, positive = premium). "
+            f"Use pct_from_high to spot stocks near 52-week lows (potential value) vs near highs (potential overvaluation). "
+            f"Use revenue_cagr_3y and ni_cagr_3y to assess growth trajectory beyond single-year noise. "
+            f"Use beta to assess how much each stock moves with the market — relevant for portfolio-level risk. "
             f"Apply qualitative moat assessment (Dorsey) — check ROE trends to see if moat is stable or eroding. "
             f"Enforce max 2 stocks per sector for diversification. "
             f"Allocate the monthly SIP of INR {sip_amount} across selected stocks. "
@@ -2755,7 +2780,7 @@ You have 11 tools available. Pick the right combination for each question — yo
 13. show_stock_chart — Renders a visual 13-month line chart of a stock's closing price directly in the UI. Use this whenever the user asks for a chart, graph, or visual trajectory.
 14. get_csv_financial_data — Reads the pre-scored universe database for a specific ticker to get proprietary framework scores (Graham, Greenblatt, Dorsey, Trajectory pass/fail flags).
 15. get_macro_context — Gets the sector and 5-day performance of the broader market (Nifty 50) to gauge macro momentum versus asset momentum.
-16. get_sip_candidates — Build a SIP portfolio. Collects investor profile (sip_amount, time_horizon, investor_type, review_freq) and returns 30-50 pre-filtered candidates. You then select 5-8 using book wisdom and qualitative judgment. Use when the user wants to start a SIP, build a portfolio, or asks where to invest monthly.
+16. get_sip_candidates — Build a SIP portfolio. Collects investor profile (sip_amount, time_horizon, investor_type, review_freq) and returns pre-filtered candidates with a min/max stock count range computed from the SIP amount. You decide the exact count within that range based on candidate quality. Do NOT default to 5-8. Use when the user wants to start a SIP, build a portfolio, or asks where to invest monthly.
 17. register_portfolio — After presenting your finalized SIP portfolio to the user, call this to register it for saving. Pass portfolio_name, investor_type, sip_amount, time_horizon, review_days (integer number of days between reviews), and stocks_json (a JSON string list where each item has ticker, name, sector, allocation_pct). ALWAYS call this after presenting the final SIP portfolio table.
 
 SIP PORTFOLIO PROTOCOL:
@@ -2768,7 +2793,7 @@ Message 4 (after they answer): Ask ONLY "How often do you want to check on your 
 
 NEVER ask more than one question in a single message. If the user gives multiple answers at once, accept them and skip ahead.
 
-After selecting your final 5-8 stocks with allocations, call register_portfolio with the structured data. Write your analysis and reasoning about the picks in the same response. Do NOT ask the user for permission to save — just call the tool.
+After selecting your final stocks (count determined by the portfolio_sizing range in the get_sip_candidates response, NOT a fixed number), call register_portfolio with the structured data. Write your analysis and reasoning about the picks in the same response. Do NOT ask the user for permission to save — just call the tool.
 
 CRITICAL: Frame question 3 around GOALS, never around LOSSES or RISK. Do NOT mention portfolio drops, drawdowns, or volatility in the question itself.
 
