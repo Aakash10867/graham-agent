@@ -249,6 +249,7 @@ def fetch_fundamentals(ticker, retries=3):
             pe = info.get("trailingPE")
 
             data = {
+                data = {
                 "ticker": ticker,
                 "name": info.get("longName") or info.get("shortName", ticker),
                 "sector": info.get("sector", ""),
@@ -262,6 +263,16 @@ def fetch_fundamentals(ticker, retries=3):
                 "earnings_yield": round(1.0 / pe * 100, 2) if pe and pe > 0 else None,
                 "profit_margin": info.get("profitMargins"),
                 "market_cap": info.get("marketCap"),
+                "current_ratio": info.get("currentRatio"),
+                "beta": info.get("beta"),
+                "week52_high": info.get("fiftyTwoWeekHigh"),
+                "week52_low": info.get("fiftyTwoWeekLow"),
+                "pct_from_high": None,
+                "pct_from_low": None,
+                "pe_4y_avg": None,
+                "pe_vs_avg": None,
+                "revenue_cagr_3y": None,
+                "ni_cagr_3y": None,
                 "rev_growth": None,
                 "ni_growth": None,
                 "debt_growth": None,
@@ -279,6 +290,14 @@ def fetch_fundamentals(ticker, retries=3):
                 "roe_y0": None, "roe_y1": None, "roe_y2": None, "roe_y3": None,
                 "de_y0": None, "de_y1": None, "de_y2": None, "de_y3": None,
             }
+            # ── 52-Week Proximity ──
+            _price = data["price"]
+            _w52h = data["week52_high"]
+            _w52l = data["week52_low"]
+            if _price and _w52h and _w52h > 0:
+                data["pct_from_high"] = round((_price / _w52h - 1) * 100, 2)
+            if _price and _w52l and _w52l > 0:
+                data["pct_from_low"] = round((_price / _w52l - 1) * 100, 2)
 
             # ── Daily Momentum & Tracking Data ──
             try:
@@ -370,6 +389,38 @@ def fetch_fundamentals(ticker, retries=3):
                             if all(pd.notna(v) for v in debt) and debt[0] > 0:
                                 data["debt_growth"] = round((debt[1] / debt[0] - 1) * 100, 2)
                         except (KeyError, ZeroDivisionError): pass
+            except Exception:
+                pass
+
+            # ── Historical PE & Growth Rates ──
+            try:
+                shares_out = info.get("sharesOutstanding")
+                if shares_out and shares_out > 0:
+                    pe_history = []
+                    for yr in range(4):
+                        ni = data.get(f"net_income_y{yr}")
+                        if ni and ni > 0:
+                            hist_eps = ni / shares_out
+                            hist_pe = data["price"] / hist_eps if hist_eps > 0 else None
+                            if hist_pe and 0 < hist_pe < 200:  # sanity bounds
+                                pe_history.append(hist_pe)
+                    if pe_history:
+                        data["pe_4y_avg"] = round(sum(pe_history) / len(pe_history), 2)
+                        if pe and pe > 0 and data["pe_4y_avg"] > 0:
+                            data["pe_vs_avg"] = round((pe / data["pe_4y_avg"] - 1) * 100, 2)
+            except Exception:
+                pass
+
+            try:
+                rev_y0 = data.get("revenue_y0")
+                rev_y3 = data.get("revenue_y3")
+                if rev_y0 and rev_y3 and rev_y3 > 0 and rev_y0 > 0:
+                    data["revenue_cagr_3y"] = round(((rev_y0 / rev_y3) ** (1/3) - 1) * 100, 2)
+
+                ni_y0 = data.get("net_income_y0")
+                ni_y3 = data.get("net_income_y3")
+                if ni_y0 and ni_y3 and ni_y3 > 0 and ni_y0 > 0:
+                    data["ni_cagr_3y"] = round(((ni_y0 / ni_y3) ** (1/3) - 1) * 100, 2)
             except Exception:
                 pass
 
@@ -588,7 +639,11 @@ def main():
         "ticker", "name", "sector", "price", "market_cap",
         "pe", "pb", "roe_pct", "de", "eps", "earnings_yield",
         "dividend_yield_pct", "profit_margin",
+        "current_ratio", "beta",
+        "week52_high", "week52_low", "pct_from_high", "pct_from_low",
+        "pe_4y_avg", "pe_vs_avg",
         "rev_growth", "ni_growth", "debt_growth",
+        "revenue_cagr_3y", "ni_cagr_3y",
         "price_1d_pct", "price_5d_pct", "rsi_14", "vol_spike_flag",
         "years_of_data",
         "revenue_y0", "revenue_y1", "revenue_y2", "revenue_y3",
