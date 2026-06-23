@@ -1650,7 +1650,7 @@ with st.sidebar:
         auth_password = st.text_input("Password", type="password", key="auth_password_input")
 
         if auth_mode == "Login":
-            if st.button("Log In", use_container_width=True):
+            if st.button("Log In", width="stretch"):
                 if not auth_email or not auth_password:
                     st.warning("Enter email and password.")
                 else:
@@ -1668,7 +1668,7 @@ with st.sidebar:
                     except Exception as e:
                         st.error(f"Login failed: {e}")
         else:
-            if st.button("Sign Up", use_container_width=True):
+            if st.button("Sign Up", width="stretch"):
                 if not auth_email or not auth_password:
                     st.warning("Enter email and password.")
                 elif len(auth_password) < 6:
@@ -1692,23 +1692,23 @@ with st.sidebar:
         st.caption(f"Logged in as {st.session_state.sb_user_email}")
         
         if st.session_state.sb_view_mode != "import":
-            if st.button("📥 Import Existing Portfolio", use_container_width=True):
+            if st.button("📥 Import Existing Portfolio", width="stretch"):
                 st.session_state.sb_view_mode = "import"
                 st.rerun()
                 
         if st.session_state.sb_view_mode != "portfolios":
-            if st.button("📁 My Portfolios", use_container_width=True):
+            if st.button("📁 My Portfolios", width="stretch"):
                 st.session_state.sb_view_mode = "portfolios"
                 st.rerun()
                 
         if st.session_state.sb_view_mode != "chat":
-            if st.button("← Back to Chat", use_container_width=True):
+            if st.button("← Back to Chat", width="stretch"):
                 st.session_state.sb_view_mode = "chat"
                 st.rerun()
 
         st.divider()
 
-        if st.button("Log Out", use_container_width=True, key="logout_btn"):
+        if st.button("Log Out", width="stretch", key="logout_btn"):
             try:
                 sb = get_supabase()
                 sb.auth.sign_out()
@@ -1735,7 +1735,7 @@ with st.sidebar:
         key="target_company",
     )
 
-    if st.button("🔄 New Chat", use_container_width=True):
+    if st.button("🔄 New Chat", width="stretch"):
         st.session_state.messages = []
         st.session_state.chat_history = []
         st.session_state.sb_view_mode = "chat" 
@@ -2004,7 +2004,7 @@ def show_stock_chart(ticker: str) -> dict:
                 tooltip=['Date', 'Close']
             ).properties(height=400)
 
-            st.altair_chart(chart, use_container_width=True)
+            st.altair_chart(chart, width="stretch")
 
             return {"success": f"Chart successfully rendered for {resolved_upper}."}
         else:
@@ -3445,7 +3445,7 @@ if st.session_state.sb_view_mode == "chat":
                 if idx < len(STOCK_PRESETS):
                     label, template = STOCK_PRESETS[idx]
                     with cols[j]:
-                        if st.button(label, key=f"preset_{idx}", use_container_width=True):
+                        if st.button(label, key=f"preset_{idx}", width="stretch"):
                             st.session_state.pending_prompt = template.format(company=target)
                             st.rerun()
 
@@ -3454,7 +3454,7 @@ if st.session_state.sb_view_mode == "chat":
     scr_cols = st.columns(3)
     for i, (label, template) in enumerate(SCREENER_PRESETS):
         with scr_cols[i]:
-            if st.button(label, key=f"screener_{i}", use_container_width=True):
+            if st.button(label, key=f"screener_{i}", width="stretch"):
                 st.session_state.pending_prompt = template
                 st.rerun()
 
@@ -3491,9 +3491,9 @@ if st.session_state.sb_view_mode == "chat":
                         "Allocation": f"{s.get('allocation_pct', 0)}%",
                         "Monthly": f"₹{portfolio['sip_amount'] * s.get('allocation_pct', 0) / 100:,.0f}",
                     })
-                st.dataframe(pd.DataFrame(preview_data), hide_index=True, use_container_width=True)
+                st.dataframe(pd.DataFrame(preview_data), hide_index=True, width="stretch")
                 st.caption(f"Total SIP: ₹{portfolio['sip_amount']:,}/month · {portfolio.get('investor_type', '')} · {portfolio.get('time_horizon', '')} horizon")
-                if st.button("💾 Save Portfolio", use_container_width=True):
+                if st.button("💾 Save Portfolio", width="stretch"):
                     try:
                         sb = get_supabase()
                         review_days = portfolio.get("review_days", 90)
@@ -3544,7 +3544,7 @@ if st.session_state.sb_view_mode == "chat":
                                 "Shares": s["shares"], "Invested": f"₹{s['actual_amount']:,.0f}",
                                 "Target": f"₹{portfolio['sip_amount'] * s['allocation_pct'] / 100:,.0f}",
                             })
-                        st.dataframe(pd.DataFrame(breakdown_data), hide_index=True, use_container_width=True)
+                        st.dataframe(pd.DataFrame(breakdown_data), hide_index=True, width="stretch")
                         st.session_state.pending_portfolio = None
                     except Exception as e:
                         st.error(f"Save failed: {e}")
@@ -3585,7 +3585,7 @@ if st.session_state.sb_view_mode == "chat":
                         st.rerun()
 
         if st.session_state.get("pending_retry"):
-            if st.button("🔄 Retry last query", use_container_width=True):
+            if st.button("🔄 Retry last query", width="stretch"):
                 st.session_state.pending_prompt = st.session_state.pop("pending_retry")
                 st.rerun()
 
@@ -3635,7 +3635,7 @@ elif st.session_state.sb_view_mode == "import":
             with col_px:
                 price_paid = st.number_input("Avg Buy Price (₹)", min_value=0.01, value=_default_price, format="%.2f")
             
-            if st.button("➕ Add to List", use_container_width=True):
+            if st.button("➕ Add to List", width="stretch"):
                 ticker_resolved = _ticker_preview
                 company_name = selected_stock.split(" (")[0]
                 
@@ -3652,14 +3652,14 @@ elif st.session_state.sb_view_mode == "import":
         if st.session_state.import_holding_pool:
             st.markdown("#### Staging Review Table")
             staging_df = pd.DataFrame(st.session_state.import_holding_pool)
-            st.dataframe(staging_df[["name", "ticker", "shares", "price"]], hide_index=True, use_container_width=True)
+            st.dataframe(staging_df[["name", "ticker", "shares", "price"]], hide_index=True, width="stretch")
             
             if st.button("🗑️ Clear List"):
                 st.session_state.import_holding_pool = []
                 st.rerun()
                 
             # 4. Save and Trigger Instant Review
-            if st.button("💾 Save & Run Instant Analysis", use_container_width=True):
+            if st.button("💾 Save & Run Instant Analysis", width="stretch"):
                 if not p_name:
                     st.error("Please provide a name for this portfolio.")
                 else:
@@ -3753,14 +3753,12 @@ elif st.session_state.sb_view_mode == "portfolios":
                             st.error(f"🛡️ **{alert['headline']}**")
                             with st.expander("Defend Position"):
                                 ticker = alert.get("ticker", "")
-                                h_match = next((h for h in (holdings_resp.data if 'holdings_resp' not in dir() else []) if h.get("ticker") == ticker and h.get("portfolio_id") == port["id"]), None)
-                                # Fetch holding for this portfolio
+                                # Fetch holding for this portfolio directly from Supabase
                                 try:
                                     h_resp = sb.table("holdings").select("*").eq("portfolio_id", port["id"]).eq("ticker", ticker).execute()
                                     h_match = h_resp.data[0] if h_resp.data else None
                                 except Exception:
                                     h_match = None
-
                                 if h_match:
                                     max_shares = h_match.get("shares", 0)
                                     sell_qty = st.number_input(
@@ -3770,7 +3768,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                     )
                                     c1, c2 = st.columns(2)
                                     with c1:
-                                        if st.button("🛡️ Confirm Sell", key=f"defend_confirm_{a_id}", use_container_width=True):
+                                        if st.button("🛡️ Confirm Sell", key=f"defend_confirm_{a_id}", width="stretch"):
                                             if sell_qty > 0:
                                                 new_shares = max_shares - sell_qty
                                                 if new_shares <= 0:
@@ -3785,7 +3783,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                                 st.success(f"Sold {sell_qty} shares of {ticker}.")
                                                 st.rerun()
                                     with c2:
-                                        if st.button("Dismiss", key=f"defend_dismiss_{a_id}", use_container_width=True):
+                                        if st.button("Dismiss", key=f"defend_dismiss_{a_id}", width="stretch"):
                                             sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
                                             st.rerun()
                                 else:
@@ -3816,7 +3814,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 )
                                 c1, c2 = st.columns(2)
                                 with c1:
-                                    if st.button("⚡ Deploy Capital", key=f"deploy_confirm_{a_id}", use_container_width=True):
+                                    if st.button("⚡ Deploy Capital", key=f"deploy_confirm_{a_id}", width="stretch"):
                                         if buy_qty > 0 and buy_price > 0:
                                             try:
                                                 sb.table("holdings").insert({
@@ -3838,7 +3836,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                         else:
                                             st.warning("Enter shares and price.")
                                 with c2:
-                                    if st.button("Dismiss", key=f"deploy_dismiss_{a_id}", use_container_width=True):
+                                    if st.button("Dismiss", key=f"deploy_dismiss_{a_id}", width="stretch"):
                                         sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
                                         st.rerun()
 
@@ -3864,7 +3862,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                             label_visibility="collapsed"
                         )
                     with col2:
-                        if st.button("💾 Save", key=f"save_sip_{port['id']}", use_container_width=True):
+                        if st.button("💾 Save", key=f"save_sip_{port['id']}", width="stretch"):
                             try:
                                 sb.table("portfolios").update({"sip_amount": new_sip}).eq("id", port["id"]).execute()
                                 st.session_state[f"edit_sip_{port['id']}"] = False
@@ -3873,7 +3871,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                             except Exception as e:
                                 st.error(f"Failed: {e}")
                     with col3:
-                        if st.button("❌", key=f"cancel_sip_{port['id']}", use_container_width=True):
+                        if st.button("❌", key=f"cancel_sip_{port['id']}", width="stretch"):
                             st.session_state[f"edit_sip_{port['id']}"] = False
                             st.rerun()
                     
@@ -3916,7 +3914,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                         "allocation_pct": "Alloc %", "score_at_entry": "Score",
                     }
                     available = {k: v for k, v in display_cols.items() if k in hold_df.columns}
-                    st.dataframe(hold_df[list(available.keys())].rename(columns=available), hide_index=True, use_container_width=True)
+                    st.dataframe(hold_df[list(available.keys())].rename(columns=available), hide_index=True, width="stretch")
                 else:
                     st.caption("No holdings found.")
 
@@ -3943,7 +3941,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                             chart_data["Nifty 50"] = ((hist_df["nifty_value"] / nifty_base) - 1) * 100 if nifty_base > 0 else 0
 
                         st.markdown("**Growth vs Market (%)**")
-                        st.line_chart(chart_data, use_container_width=True, color=["#1D4ED8", "#9CA3AF"][:len(chart_data.columns)])
+                        st.line_chart(chart_data, width="stretch", color=["#1D4ED8", "#9CA3AF"][:len(chart_data.columns)])
 
                         # Summary
                         first_val = hist_df["total_value"].iloc[0]
@@ -3975,13 +3973,13 @@ elif st.session_state.sb_view_mode == "portfolios":
                         file_name=f"DeepMoat_{re.sub(r'[^a-zA-Z0-9]', '_', port.get('name', 'portfolio'))}_{datetime.date.today().isoformat()}.pdf",
                         mime="application/pdf",
                         key=f"pdf_download_{port['id']}",
-                        use_container_width=True,
+                        width="stretch",
                     )
                     if st.button("✕ Clear", key=f"pdf_clear_{port['id']}"):
                         del st.session_state[report_key]
                         st.rerun()
                 else:
-                    if st.button("📄 Generate Report", key=f"pdf_gen_{port['id']}", use_container_width=True):
+                    if st.button("📄 Generate Report", key=f"pdf_gen_{port['id']}", width="stretch"):
                         with st.spinner("Building report — analyzing holdings against book principles..."):
                             try:
                                 hold_for_pdf = sb.table("holdings").select("*").eq("portfolio_id", port["id"]).execute().data or []
@@ -4031,7 +4029,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                     {"Sector": s, "Stocks": c, "Weight": f"{c/sum(sector_dist.values())*100:.0f}%"}
                                     for s, c in sorted(sector_dist.items(), key=lambda x: -x[1])
                                 ])
-                                st.dataframe(sector_df, hide_index=True, use_container_width=True)
+                                st.dataframe(sector_df, hide_index=True, width="stretch")
                             for w in hc.get("warnings", []):
                                 st.warning(w)
                             if hc.get("narrative"):
@@ -4053,7 +4051,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                     if st.button(
                                         f"📉 Reduce {act_ticker} to {target_pct}% — {act_reason}",
                                         key=f"hc_reduce_{port['id']}_{ai}",
-                                        use_container_width=True
+                                        width="stretch"
                                     ):
                                         try:
                                             sb.table("holdings").update(
@@ -4070,7 +4068,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                     if st.button(
                                         f"{label} — {act_reason}",
                                         key=f"hc_sell_{port['id']}_{ai}",
-                                        use_container_width=True
+                                        width="stretch"
                                     ):
                                         try:
                                             if sell_shares == 0:
@@ -4109,7 +4107,7 @@ elif st.session_state.sb_view_mode == "portfolios":
 
                                     if st.button(
                                         f"Add {act_name} ({act_ticker}) — {act_reason}",
-                                        key=btn_key, use_container_width=True
+                                        key=btn_key, width="stretch"
                                     ):
                                         st.session_state[add_state_key] = True
 
@@ -4146,7 +4144,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                                 )
                                             bc1, bc2 = st.columns(2)
                                             with bc1:
-                                                if st.button("Confirm Add", key=f"hc_add_confirm_{port['id']}_{ai}", use_container_width=True):
+                                                if st.button("Confirm Add", key=f"hc_add_confirm_{port['id']}_{ai}", width="stretch"):
                                                     try:
                                                         invested = round(add_qty * add_price, 2)
                                                         sb.table("holdings").insert({
@@ -4188,7 +4186,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                                     except Exception as e:
                                                         st.error(f"Failed: {e}")
                                             with bc2:
-                                                if st.button("Cancel", key=f"hc_add_cancel_{port['id']}_{ai}", use_container_width=True):
+                                                if st.button("Cancel", key=f"hc_add_cancel_{port['id']}_{ai}", width="stretch"):
                                                     del st.session_state[add_state_key]
                                                     st.rerun()
 
@@ -4197,7 +4195,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                     inv_key = f"hc_inv_result_{port['id']}_{ai}"
                                     if st.button(
                                         f"Investigate {act_ticker} — {act_reason}",
-                                        key=btn_key, use_container_width=True
+                                        key=btn_key, width="stretch"
                                     ):
                                         with st.spinner(f"Investigating {act_ticker}..."):
                                             try:
@@ -4239,7 +4237,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                             del st.session_state[hc_key]
                             st.rerun()
                     else:
-                        if st.button("🩺 Health Check", key=f"hc_btn_{port['id']}", use_container_width=True):
+                        if st.button("🩺 Health Check", key=f"hc_btn_{port['id']}", width="stretch"):
                             with st.spinner("Diagnosing portfolio against book principles..."):
                                 try:
                                     hc_holdings = sb.table("holdings").select("*").eq("portfolio_id", port["id"]).execute().data or []
@@ -4274,7 +4272,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                             else:
                                 st.error(f"📅 Review overdue by {abs(days_until)} days!")
 
-                        _review_clicked = st.button("🔄 Review Portfolio", key=f"review_{port['id']}", use_container_width=True)
+                        _review_clicked = st.button("🔄 Review Portfolio", key=f"review_{port['id']}", width="stretch")
                         if _review_clicked or _auto_run:
                             with st.spinner("Analyzing holdings with market context and book philosophy..."):
                                 enriched = build_review_context(holdings, port)
@@ -4450,7 +4448,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                         st.caption(f"📊 Market context: {nifty_note}")
 
                     display_df = pd.DataFrame(review_rows).drop(columns=[c for c in review_rows[0] if c.startswith("_")])
-                    st.dataframe(display_df, hide_index=True, use_container_width=True)
+                    st.dataframe(display_df, hide_index=True, width="stretch")
 
 
                     # Per-stock reasoning with quality data
@@ -4505,7 +4503,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                     {"Sector": s, "Stocks": c, "Weight": f"{c/sum(sector_dist.values())*100:.0f}%"}
                                     for s, c in sorted(sector_dist.items(), key=lambda x: -x[1])
                                 ])
-                                st.dataframe(sector_df, hide_index=True, use_container_width=True)
+                                st.dataframe(sector_df, hide_index=True, width="stretch")
 
                             for w in hc.get("warnings", []):
                                 st.warning(w)
@@ -4529,7 +4527,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                     if st.button(
                                         f"📉 Reduce {act_ticker} to {target_pct}% — {act_reason}",
                                         key=f"hc_reduce_{port['id']}_{ai}",
-                                        use_container_width=True
+                                        width="stretch"
                                     ):
                                         try:
                                             sb.table("holdings").update(
@@ -4546,7 +4544,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                     if st.button(
                                         f"{label} — {act_reason}",
                                         key=f"hc_sell_{port['id']}_{ai}",
-                                        use_container_width=True
+                                        width="stretch"
                                     ):
                                         try:
                                             if sell_shares == 0:
@@ -4579,7 +4577,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                     inv_key = f"hc_inv_result_{port['id']}_{ai}"
                                     if st.button(
                                         f"Investigate {act_ticker} — {act_reason}",
-                                        key=btn_key, use_container_width=True
+                                        key=btn_key, width="stretch"
                                     ):
                                         with st.spinner(f"Investigating {act_ticker}..."):
                                             try:
@@ -4713,7 +4711,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 "name": "Stock", "ticker": "Ticker", "sector": "Sector",
                                 "price": "Price", "score": "Score", "pe": "P/E", "roe_pct": "ROE %"
                             })
-                            st.dataframe(cand_display, hide_index=True, use_container_width=True)
+                            st.dataframe(cand_display, hide_index=True, width="stretch")
                             st.caption("Shares pre-filled from total budget. Set to 0 to skip a stock.")
                             per_slot = total_repl_budget / len(candidates) if candidates else 0
                             for c in candidates:
@@ -4739,7 +4737,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 st.warning(f"Over-allocated by ₹{abs(remaining):,.0f}. Budget: ₹{total_repl_budget:,.0f}, Allocated: ₹{spent:,.0f}")
 
                     # ── Single update button ──
-                    if st.button("✅ Portfolio Updated", key=f"apply_{port['id']}", use_container_width=True):
+                    if st.button("✅ Portfolio Updated", key=f"apply_{port['id']}", width="stretch"):
                         for i, r in enumerate(review_rows):
                             h_id = r["_holding_id"]
                             if "SELL" in r["Action"]:
