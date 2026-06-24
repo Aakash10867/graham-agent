@@ -647,7 +647,6 @@ ticker,name,exchange
 519612.BO,LAKE SHORE REALTY LIMITED,BSE
 520075.BO,Samkrg Pistons and Rings Ltd.,BSE
 520081.BO,East Coast Steel Ltd,BSE
-520121.BO,Arcee Indusrtries ltd.,BSE
 520123.BO,ABC India Ltd.,BSE
 520127.BO,Balurghat Technologies Ltd.,BSE
 520131.BO,Coastal Roadways Ltd.,BSE
@@ -963,7 +962,6 @@ ticker,name,exchange
 527005.BO,Shree Pacetronix Ltd,BSE
 530025.BO,Samyak International Limited,BSE
 530027.BO,Aadi Industries Ltd,BSE
-530035.BO,Santosh Fine-Fab Ltd.,BSE
 530037.BO,SPARKLE GOLD ROCK LIMITED,BSE
 530043.BO,Acknit Industries Ltd,BSE
 530045.BO,Titan Securities Ltd.,BSE
@@ -2620,6 +2618,10 @@ ticker,name,exchange
 544792.BO,Mirae Asset Mutual Fund,BSE
 544793.BO,Susan Electricals India Limited,BSE
 544794.BO,HORIZON RECLAIM (INDIA) LIMITED,BSE
+544795.BO,ICICI Prudential Mutual Fund,BSE
+544796.BO,LIOTECH INDUSTRIES LIMITED,BSE
+544797.BO,LEAPFROG ENGINEERING SERVICES LIMITED,BSE
+544798.BO,DIKSHA POLYMERS LIMITED,BSE
 555555.BO,ICICI Prudential Mutual Fund,BSE
 590103.BO,Reliance Mutual Fund-Permitted,BSE
 590104.BO,Reliance Mutual Fund-Permitted,BSE
