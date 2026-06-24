@@ -87,7 +87,7 @@ ALERT_BOOK_QUERIES = {
 
 
 def run_daily_tracker():
-    print("Initiating DeepMoat Daily Portfolio Audit...")
+    print("Initiating Kordent Daily Portfolio Audit...")
 
     url = os.environ.get("SUPABASE_URL")
     key = os.environ.get("SUPABASE_KEY")
@@ -432,7 +432,7 @@ def run_daily_tracker():
     else:
         _send_llm_emails(all_alerts, profiles, smtp_user, smtp_pass, gemini_key)
 
-    print("DeepMoat Daily Audit Complete.")
+    print("Kordent Daily Audit Complete.")
 
 
 def _build_llm_email(alerts, gemini_key):
@@ -459,7 +459,7 @@ Book context:
 ---
 """
 
-    prompt = f"""You are DeepMoat's Chief Investment Analyst writing a daily email alert.
+    prompt = f"""You are Kordent's Chief Investment Analyst writing a daily email alert.
 
 Today's date: {date.today().strftime('%B %d, %Y')}
 
@@ -474,7 +474,7 @@ Write a professional, concise investment note email. Rules:
 5. End with a clear action summary: what the investor should consider doing
 6. Keep the entire email under 500 words
 7. Use plain text formatting, no HTML or markdown
-8. Sign off as "DeepMoat Daily Intelligence"
+8. Sign off as "Kordent Daily Intelligence"
 
 Do NOT be generic. Use the actual book passages provided to make specific, grounded recommendations."""
 
@@ -524,7 +524,7 @@ def _send_llm_emails(all_alerts, profiles, smtp_user, smtp_pass, gemini_key):
             parts.append(f"{opp_count} opportunity")
         if any(a["alert_type"] == "review_due" for a in alerts):
             parts.append("review due")
-        subject = f"DeepMoat Daily: {', '.join(parts)}" if parts else "DeepMoat Daily Intelligence"
+        subject = f"Kordent Daily: {', '.join(parts)}" if parts else "Kordent Daily Intelligence"
 
         try:
             msg = MIMEMultipart()
@@ -564,7 +564,7 @@ def _send_single_plain_email(alerts, recipient, smtp_user, smtp_pass):
     opp_alerts = [a for a in alerts if a["alert_type"] == "opportunity"]
     review_alerts = [a for a in alerts if a["alert_type"] == "review_due"]
 
-    body_parts = [f"DeepMoat Daily Alert — {date.today().strftime('%B %d, %Y')}\n{'=' * 40}\n"]
+    body_parts = [f"Kordent Daily Alert — {date.today().strftime('%B %d, %Y')}\n{'=' * 40}\n"]
 
     if danger_alerts:
         body_parts.append("DANGER ALERTS\n")
@@ -585,7 +585,7 @@ def _send_single_plain_email(alerts, recipient, smtp_user, smtp_pass):
             body_parts.append(f"  >> {a['headline']}\n")
         body_parts.append("")
 
-    body_parts.append("--\nLog in to DeepMoat to take action.\nNot financial advice.")
+    body_parts.append("--\nLog in to Kordent to take action.\nNot financial advice.")
 
     parts = []
     if danger_alerts:
@@ -594,7 +594,7 @@ def _send_single_plain_email(alerts, recipient, smtp_user, smtp_pass):
         parts.append(f"{len(opp_alerts)} opportunity")
     if review_alerts:
         parts.append("review due")
-    subject = f"DeepMoat: {', '.join(parts)}" if parts else "DeepMoat Daily"
+    subject = f"Kordent: {', '.join(parts)}" if parts else "Kordent Daily"
 
     try:
         msg = MIMEMultipart()
