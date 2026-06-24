@@ -1164,7 +1164,7 @@ def _resolve_ticker(query):
 # ══════════════════════════════════════════════
 st.set_page_config(
     page_title="Kordent",
-    page_icon="logo.svg",
+    page_icon="logo.png",
     layout="centered",
 )
 
@@ -1773,7 +1773,7 @@ with st.sidebar:
 h_col1, h_col2 = st.columns([1, 11])
 
 with h_col1:
-    st.image("logo.svg", width=54) # Precise, discrete sizing
+    st.image("logo.png", width=54) # Precise, discrete sizing
 
 with h_col2:
     st.markdown("<h1 style='margin-top: -15px; padding-bottom: 0px;'>Kordent</h1>", unsafe_allow_html=True)
@@ -3440,7 +3440,7 @@ if "chat_history" not in st.session_state:
 
 
 USER_AVATAR = "👤"
-AGENT_AVATAR = "logo.svg"
+AGENT_AVATAR = "logo.png"
 
 if st.session_state.sb_view_mode == "chat":
     chat_area = st.container()
