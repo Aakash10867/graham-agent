@@ -3157,27 +3157,32 @@ def get_macro_context(ticker: str) -> dict:
 
 
 def _sanitize_for_json(obj):
-    """Replace NaN, Inf, and pd.NA with valid JSON equivalents (None/null)."""
+    """Deep-cleans all data structures to ensure strict JSON spec compliance."""
+    import math
+    
+    # Handle Dictionaries
     if isinstance(obj, dict):
         return {k: _sanitize_for_json(v) for k, v in obj.items()}
-    if isinstance(obj, list):
+    
+    # Handle Iterables
+    if isinstance(obj, (list, tuple, set)):
         return [_sanitize_for_json(v) for v in obj]
-    if isinstance(obj, tuple):
-        return tuple(_sanitize_for_json(v) for v in obj)
-    # 1. Convert NumPy scalars to native Python types first
+        
+    # Handle NumPy scalars/extractors
     if hasattr(obj, 'item'):
         try:
             obj = obj.item()
         except Exception:
-            pass  
-    # 2. Leverage pandas to capture all variants of NaN (Python float, NumPy, Pandas NA)
+            pass
+            
+    # Comprehensive check for any variant of NaN / Null / Inf
     try:
         import pandas as pd
-        if pd.isna(obj):
+        if pd.isna(obj) or obj is None:
             return None
     except Exception:
         pass
-    # 3. Fallback catch for infinity or remaining float NaN cases
+
     try:
         if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
             return None
