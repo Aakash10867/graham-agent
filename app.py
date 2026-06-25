@@ -1691,55 +1691,31 @@ div[data-baseweb] [aria-invalid] { box-shadow: none !important; }
 """, unsafe_allow_html=True)
 
 # ── Google OAuth callback handler ──
-import streamlit.components.v1 as components
-if not st.session_state.sb_user_email:
-    # JavaScript captures tokens from URL fragment and converts to query params
-    components.html("""
-    <script>
-    (function() {
-        const hash = window.parent.location.hash;
-        if (hash && hash.includes('access_token')) {
-            const params = new URLSearchParams(hash.substring(1));
-            const at = params.get('access_token');
-            const rt = params.get('refresh_token');
-            if (at) {
-                const url = new URL(window.parent.location.href.split('#')[0]);
-                url.searchParams.set('access_token', at);
-                url.searchParams.set('refresh_token', rt);
-                window.parent.location.replace(url.toString());
-            }
-        }
-    })();
-    </script>
-    """, height=0)
-
-    # If tokens arrived as query params, establish session
-    _oa_access = st.query_params.get("access_token")
-    _oa_refresh = st.query_params.get("refresh_token")
-    if _oa_access:
+_oa_access = st.query_params.get("access_token")
+_oa_refresh = st.query_params.get("refresh_token")
+if _oa_access and not st.session_state.sb_user_email:
+    try:
+        sb = get_supabase()
+        resp = sb.auth.set_session(_oa_access, _oa_refresh)
+        st.session_state.sb_access_token = _oa_access
+        st.session_state.sb_refresh_token = _oa_refresh
+        st.session_state.sb_user_email = resp.user.email
+        st.session_state.sb_user_id = str(resp.user.id)
+        meta = resp.user.user_metadata or {}
+        st.session_state["_profile_name"] = meta.get("full_name") or meta.get("name") or ""
+        st.session_state["_profile_name_checked"] = True
         try:
-            sb = get_supabase()
-            resp = sb.auth.set_session(_oa_access, _oa_refresh)
-            st.session_state.sb_access_token = _oa_access
-            st.session_state.sb_refresh_token = _oa_refresh
-            st.session_state.sb_user_email = resp.user.email
-            st.session_state.sb_user_id = str(resp.user.id)
-            meta = resp.user.user_metadata or {}
-            st.session_state["_profile_name"] = meta.get("full_name") or meta.get("name") or ""
-            st.session_state["_profile_name_checked"] = True
-            # Persist name to profiles (non-blocking, may fail on RLS)
-            try:
-                sb.table("profiles").upsert({
-                    "id": st.session_state.sb_user_id,
-                    "full_name": st.session_state["_profile_name"],
-                    "email": resp.user.email
-                }, on_conflict="id").execute()
-            except Exception:
-                pass
-        except Exception as e:
-            st.error(f"Google login failed: {e}")
-        st.query_params.clear()
-        st.rerun()
+            sb.table("profiles").upsert({
+                "id": st.session_state.sb_user_id,
+                "full_name": st.session_state["_profile_name"],
+                "email": resp.user.email
+            }, on_conflict="id").execute()
+        except Exception:
+            pass
+    except Exception as e:
+        st.error(f"Google login failed: {e}")
+    st.query_params.clear()
+    st.rerun()
 
 
 
@@ -1749,7 +1725,7 @@ if not st.session_state.sb_user_email:
 with st.sidebar:
     # ── Auth ──
     if st.session_state.sb_user_email is None:
-        _goog_url = f"{st.secrets['SUPABASE_URL']}/auth/v1/authorize?provider=google&redirect_to=https://kordent.streamlit.app"
+        _goog_url = f"{st.secrets['SUPABASE_URL']}/auth/v1/authorize?provider=google&redirect_to=https://aakash10867.github.io/graham-agent/auth-callback.html"
         st.link_button("🔵 Sign in with Google", _goog_url, use_container_width=True)
         st.divider()
         auth_mode = st.radio(
