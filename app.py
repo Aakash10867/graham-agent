@@ -3157,20 +3157,33 @@ def get_macro_context(ticker: str) -> dict:
 
 
 def _sanitize_for_json(obj):
-    """Replace NaN/Inf with None so Gemini gets valid JSON."""
+    """Replace NaN, Inf, and pd.NA with valid JSON equivalents (None/null)."""
     if isinstance(obj, dict):
         return {k: _sanitize_for_json(v) for k, v in obj.items()}
     if isinstance(obj, list):
         return [_sanitize_for_json(v) for v in obj]
-    # Catch Python float, numpy.float64, numpy.float32, and any numeric type
-    try:
-        if math.isnan(obj) or math.isinf(obj):
-            return None
-    except (TypeError, ValueError, OverflowError):
-        pass
-    # Convert stray numpy scalars to Python native so json.dumps never chokes
+    if isinstance(obj, tuple):
+        return tuple(_sanitize_for_json(v) for v in obj)
+    # 1. Convert NumPy scalars to native Python types first
     if hasattr(obj, 'item'):
-        return obj.item()
+        try:
+            obj = obj.item()
+        except Exception:
+            pass  
+    # 2. Leverage pandas to capture all variants of NaN (Python float, NumPy, Pandas NA)
+    try:
+        import pandas as pd
+        if pd.isna(obj):
+            return None
+    except Exception:
+        pass
+    # 3. Fallback catch for infinity or remaining float NaN cases
+    try:
+        if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+            return None
+    except Exception:
+        pass
+        
     return obj
 
 # ──────────────────────────────────────────────
