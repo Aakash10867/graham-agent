@@ -384,15 +384,7 @@ def run_daily_tracker():
             except Exception as e:
                 print(f"Score history batch failed: {e}")
 
-        # Clean up rows older than 90 days
-        try:
-            from datetime import timedelta
-            cutoff_90 = (date.today() - timedelta(days=90))
-            supabase.table("score_history").delete().lt("date", cutoff_90.isoformat()).execute()
-        except Exception as e:
-            print(f"Score history cleanup failed: {e}")
-
-        print(f"Logged {written_scores} score history rows. Cleaned >90 days.")
+        print(f"Logged {written_scores} score history rows.")
  
     # ══════════════════════════════════════
     # 4. WRITE ALERTS TO SUPABASE
