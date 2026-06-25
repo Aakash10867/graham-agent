@@ -2,7 +2,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100%" height="100%">
   <defs>
     <filter id="glass-shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.35"/>
+      <feDropShadow dx="0" dy="5" stdDeviation="4" flood-color="#000000" flood-opacity="0.45"/>
     </filter>
     
     <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
@@ -14,9 +14,15 @@
     </filter>
 
     <linearGradient id="glass-glare" x1="10%" y1="0%" x2="90%" y2="100%">
-      <stop offset="0%" stop-color="rgba(255,255,255,0.8)" />
-      <stop offset="40%" stop-color="rgba(255,255,255,0.15)" />
+      <stop offset="0%" stop-color="rgba(255,255,255,0.95)" />
+      <stop offset="35%" stop-color="rgba(255,255,255,0.2)" />
       <stop offset="100%" stop-color="rgba(255,255,255,0)" />
+    </linearGradient>
+
+    <linearGradient id="dark-refraction" x1="80%" y1="100%" x2="20%" y2="0%">
+      <stop offset="0%" stop-color="rgba(0, 10, 30, 0.85)" />
+      <stop offset="50%" stop-color="rgba(0, 10, 30, 0.15)" />
+      <stop offset="100%" stop-color="rgba(0, 10, 30, 0)" />
     </linearGradient>
 
     <path id="sparkle" d="M 0,-4 Q 0,0 4,0 Q 0,0 0,4 Q 0,0 -4,0 Q 0,0 0,-4 Z" fill="#FFFFFF" filter="url(#glow)" />
@@ -33,13 +39,19 @@
   <circle cx="50" cy="50" r="28" fill="url(#glass-glare)" />
   <circle cx="50" cy="50" r="28" fill="none" stroke="rgba(255, 255, 255, 0.7)" stroke-width="1.5" />
 
-  <path d="M50 25 L54 46 L75 50 L54 54 L50 75 L46 54 L25 50 L46 46 Z" fill="rgba(255, 255, 255, 0.3)" filter="url(#glass-shadow)" />
-  <path d="M50 25 L54 46 L75 50 L54 54 L50 75 L46 54 L25 50 L46 46 Z" fill="url(#glass-glare)">
-    <animate attributeName="opacity" values="0.1; 1; 0.1" dur="1.8s" repeatCount="indefinite" />
-  </path>
-  <path d="M50 25 L54 46 L75 50 L54 54 L50 75 L46 54 L25 50 L46 46 Z" fill="none" stroke="rgba(255, 255, 255, 1)" stroke-width="1">
-    <animate attributeName="opacity" values="0.5; 1; 0.5" dur="1.8s" repeatCount="indefinite" />
-  </path>
+  <g style="transform-origin: 50px 50px;">
+    <animateTransform attributeName="transform" type="scale" values="1; 1.15; 1; 1.08; 1" keyTimes="0; 0.1; 0.3; 0.45; 1" dur="2s" repeatCount="indefinite" />
+    
+    <path d="M50 25 L54 46 L75 50 L54 54 L50 75 L46 54 L25 50 L46 46 Z" fill="url(#dark-refraction)" filter="url(#glass-shadow)" />
+    
+    <path d="M50 25 L54 46 L75 50 L54 54 L50 75 L46 54 L25 50 L46 46 Z" fill="rgba(255, 255, 255, 0.35)" />
+    
+    <path d="M50 25 L54 46 L75 50 L54 54 L50 75 L46 54 L25 50 L46 46 Z" fill="url(#glass-glare)">
+      <animate attributeName="opacity" values="0.2; 1; 0.2; 0.9; 0.2" keyTimes="0; 0.1; 0.3; 0.45; 1" dur="2s" repeatCount="indefinite" />
+    </path>
+    
+    <path d="M50 25 L54 46 L75 50 L54 54 L50 75 L46 54 L25 50 L46 46 Z" fill="none" stroke="rgba(255, 255, 255, 1)" stroke-width="1.5" />
+  </g>
   
   <use href="#sparkle" transform="translate(32, 28) scale(0.9)">
     <animate attributeName="opacity" values="0; 1; 0" dur="1.7s" repeatCount="indefinite" />
