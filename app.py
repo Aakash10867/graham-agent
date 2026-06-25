@@ -3663,7 +3663,7 @@ if st.session_state.sb_view_mode == "chat":
     if not prompt and "pending_prompt" in st.session_state:
         prompt = st.session_state.pop("pending_prompt")
         if prompt and st.session_state.get("pending_disambiguation"):
-        st.session_state.pending_disambiguation = None
+            st.session_state.pending_disambiguation = None
 
     with chat_area:
         if not st.session_state.messages:
