@@ -88,6 +88,48 @@ def allocate_shares(stocks, sip_amount):
 
     return result, round(remaining, 2)
 
+def enrich_holdings_live(holdings, cache_key=None):
+    """Compute live allocation_pct from current market prices.
+
+    Overwrites the stored allocation_pct with:
+        (shares × current_price) / total_portfolio_value × 100
+    Adds 'current_price' and 'current_value' to each holding dict.
+    Caches prices in session state for 5 min to avoid re-fetching on Streamlit reruns.
+    """
+    import time as _time
+
+    price_cache = {}
+    if cache_key:
+        cached = st.session_state.get(f"_price_cache_{cache_key}")
+        if cached and _time.time() - cached.get("_ts", 0) < 300:
+            price_cache = dict(cached)
+            price_cache.pop("_ts", None)
+
+    for h in holdings:
+        t = h.get("ticker", "")
+        if t and t not in price_cache:
+            try:
+                price_cache[t] = yf.Ticker(t).fast_info.last_price or h.get("price_at_entry", 0)
+            except Exception:
+                price_cache[t] = h.get("price_at_entry", 0)
+
+    if cache_key:
+        st.session_state[f"_price_cache_{cache_key}"] = {**price_cache, "_ts": _time.time()}
+
+    enriched = []
+    for h in holdings:
+        h = dict(h)  # shallow copy — don't mutate originals
+        t = h.get("ticker", "")
+        h["current_price"] = round(price_cache.get(t, h.get("price_at_entry", 0)), 2)
+        h["current_value"] = round(h.get("shares", 0) * h["current_price"], 2)
+        enriched.append(h)
+
+    total_val = sum(h["current_value"] for h in enriched)
+    for h in enriched:
+        h["allocation_pct"] = round(h["current_value"] / total_val * 100, 1) if total_val > 0 else 0
+
+    return enriched
+
 def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None, chart_buf=None, narrative=None):
     """Generate a professional PDF report for a portfolio."""
     from reportlab.lib.pagesizes import A4
@@ -3958,10 +4000,12 @@ elif st.session_state.sb_view_mode == "portfolios":
                     holdings = []
 
                 if holdings:
-                    hold_df = pd.DataFrame(holdings)
+                    display_holdings = enrich_holdings_live(holdings, cache_key=str(port["id"]))
+                    hold_df = pd.DataFrame(display_holdings)
                     display_cols = {
                         "name": "Stock", "ticker": "Ticker", "sector": "Sector", "shares": "Shares",
-                        "price_at_entry": "Entry Price", "sip_amount_inr": "Invested",
+                        "price_at_entry": "Entry ₹", "current_price": "CMP ₹",
+                        "sip_amount_inr": "Invested", "current_value": "Value",
                         "allocation_pct": "Alloc %", "score_at_entry": "Score",
                     }
                     available = {k: v for k, v in display_cols.items() if k in hold_df.columns}
@@ -4034,6 +4078,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                         with st.spinner("Building report — analyzing holdings against book principles..."):
                             try:
                                 hold_for_pdf = sb.table("holdings").select("*").eq("portfolio_id", port["id"]).execute().data or []
+                                hold_for_pdf = enrich_holdings_live(hold_for_pdf, cache_key=f"pdf_{port['id']}")
                                 hist_for_pdf = sb.table("portfolio_history").select("*").eq("portfolio_id", port["id"]).order("date").execute().data or []
                                 alerts_for_pdf = sb.table("portfolio_alerts").select("*").eq("portfolio_id", port["id"]).eq("is_read", False).execute().data or []
 
@@ -4292,6 +4337,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                             with st.spinner("Diagnosing portfolio against book principles..."):
                                 try:
                                     hc_holdings = sb.table("holdings").select("*").eq("portfolio_id", port["id"]).execute().data or []
+                                    hc_holdings = enrich_holdings_live(hc_holdings, cache_key=str(port["id"]))
                                     hc_result = generate_health_check(port, hc_holdings, universe_df, collection)
                                     if hc_result:
                                         st.session_state[hc_key] = hc_result
@@ -4460,7 +4506,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                     })
 
                                 # Auto-run health check during review
-                                hc_result = generate_health_check(port, holdings, universe_df, collection)
+                                hc_result = generate_health_check(port, enrich_holdings_live(holdings, cache_key=str(port["id"])), universe_df, collection)
 
                                 st.session_state[f"review_data_{port['id']}"] = {
                                     "rows": review_rows, "total_entry": total_entry,
