@@ -29,6 +29,7 @@ import re
 import requests
 import pandas as pd
 import numpy as np
+import math
 
 # ──────────────────────────────────────────────
 # FREE MODEL FALLBACK LIST
@@ -2641,6 +2642,25 @@ def calculate_graham_value(ticker: str) -> dict:
     try:
         t = yf.Ticker(resolved)
         info = t.info
+        # Graham requires 7+ years of earnings track record
+        first_trade = info.get("firstTradeDateEpochUtc")
+        if first_trade:
+            first_date = datetime.datetime.fromtimestamp(first_trade, tz=datetime.timezone.utc)
+            years_listed = (datetime.datetime.now(tz=datetime.timezone.utc) - first_date).days / 365.25
+            if years_listed < 7:
+                return {
+                    "ticker": resolved,
+                    "graham_applicable": False,
+                    "years_listed": round(years_listed, 1),
+                    "error": (
+                        f"Graham analysis not applicable: {resolved} has only "
+                        f"~{round(years_listed, 1)} years of trading history. "
+                        f"Graham required a minimum of 7 years of consistent earnings "
+                        f"data before trusting any valuation formula. Companies with "
+                        f"shorter track records lack the earnings stability evidence "
+                        f"his intrinsic value formula assumes."
+                    ),
+                }
 
         eps = info.get("trailingEps")
         if not eps or eps <= 0:
@@ -3076,7 +3096,15 @@ def get_macro_context(ticker: str) -> dict:
         return {"error": f"Error fetching macro context: {str(e)}"}
 
 
-
+def _sanitize_for_json(obj):
+    """Replace NaN/Inf with None so Gemini gets valid JSON."""
+    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return None
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_for_json(v) for v in obj]
+    return obj
 
 # ──────────────────────────────────────────────
 # TOOLS REGISTRY
@@ -3456,7 +3484,7 @@ def agent_turn(user_message):
                 function_responses = []
                 for fc in analyst_response.function_calls:
                     if fc.name in tool_functions:
-                        result = tool_functions[fc.name](**fc.args)
+                        result = _sanitize_for_json(tool_functions[fc.name](**fc.args))
                     else:
                         result = {"error": f"Unknown tool: {fc.name}"}
                     function_responses.append(
