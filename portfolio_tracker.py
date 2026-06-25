@@ -1,8 +1,5 @@
 import os
 import re
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 import yfinance as yf
 import pandas as pd
 import pymupdf
@@ -91,7 +88,6 @@ def run_daily_tracker():
 
     url = os.environ.get("SUPABASE_URL")
     key = os.environ.get("SUPABASE_KEY")
-    gemini_key = os.environ.get("GEMINI_API_KEY")
 
     if not url or not key:
         raise ValueError("Missing SUPABASE_URL or SUPABASE_KEY environment variables.")
@@ -119,9 +115,6 @@ def run_daily_tracker():
 
     holdings_resp = supabase.table("holdings").select("*").execute()
     holdings = holdings_resp.data
-
-    profiles_resp = supabase.table("profiles").select("id, email").execute()
-    profiles = {p["id"]: p.get("email", "") for p in profiles_resp.data}
 
     # ── Fetch Nifty 50 close price once ──
     nifty_close = None
@@ -408,201 +401,7 @@ def run_daily_tracker():
 
     print(f"Wrote {written} alerts.")
 
-    # ══════════════════════════════════════
-    # 5. LLM-WRITTEN EMAIL ALERTS
-    # ══════════════════════════════════════
-    smtp_user = os.environ.get("ALERT_EMAIL")
-    smtp_pass = os.environ.get("ALERT_EMAIL_PASSWORD")
-
-    if not smtp_user or not smtp_pass:
-        print("Email credentials not configured. Skipping.")
-    elif not all_alerts:
-        print("No alerts to email.")
-    elif not gemini_key:
-        print("GEMINI_API_KEY not set. Sending plain email fallback.")
-        _send_plain_emails(all_alerts, profiles, smtp_user, smtp_pass)
-    else:
-        _send_llm_emails(all_alerts, profiles, smtp_user, smtp_pass, gemini_key)
-
     print("Kordent Daily Audit Complete.")
-
-
-def _build_llm_email(alerts, gemini_key):
-    """Use Gemini to write a cohesive, book-grounded email from raw alerts."""
-    client = genai.Client(api_key=gemini_key)
-
-    # Build context block with alerts and their book passages
-    alerts_block = ""
-    for a in alerts:
-        detail = a.get("detail", {})
-        passages = detail.get("book_passages", [])
-        passage_text = ""
-        if passages:
-            passage_text = "\n".join(
-                f"  [{p['author']}]: {p['text']}" for p in passages
-            )
-
-        alerts_block += f"""
-ALERT: {a['headline']}
-Type: {a['alert_type']} | Ticker: {a.get('ticker', 'N/A')}
-Data: {', '.join(f'{k}={v}' for k, v in detail.items() if k != 'book_passages')}
-Book context:
-{passage_text}
----
-"""
-
-    prompt = f"""You are Kordent's Chief Investment Analyst writing a daily email alert.
-
-Today's date: {date.today().strftime('%B %d, %Y')}
-
-ALERTS TO COVER:
-{alerts_block}
-
-Write a professional, concise investment note email. Rules:
-1. Open with a one-line summary of the day's findings
-2. Group by priority: dangers first, then opportunities, then review reminders
-3. For each alert, explain what happened AND what the investment books say about it
-4. Reference specific authors and concepts naturally (e.g., "Graham's margin of safety principle suggests..." or "Dorsey would flag this as potential moat erosion because...")
-5. End with a clear action summary: what the investor should consider doing
-6. Keep the entire email under 500 words
-7. Use plain text formatting, no HTML or markdown
-8. Sign off as "Kordent Daily Intelligence"
-
-Do NOT be generic. Use the actual book passages provided to make specific, grounded recommendations."""
-
-    models = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"]
-    for model in models:
-        try:
-            response = client.models.generate_content(model=model, contents=prompt)
-            return response.text
-        except Exception as e:
-            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                continue
-            print(f"Gemini error: {e}")
-            return None
-    return None
-
-
-def _send_llm_emails(all_alerts, profiles, smtp_user, smtp_pass, gemini_key):
-    """Group alerts by user, generate LLM narrative, send email."""
-    user_alerts = {}
-    for alert in all_alerts:
-        uid = alert["user_id"]
-        if uid not in user_alerts:
-            user_alerts[uid] = []
-        user_alerts[uid].append(alert)
-
-    for uid, alerts in user_alerts.items():
-        recipient = profiles.get(uid)
-        if not recipient:
-            print(f"No email for user {uid}. Skipping.")
-            continue
-
-        # Generate narrative via Gemini
-        narrative = _build_llm_email(alerts, gemini_key)
-
-        if not narrative:
-            print(f"LLM failed for {recipient}. Falling back to plain.")
-            _send_single_plain_email(alerts, recipient, smtp_user, smtp_pass)
-            continue
-
-        # Subject line
-        danger_count = sum(1 for a in alerts if a["alert_type"] == "danger")
-        opp_count = sum(1 for a in alerts if a["alert_type"] == "opportunity")
-        parts = []
-        if danger_count:
-            parts.append(f"{danger_count} danger")
-        if opp_count:
-            parts.append(f"{opp_count} opportunity")
-        if any(a["alert_type"] == "review_due" for a in alerts):
-            parts.append("review due")
-        subject = f"Kordent Daily: {', '.join(parts)}" if parts else "Kordent Daily Intelligence"
-
-        try:
-            msg = MIMEMultipart()
-            msg["From"] = smtp_user
-            msg["To"] = recipient
-            msg["Subject"] = subject
-            msg.attach(MIMEText(narrative, "plain"))
-
-            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-                server.login(smtp_user, smtp_pass)
-                server.send_message(msg)
-
-            print(f"LLM email sent to {recipient}: {subject}")
-        except Exception as e:
-            print(f"Email failed for {recipient}: {e}")
-
-
-def _send_plain_emails(all_alerts, profiles, smtp_user, smtp_pass):
-    """Fallback: plain text emails without LLM."""
-    user_alerts = {}
-    for alert in all_alerts:
-        uid = alert["user_id"]
-        if uid not in user_alerts:
-            user_alerts[uid] = []
-        user_alerts[uid].append(alert)
-
-    for uid, alerts in user_alerts.items():
-        recipient = profiles.get(uid)
-        if not recipient:
-            continue
-        _send_single_plain_email(alerts, recipient, smtp_user, smtp_pass)
-
-
-def _send_single_plain_email(alerts, recipient, smtp_user, smtp_pass):
-    """Send a single plain text email for one user."""
-    danger_alerts = [a for a in alerts if a["alert_type"] == "danger"]
-    opp_alerts = [a for a in alerts if a["alert_type"] == "opportunity"]
-    review_alerts = [a for a in alerts if a["alert_type"] == "review_due"]
-
-    body_parts = [f"Kordent Daily Alert — {date.today().strftime('%B %d, %Y')}\n{'=' * 40}\n"]
-
-    if danger_alerts:
-        body_parts.append("DANGER ALERTS\n")
-        for a in danger_alerts:
-            body_parts.append(f"  >> {a['headline']}\n")
-        body_parts.append("")
-
-    if opp_alerts:
-        body_parts.append("OPPORTUNITIES\n")
-        for a in opp_alerts:
-            d = a.get("detail", {})
-            body_parts.append(f"  >> {a['headline']}\n")
-        body_parts.append("")
-
-    if review_alerts:
-        body_parts.append("REVIEW DUE\n")
-        for a in review_alerts:
-            body_parts.append(f"  >> {a['headline']}\n")
-        body_parts.append("")
-
-    body_parts.append("--\nLog in to Kordent to take action.\nNot financial advice.")
-
-    parts = []
-    if danger_alerts:
-        parts.append(f"{len(danger_alerts)} danger")
-    if opp_alerts:
-        parts.append(f"{len(opp_alerts)} opportunity")
-    if review_alerts:
-        parts.append("review due")
-    subject = f"Kordent: {', '.join(parts)}" if parts else "Kordent Daily"
-
-    try:
-        msg = MIMEMultipart()
-        msg["From"] = smtp_user
-        msg["To"] = recipient
-        msg["Subject"] = subject
-        msg.attach(MIMEText("\n".join(body_parts), "plain"))
-
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(smtp_user, smtp_pass)
-            server.send_message(msg)
-
-        print(f"Plain email sent to {recipient}: {subject}")
-    except Exception as e:
-        print(f"Email failed for {recipient}: {e}")
-
 
 if __name__ == "__main__":
     run_daily_tracker()
