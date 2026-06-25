@@ -3891,6 +3891,19 @@ elif st.session_state.sb_view_mode == "portfolios":
                         "portfolio_id", port["id"]
                     ).eq("is_read", False).order("created_at", desc=True).execute()
                     port_alerts = alerts_resp.data
+
+                    # Also fetch broadcast alerts (new_entry — no portfolio_id)
+                    try:
+                        broadcast_resp = sb.table("portfolio_alerts").select("*").is_(
+                            "portfolio_id", "null"
+                        ).eq("is_read", False).order("created_at", desc=True).limit(5).execute()
+                        if broadcast_resp.data:
+                            seen_tickers = {a["ticker"] for a in port_alerts}
+                            for ba in broadcast_resp.data:
+                                if ba["ticker"] not in seen_tickers:
+                                    port_alerts.append(ba)
+                    except Exception:
+                        pass
                 except Exception:
                     port_alerts = []
 
@@ -3956,57 +3969,41 @@ elif st.session_state.sb_view_mode == "portfolios":
 
                         elif a_type == "opportunity":
                             st.success(f"⚡ **{alert['headline']}**")
-                            
-                            # Replaced expander with a permanently open, bordered container
+
                             with st.container(border=True):
-                                st.markdown("##### Deploy Capital")
-                                
                                 ticker = alert.get("ticker", "")
                                 opp_name = detail.get("name", ticker)
                                 live_price = float(detail.get("price", 0)) if detail.get("price") else 0.0
-                                
-                                # Fetch user constraints
-                                monthly_sip = float(port.get("sip_amount", 0))
-                                
-                                # Calculate tactical expandable budget (e.g., 30% of their monthly SIP)
-                                tactical_budget = monthly_sip * 0.30
-                                
-                                # Calculate max affordable shares within this conservative tranche
-                                suggested_qty = 0
-                                if live_price > 0:
-                                    suggested_qty = int(tactical_budget // live_price)
-                                
-                                st.markdown(f"""
-                                **Tactical Allocation Framework:**
-                                * **Monthly SIP Commitment:** ₹{monthly_sip:,.0f}
-                                * **Estimated Off-Cycle Expandable Capital (30% of SIP):** ₹{tactical_budget:,.0f}
-                                * **Current Market Price:** ₹{live_price:,.2f}
-                                """)
-                                
-                                # Safeguard for expensive stocks
-                                if live_price > tactical_budget:
-                                    st.warning(f"⚠️ **Liquidity Notice:** A single share of {opp_name} (₹{live_price:,.2f}) exceeds your estimated tactical budget tranche (₹{tactical_budget:,.0f}). Consider waiting for your structural review date to alter your core asset weights rather than deploying ad-hoc capital.")
-                                elif suggested_qty == 0:
-                                    st.info("Tactical capital allocation is too low to acquire a full share at this price.")
+                                act_now = detail.get("act_now", False)
+                                budget_left = float(port.get("sip_budget_remaining") or 0)
+
+                                suggested_qty = int(budget_left // live_price) if live_price > 0 and budget_left > 0 else 0
+
+                                if act_now and suggested_qty > 0:
+                                    st.markdown(f"Budget left this month: **₹{budget_left:,.0f}** · Price: **₹{live_price:,.2f}** · Suggested: **{suggested_qty} shares** (~₹{suggested_qty * live_price:,.0f})")
+                                elif live_price > budget_left and budget_left > 0:
+                                    st.info(f"One share costs ₹{live_price:,.0f} but only ₹{budget_left:,.0f} left in this month's opportunity budget. Consider this at your next review.")
+                                elif budget_left <= 0:
+                                    st.info("This month's opportunity budget is used up. Noted for your weekly summary.")
                                 else:
-                                    st.info(f"💡 **Committee Recommendation:** Deploy a micro-tranche of **{suggested_qty} shares** (Total: ~₹{suggested_qty * live_price:,.0f}) to accumulate a position smoothly without altering your monthly baseline liquidity.")
+                                    st.markdown(f"Price: **₹{live_price:,.2f}**")
 
                                 col_sh, col_px = st.columns(2)
                                 with col_sh:
                                     buy_qty = st.number_input(
                                         "Shares to buy",
-                                        min_value=0, value=suggested_qty, key=f"deploy_qty_{a_id}"
+                                        min_value=0, value=suggested_qty, key=f"buy_qty_{a_id}"
                                     )
                                 with col_px:
                                     buy_price = st.number_input(
                                         "Price per share (₹)",
                                         min_value=0.0, value=live_price,
-                                        format="%.2f", key=f"deploy_price_{a_id}"
+                                        format="%.2f", key=f"buy_price_{a_id}"
                                     )
-                                    
+
                                 c1, c2 = st.columns(2)
                                 with c1:
-                                    if st.button("⚡ Deploy Capital", key=f"deploy_confirm_{a_id}", width="stretch"):
+                                    if st.button("✅ Bought", key=f"buy_confirm_{a_id}", use_container_width=True):
                                         if buy_qty > 0 and buy_price > 0:
                                             try:
                                                 invested = round(buy_qty * buy_price, 2)
@@ -4015,31 +4012,83 @@ elif st.session_state.sb_view_mode == "portfolios":
                                                     "ticker": ticker,
                                                     "name": opp_name,
                                                     "sector": detail.get("sector", ""),
-                                                    "allocation_pct": 0, 
+                                                    "allocation_pct": 0,
                                                     "shares": buy_qty,
                                                     "sip_amount_inr": invested,
                                                     "price_at_entry": round(buy_price, 2),
                                                     "score_at_entry": detail.get("score"),
                                                 }).execute()
+                                                new_budget = max(0, budget_left - invested)
+                                                sb.table("portfolios").update({
+                                                    "sip_budget_remaining": round(new_budget, 2)
+                                                }).eq("id", port["id"]).execute()
                                                 sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
-                                                st.success(f"Successfully tracked {buy_qty} shares of {opp_name}!")
+                                                st.success(f"Tracked {buy_qty} shares of {opp_name}. Budget remaining: ₹{new_budget:,.0f}")
                                                 st.rerun()
                                             except Exception as e:
-                                                st.error(f"Failed to deploy capital: {e}")
+                                                st.error(f"Failed: {e}")
                                         else:
                                             st.warning("Enter shares and price.")
-                                            
                                 with c2:
-                                    if st.button("Dismiss", key=f"deploy_dismiss_{a_id}", width="stretch"):
+                                    if st.button("✗ Skip", key=f"buy_skip_{a_id}", use_container_width=True):
                                         sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
                                         st.rerun()
 
                         
-                        elif a_type == "review_due":
-                            st.warning(f"📅 **{alert['headline']}**")
-                            if st.button("Dismiss", key=f"review_dismiss_{a_id}"):
-                                sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
-                                st.rerun()
+                        elif a_type == "overvalued":
+                            st.warning(f"📈 **{alert['headline']}**")
+                            with st.container(border=True):
+                                pe_val = detail.get("pe")
+                                pb_val = detail.get("pb")
+                                metrics = []
+                                if pe_val: metrics.append(f"PE {pe_val:.1f}")
+                                if pb_val: metrics.append(f"PB {pb_val:.1f}")
+                                st.markdown(f"Graham's margin of safety is thinning ({', '.join(metrics)}). This doesn't mean sell — but it's worth reviewing whether the price still makes sense.")
+                                c1, c2 = st.columns(2)
+                                with c1:
+                                    if st.button("📋 Review Now", key=f"overval_review_{a_id}", use_container_width=True):
+                                        sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
+                                        st.session_state["active_tab"] = "review"
+                                        st.rerun()
+                                with c2:
+                                    if st.button("✗ Dismiss", key=f"overval_dismiss_{a_id}", use_container_width=True):
+                                        sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
+                                        st.rerun()
+
+                        elif a_type == "sector_headwind":
+                            st.warning(f"🌊 **{alert['headline']}**")
+                            with st.container(border=True):
+                                idx_ret = detail.get("index_return_pct", 0)
+                                weight = detail.get("portfolio_weight_pct", 0)
+                                sector = detail.get("sector", "")
+                                st.markdown(f"The {sector} sector index dropped {idx_ret:.1f}% this month and makes up {weight:.0f}% of this portfolio. Keep an eye on it — if fundamentals hold, sector dips can be buying opportunities.")
+                                if st.button("✗ Dismiss", key=f"headwind_dismiss_{a_id}", use_container_width=True):
+                                    sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
+                                    st.rerun()
+
+                        elif a_type == "goal_drift":
+                            st.error(f"🎯 **{alert['headline']}**")
+                            with st.container(border=True):
+                                actual = detail.get("actual_cagr_pct", 0)
+                                needed = detail.get("needed_cagr_pct", 0)
+                                months = detail.get("months_remaining", 0)
+                                st.markdown(f"Your portfolio is growing at {actual:.1f}% but needs {needed:.1f}% to hit your goal in {months} months. Consider increasing your SIP or reviewing your picks — but don't chase risk.")
+                                if st.button("✗ Dismiss", key=f"goaldrift_dismiss_{a_id}", use_container_width=True):
+                                    sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
+                                    st.rerun()
+
+                        elif a_type == "new_entry":
+                            st.info(f"🆕 **{alert['headline']}**")
+                            with st.container(border=True):
+                                ne_name = detail.get("name", alert.get("ticker", ""))
+                                ne_score = detail.get("score", 0)
+                                ne_sector = detail.get("sector", "N/A")
+                                ne_pe = detail.get("pe")
+                                pe_str = f" · PE {ne_pe:.1f}" if ne_pe else ""
+                                st.markdown(f"**{ne_name}** just appeared on our radar with a score of {ne_score}/4. Sector: {ne_sector}{pe_str}. Worth a closer look if it fits your portfolio.")
+                                if st.button("✗ Dismiss", key=f"newentry_dismiss_{a_id}", use_container_width=True):
+                                    sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
+                                    st.rerun()
 
                 
                 # Check if this specific portfolio is in "SIP edit mode"
