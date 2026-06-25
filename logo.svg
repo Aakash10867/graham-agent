@@ -1,11 +1,12 @@
+
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100%" height="100%">
   <defs>
     <filter id="glass-shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.3"/>
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.35"/>
     </filter>
     
     <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
-      <feGaussianBlur stdDeviation="1.5" result="coloredBlur"/>
+      <feGaussianBlur stdDeviation="1.2" result="coloredBlur"/>
       <feMerge>
         <feMergeNode in="coloredBlur"/>
         <feMergeNode in="SourceGraphic"/>
@@ -13,10 +14,12 @@
     </filter>
 
     <linearGradient id="glass-glare" x1="10%" y1="0%" x2="90%" y2="100%">
-      <stop offset="0%" stop-color="rgba(255,255,255,0.7)" />
-      <stop offset="30%" stop-color="rgba(255,255,255,0.1)" />
+      <stop offset="0%" stop-color="rgba(255,255,255,0.8)" />
+      <stop offset="40%" stop-color="rgba(255,255,255,0.15)" />
       <stop offset="100%" stop-color="rgba(255,255,255,0)" />
     </linearGradient>
+
+    <path id="sparkle" d="M 0,-4 Q 0,0 4,0 Q 0,0 0,4 Q 0,0 -4,0 Q 0,0 0,-4 Z" fill="#FFFFFF" filter="url(#glow)" />
 
     <path id="arc" d="M 85 50 A 35 35 0 0 0 50 15" fill="none" stroke="#002366" stroke-width="10" stroke-linecap="round" filter="url(#glass-shadow)" />
   </defs>
@@ -26,35 +29,62 @@
   <use href="#arc" transform="rotate(185 50 50)" />
   <use href="#arc" transform="rotate(275 50 50)" />
 
-  <circle cx="50" cy="50" r="28" fill="rgba(255, 136, 0, 0.35)" filter="url(#glass-shadow)" />
+  <circle cx="50" cy="50" r="28" fill="rgba(255, 98, 0, 0.65)" filter="url(#glass-shadow)" />
   <circle cx="50" cy="50" r="28" fill="url(#glass-glare)" />
-  <circle cx="50" cy="50" r="28" fill="none" stroke="rgba(255, 255, 255, 0.6)" stroke-width="1.5" />
+  <circle cx="50" cy="50" r="28" fill="none" stroke="rgba(255, 255, 255, 0.7)" stroke-width="1.5" />
 
-  <path d="M50 25 L54 46 L75 50 L54 54 L50 75 L46 54 L25 50 L46 46 Z" fill="rgba(255, 255, 255, 0.25)" filter="url(#glass-shadow)" />
-  <path d="M50 25 L54 46 L75 50 L54 54 L50 75 L46 54 L25 50 L46 46 Z" fill="url(#glass-glare)" />
-  <path d="M50 25 L54 46 L75 50 L54 54 L50 75 L46 54 L25 50 L46 46 Z" fill="none" stroke="rgba(255, 255, 255, 0.9)" stroke-width="1" />
-  
-  <circle cx="36" cy="38" r="1.2" fill="#FFF" filter="url(#glow)">
-    <animate attributeName="opacity" values="0.1; 1; 0.1" dur="1.3s" repeatCount="indefinite" />
-  </circle>
-  
-  <circle cx="64" cy="34" r="0.8" fill="#FFF" filter="url(#glow)">
-    <animate attributeName="opacity" values="0.1; 1; 0.1" dur="2.7s" repeatCount="indefinite" />
-  </circle>
-  
-  <circle cx="32" cy="60" r="1.5" fill="#FFF" filter="url(#glow)">
+  <path d="M50 25 L54 46 L75 50 L54 54 L50 75 L46 54 L25 50 L46 46 Z" fill="rgba(255, 255, 255, 0.3)" filter="url(#glass-shadow)" />
+  <path d="M50 25 L54 46 L75 50 L54 54 L50 75 L46 54 L25 50 L46 46 Z" fill="url(#glass-glare)">
     <animate attributeName="opacity" values="0.1; 1; 0.1" dur="1.8s" repeatCount="indefinite" />
-  </circle>
+  </path>
+  <path d="M50 25 L54 46 L75 50 L54 54 L50 75 L46 54 L25 50 L46 46 Z" fill="none" stroke="rgba(255, 255, 255, 1)" stroke-width="1">
+    <animate attributeName="opacity" values="0.5; 1; 0.5" dur="1.8s" repeatCount="indefinite" />
+  </path>
   
-  <circle cx="62" cy="64" r="1.0" fill="#FFF" filter="url(#glow)">
-    <animate attributeName="opacity" values="0.1; 1; 0.1" dur="3.1s" repeatCount="indefinite" />
-  </circle>
+  <use href="#sparkle" transform="translate(32, 28) scale(0.9)">
+    <animate attributeName="opacity" values="0; 1; 0" dur="1.7s" repeatCount="indefinite" />
+  </use>
+  <use href="#sparkle" transform="translate(24, 40) scale(0.5)">
+    <animate attributeName="opacity" values="0; 0.8; 0" dur="2.3s" repeatCount="indefinite" />
+  </use>
+  <use href="#sparkle" transform="translate(38, 38) scale(0.7)">
+    <animate attributeName="opacity" values="0; 1; 0" dur="1.1s" repeatCount="indefinite" />
+  </use>
 
-  <circle cx="48" cy="32" r="0.9" fill="#FFF" filter="url(#glow)">
-    <animate attributeName="opacity" values="0.1; 1; 0.1" dur="2.2s" repeatCount="indefinite" />
-  </circle>
+  <use href="#sparkle" transform="translate(70, 32) scale(1.1)">
+    <animate attributeName="opacity" values="0; 1; 0" dur="2.9s" repeatCount="indefinite" />
+  </use>
+  <use href="#sparkle" transform="translate(60, 24) scale(0.6)">
+    <animate attributeName="opacity" values="0; 0.9; 0" dur="1.3s" repeatCount="indefinite" />
+  </use>
+  <use href="#sparkle" transform="translate(76, 44) scale(0.8)">
+    <animate attributeName="opacity" values="0; 1; 0" dur="3.1s" repeatCount="indefinite" />
+  </use>
 
-  <circle cx="56" cy="68" r="1.3" fill="#FFF" filter="url(#glow)">
-    <animate attributeName="opacity" values="0.1; 1; 0.1" dur="1.5s" repeatCount="indefinite" />
-  </circle>
+  <use href="#sparkle" transform="translate(28, 68) scale(1)">
+    <animate attributeName="opacity" values="0; 1; 0" dur="1.9s" repeatCount="indefinite" />
+  </use>
+  <use href="#sparkle" transform="translate(38, 58) scale(0.6)">
+    <animate attributeName="opacity" values="0; 0.8; 0" dur="2.7s" repeatCount="indefinite" />
+  </use>
+  <use href="#sparkle" transform="translate(20, 56) scale(0.7)">
+    <animate attributeName="opacity" values="0; 1; 0" dur="3.7s" repeatCount="indefinite" />
+  </use>
+
+  <use href="#sparkle" transform="translate(68, 68) scale(0.8)">
+    <animate attributeName="opacity" values="0; 1; 0" dur="1.5s" repeatCount="indefinite" />
+  </use>
+  <use href="#sparkle" transform="translate(58, 76) scale(0.9)">
+    <animate attributeName="opacity" values="0; 1; 0" dur="2.5s" repeatCount="indefinite" />
+  </use>
+  <use href="#sparkle" transform="translate(78, 60) scale(0.5)">
+    <animate attributeName="opacity" values="0; 0.7; 0" dur="1.4s" repeatCount="indefinite" />
+  </use>
+  
+  <use href="#sparkle" transform="translate(50, 18) scale(0.4)">
+    <animate attributeName="opacity" values="0; 1; 0" dur="0.9s" repeatCount="indefinite" />
+  </use>
+  <use href="#sparkle" transform="translate(50, 82) scale(0.4)">
+    <animate attributeName="opacity" values="0; 1; 0" dur="1.2s" repeatCount="indefinite" />
+  </use>
 </svg>
