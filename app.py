@@ -1201,6 +1201,76 @@ def _resolve_ticker(query):
 
     return key
 
+def fuzzy_search_universe(query: str, df, max_results: int = 6):
+    """
+    Fuzzy-match a user query against universe_df name + ticker columns.
+    Returns list of {ticker, name, match_score, score, quality_pass} sorted desc.
+    """
+    from difflib import SequenceMatcher
+
+    if df is None or df.empty:
+        return []
+
+    q = query.lower().strip()
+    if not q:
+        return []
+
+    noise = {"should", "i", "buy", "sell", "analyse", "analyze", "about", "what",
+             "how", "is", "the", "a", "an", "tell", "me", "give", "show", "check",
+             "review", "of", "for", "can", "you", "do", "think", "worth", "good",
+             "investment", "stock", "company", "investing", "in", "it", "my", "best"}
+    q_words = [w for w in q.split() if w not in noise]
+    q_clean = " ".join(q_words).strip()
+
+    if not q_clean:
+        return []
+
+    candidates = []
+    for _, row in df.iterrows():
+        ticker = str(row.get("ticker", ""))
+        name = str(row.get("name", ""))
+        t_bare = ticker.lower().replace(".ns", "").replace(".bo", "")
+        n_lower = name.lower()
+
+        score = 0.0
+
+        # 1. Exact ticker match
+        if q_clean == t_bare or q_clean == ticker.lower():
+            score = 1.0
+        # 2. Ticker appears as a word in cleaned query
+        elif t_bare in q_words:
+            score = 0.95
+        # 3. Full company name is substring of cleaned query
+        elif n_lower in q_clean:
+            score = 0.92
+        # 4. Cleaned query is substring of company name (min 3 chars)
+        elif len(q_clean) >= 3 and q_clean in n_lower:
+            score = 0.85
+        # 5. All cleaned query words appear in company name
+        elif len(q_words) >= 2 and all(w in n_lower for w in q_words):
+            score = 0.80
+        else:
+            # 6. Fuzzy match via SequenceMatcher
+            if len(q_clean) >= 3:
+                best = max(
+                    SequenceMatcher(None, q_clean, n_lower).ratio(),
+                    SequenceMatcher(None, q_clean, t_bare).ratio()
+                )
+                if best > 0.55:
+                    score = best * 0.75
+
+        if score > 0.4:
+            candidates.append({
+                "ticker": ticker,
+                "name": name,
+                "match_score": round(score, 3),
+                "score": int(row["score"]) if pd.notna(row.get("score")) else 0,
+                "quality_pass": bool(row["quality_pass"]) if pd.notna(row.get("quality_pass")) else False,
+            })
+
+    candidates.sort(key=lambda x: x["match_score"], reverse=True)
+    return candidates[:max_results]
+
 
 # ══════════════════════════════════════════════
 # PAGE CONFIG
@@ -1227,7 +1297,8 @@ default_state = {
     "sb_user_email": None,
     "sb_user_id": None,
     "pending_portfolio": None,
-    "pending_retry": None
+    "pending_retry": None,
+    "pending_disambiguation": None
 }
 
 for key, value in default_state.items():
@@ -1851,19 +1922,8 @@ with st.sidebar:
             st.session_state.sb_view_mode = "chat" # Resets view on logout
             st.rerun()
 
-
-    
-
     st.divider()
     st.markdown("Multi-framework investment analysis powered by Graham, Greenblatt, Dorsey, and momentum scoring.")
-
-    st.markdown("---")
-
-    st.text_input(
-        "TARGET COMPANY",
-        placeholder="e.g. TCS, Reliance, Apple",
-        key="target_company",
-    )
 
     if st.button("🔄 New Chat", width="stretch"):
         st.session_state.messages = []
@@ -3589,23 +3649,6 @@ AGENT_AVATAR = "logo.svg"
 if st.session_state.sb_view_mode == "chat":
     chat_area = st.container()
 
-    target = st.session_state.get("target_company", "").strip()
-
-    if target:
-        st.markdown("")
-        st.caption(f"Quick analysis for **{target}**")
-        cols_per_row = 3
-        for i in range(0, len(STOCK_PRESETS), cols_per_row):
-            cols = st.columns(cols_per_row)
-            for j in range(cols_per_row):
-                idx = i + j
-                if idx < len(STOCK_PRESETS):
-                    label, template = STOCK_PRESETS[idx]
-                    with cols[j]:
-                        if st.button(label, key=f"preset_{idx}", width="stretch"):
-                            st.session_state.pending_prompt = template.format(company=target)
-                            st.rerun()
-
     st.markdown("")
     st.caption("Market screeners")
     scr_cols = st.columns(3)
@@ -3619,11 +3662,13 @@ if st.session_state.sb_view_mode == "chat":
 
     if not prompt and "pending_prompt" in st.session_state:
         prompt = st.session_state.pop("pending_prompt")
+        if prompt and st.session_state.get("pending_disambiguation"):
+        st.session_state.pending_disambiguation = None
 
     with chat_area:
         if not st.session_state.messages:
             st.markdown("")
-            st.info("Choose a company in the sidebar then select a framework below, or find best stocks by clicking below buttons.")
+            st.info("Type a company name or question below to get started, or use the screeners above.")
 
         for msg in st.session_state.messages:
             avatar = USER_AVATAR if msg["role"] == "user" else AGENT_AVATAR
@@ -3706,7 +3751,35 @@ if st.session_state.sb_view_mode == "chat":
                     except Exception as e:
                         st.error(f"Save failed: {e}")
 
+        # ── Disambiguation UI (shown when awaiting user's pick) ──
+        if not prompt and st.session_state.get("pending_disambiguation"):
+            pd_data = st.session_state.pending_disambiguation
+            with st.chat_message("user", avatar=USER_AVATAR):
+                st.markdown(pd_data["original_query"])
+            st.info("🔍 Multiple matches found. Which company did you mean?")
+            _matches = pd_data["matches"]
+            _ncols = min(len(_matches), 3)
+            _btn_cols = st.columns(_ncols)
+            for _i, _m in enumerate(_matches):
+                with _btn_cols[_i % _ncols]:
+                    _lbl = f"{_m['name']} ({_m['ticker'].replace('.NS','').replace('.BO','')})"
+                    if st.button(_lbl, key=f"disambig_{_i}", use_container_width=True):
+                        _resolved = f"{pd_data['original_query']} (company: {_m['name']}, ticker: {_m['ticker']})"
+                        st.session_state.pending_prompt = _resolved
+                        st.session_state.pending_disambiguation = None
+                        st.rerun()
+
         if prompt:
+            # ── Fuzzy search: disambiguate before LLM call ──
+            _fz = fuzzy_search_universe(prompt, universe_df)
+            _good = [m for m in _fz if m["match_score"] > 0.5]
+            if len(_good) >= 2 and _good[0]["match_score"] < 0.9:
+                st.session_state.pending_disambiguation = {
+                    "original_query": prompt,
+                    "matches": _good[:6],
+                }
+                st.rerun()
+
             st.session_state.messages.append({"role": "user", "content": prompt})
             with st.chat_message("user", avatar=USER_AVATAR):
                 st.markdown(prompt)
