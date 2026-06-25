@@ -24,7 +24,7 @@ from google import genai
 from supabase import create_client, Client
 
 
-APP_URL = "https://kordent.in"
+APP_URL = "https://kordent.streamlit.app"
 GEMINI_MODELS = [
     "gemini-2.5-flash-lite",
     "gemini-2.5-flash",
