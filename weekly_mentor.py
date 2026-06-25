@@ -315,32 +315,43 @@ def build_plain_fallback(name, summaries, alerts):
 
 
 def build_subject(name, summaries, alerts):
-    """Build an informative, non-urgent subject line."""
-    # Lead with portfolio performance if available
-    if summaries and summaries[0].get("weekly_return_pct") is not None:
-        total_val = sum(s["value"] for s in summaries)
-        # Weighted weekly return
+    """Subject line with emotional context — a mentor who feels what you feel."""
+    if summaries:
         weighted_ret = 0
         total_weight = 0
         for s in summaries:
-            if s["weekly_return_pct"] is not None and s["value"] > 0:
+            if s.get("weekly_return_pct") is not None and s["value"] > 0:
                 weighted_ret += s["weekly_return_pct"] * s["value"]
                 total_weight += s["value"]
+
         if total_weight > 0:
-            avg_ret = weighted_ret / total_weight
-            return f"📊 {name}, your week: {avg_ret:+.1f}%"
+            r = weighted_ret / total_weight
+            pct = f"({r:+.1f}%)"
+
+            if r >= 3:
+                return f"🟢 {name}, weeks like this are why you stay patient {pct}"
+            elif r >= 1:
+                return f"🟢 {name}, steady progress — your portfolio grew {pct}"
+            elif r >= 0:
+                return f"📊 {name}, quiet week {pct} — that's how compounding feels"
+            elif r >= -2:
+                return f"📊 {name}, a small dip {pct} — nothing to worry about"
+            elif r >= -5:
+                return f"🟡 {name}, bumpy week {pct} — let's look at what matters"
+            else:
+                return f"🔴 {name}, tough week {pct} — here's the bigger picture"
 
     danger_count = sum(1 for a in alerts if a.get("alert_type") in ("danger", "overvalued", "goal_drift"))
     opp_count = sum(1 for a in alerts if a.get("alert_type") in ("opportunity", "new_entry"))
 
     if danger_count and opp_count:
-        return f"📊 {name}, {danger_count} to watch, {opp_count} to consider"
+        return f"📊 {name}, a few things to look at this week"
     elif danger_count:
-        return f"📊 {name}, {danger_count} thing{'s' if danger_count > 1 else ''} to watch"
+        return f"📊 {name}, something needs your attention"
     elif opp_count:
-        return f"📊 {name}, {opp_count} opportunity{'ies' if opp_count > 1 else 'y'} this week"
+        return f"📊 {name}, spotted something interesting for you"
 
-    return f"📊 {name}, your weekly update"
+    return f"📊 {name}, your week in a minute"
 
 
 def send_email(recipient, subject, body, smtp_user, smtp_pass):
