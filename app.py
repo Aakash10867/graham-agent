@@ -1793,7 +1793,7 @@ if st.session_state.sb_view_mode == "chat" and not st.session_state.messages:
         top_portfolios = leaderboard_resp.data
         
         if top_portfolios:
-            st.markdown("### 🏆 Top Performing Committees")
+            st.markdown("### 🏆 Top Performing Portfolios")
             l_cols = st.columns(3)
             for i, port in enumerate(top_portfolios):
                 with l_cols[i]:
