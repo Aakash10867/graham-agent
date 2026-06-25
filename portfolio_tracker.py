@@ -5,7 +5,7 @@ import pandas as pd
 import pymupdf
 from google import genai
 from supabase import create_client, Client
-from datetime import date
+from datetime import date, timedelta
 from collections import Counter
 
 
@@ -80,8 +80,25 @@ ALERT_BOOK_QUERIES = {
     "price_crash": "Mr Market irrational prices holding through declines margin of safety buying opportunity panic",
     "opportunity": "buying undervalued stocks discount intrinsic value margin of safety quality companies",
     "review_due": "periodic review discipline portfolio maintenance rebalancing intelligent investor patience",
+    "overvalued": "selling overpriced stocks taking profits margin of safety disappearing valuation stretched",
+    "goal_drift": "falling behind investment goals compounding patience increasing contributions discipline",
+    "sector_headwind": "sector rotation industry downturn diversification concentration risk cyclical",
+    "new_entry": "new investment opportunities emerging companies quality discovery fresh screening",
 }
 
+# Sector → Nifty sectoral index (yfinance tickers)
+SECTOR_INDEX_MAP = {
+    "Technology": "^CNXIT",
+    "Financial Services": "^NSEBANK",
+    "Industrials": "^CNXINFRA",
+    "Basic Materials": "^CNXMETAL",
+    "Consumer Cyclical": "^CNXAUTO",
+    "Consumer Defensive": "^CNXFMCG",
+    "Healthcare": "^CNXPHARMA",
+    "Energy": "^CNXENERGY",
+    "Real Estate": "^CNXREALTY",
+    "Communication Services": "^CNXMEDIA",
+}
 
 def run_daily_tracker():
     print("Initiating Kordent Daily Portfolio Audit...")
@@ -272,6 +289,25 @@ def run_daily_tracker():
                         "price_crash"
                     ))
 
+            # ── Overvalued: Graham margin of safety eroding ──
+            current_pe = float(row["pe"].iloc[0]) if pd.notna(row["pe"].iloc[0]) else None
+            current_pb = float(row["pb"].iloc[0]) if "pb" in row.columns and pd.notna(row["pb"].iloc[0]) else None
+
+            overvalued_reasons = []
+            if current_pe and current_pe > 18:
+                overvalued_reasons.append(f"PE {current_pe:.1f} > 18")
+            if current_pb and current_pb > 1.8:
+                overvalued_reasons.append(f"PB {current_pb:.1f} > 1.8")
+
+            if overvalued_reasons:
+                all_alerts.append(make_alert(
+                    "overvalued", ticker,
+                    f"{holding.get('name', ticker)} may be overvalued — {', '.join(overvalued_reasons)}",
+                    {"name": holding.get("name", ticker), "reason": "overvalued",
+                     "pe": current_pe, "pb": current_pb},
+                    "overvalued"
+                ))
+
         # ── 3c. Opportunity alerts ──
         investor_type = port.get("investor_type", "balanced")
 
@@ -336,6 +372,74 @@ def run_daily_tracker():
                     "review_due"
                 ))
 
+    # ── Sector headwind: top-weighted sector index dropped >10% in 30 days ──
+        if held_sectors:
+            sector_weights = Counter(held_sectors)
+            top_sector = sector_weights.most_common(1)[0][0]
+            index_ticker = SECTOR_INDEX_MAP.get(top_sector)
+
+            if index_ticker:
+                try:
+                    idx_hist = yf.Ticker(index_ticker).history(period="1mo")
+                    if len(idx_hist) >= 2:
+                        idx_start = float(idx_hist["Close"].iloc[0])
+                        idx_end = float(idx_hist["Close"].iloc[-1])
+                        idx_return = ((idx_end - idx_start) / idx_start) * 100
+                        if idx_return < -10:
+                            alloc_pct = (sector_weights[top_sector] / len(held_sectors)) * 100
+                            all_alerts.append(make_alert(
+                                "sector_headwind", "_portfolio",
+                                f"{top_sector} index down {idx_return:.1f}% this month — {alloc_pct:.0f}% of {port['name']}",
+                                {"reason": "sector_headwind", "sector": top_sector,
+                                 "index_return_pct": round(idx_return, 1),
+                                 "portfolio_weight_pct": round(alloc_pct, 1)},
+                                "sector_headwind"
+                            ))
+                except Exception as e:
+                    print(f"Sector index check failed for {top_sector}: {e}")
+
+            # ── Goal drift: trailing CAGR < 80% of needed CAGR ──
+            target_amount = port.get("target_amount")
+            target_date_str = port.get("target_date")
+            if target_amount and target_date_str:
+                try:
+                    target_dt = date.fromisoformat(str(target_date_str))
+                    months_remaining = max(1, (target_dt - date.today()).days / 30.44)
+    
+                    # Need 6+ months of history before judging trajectory
+                    hist_resp = supabase.table("portfolio_history").select("date, total_value").eq(
+                        "portfolio_id", port_id
+                    ).order("date").execute()
+                    hist_rows = hist_resp.data
+    
+                    if len(hist_rows) >= 180:  # ~6 months of weekday entries
+                        first_val = float(hist_rows[0]["total_value"])
+                        first_date = date.fromisoformat(hist_rows[0]["date"])
+                        days_active = max(1, (date.today() - first_date).days)
+    
+                        if first_val > 0:
+                            actual_cagr = (current_total_value / first_val) ** (365 / days_active) - 1
+    
+                            sip_monthly = port.get("sip_amount", 0) or 0
+                            # Approximate needed CAGR (ignoring SIP for simplicity — full math in goal tracker)
+                            if current_total_value > 0:
+                                needed_cagr = (float(target_amount) / current_total_value) ** (12 / months_remaining) - 1
+    
+                                if needed_cagr > 0 and actual_cagr < (0.8 * needed_cagr):
+                                    severity = "danger" if actual_cagr < (0.5 * needed_cagr) else "goal_drift"
+                                    all_alerts.append(make_alert(
+                                        severity, "_portfolio",
+                                        f"{port['name']} trailing behind goal — actual {actual_cagr*100:.1f}% vs needed {needed_cagr*100:.1f}%",
+                                        {"reason": "goal_drift",
+                                         "actual_cagr_pct": round(actual_cagr * 100, 1),
+                                         "needed_cagr_pct": round(needed_cagr * 100, 1),
+                                         "target_amount": float(target_amount),
+                                         "months_remaining": round(months_remaining)},
+                                        "goal_drift"
+                                    ))
+                except (ValueError, TypeError) as e:
+                    print(f"Goal drift check failed for {port['name']}: {e}")
+
     # ══════════════════════════════════════
     # 3e. SCORE HISTORY TRACKING
     # ══════════════════════════════════════
@@ -378,6 +482,43 @@ def run_daily_tracker():
                 print(f"Score history batch failed: {e}")
 
         print(f"Logged {written_scores} score history rows.")
+        # ── New entry detection: score ≥ 3 stocks appearing for the first time ──
+        try:
+            latest_hist = supabase.table("score_history").select("date").order("date", desc=True).limit(1).execute()
+            if latest_hist.data:
+                prev_date = latest_hist.data[0]["date"]
+                if prev_date != today_str:
+                    prev_resp = supabase.table("score_history").select("ticker").eq("date", prev_date).execute()
+                    prev_tickers = set(row["ticker"] for row in prev_resp.data)
+
+                    new_high_scorers = universe_df[
+                        (universe_df["score"] >= 3) &
+                        (universe_df["quality_pass"] == True) &
+                        (~universe_df["ticker"].isin(prev_tickers))
+                    ]
+
+                    for _, nr in new_high_scorers.iterrows():
+                        all_alerts.append({
+                            "portfolio_id": None,
+                            "user_id": None,  # broadcast — weekly_mentor sends to all users
+                            "alert_type": "new_entry",
+                            "ticker": nr["ticker"],
+                            "headline": f"{nr.get('name', nr['ticker'])} new to radar at score {int(nr['score'])}/4",
+                            "detail": {
+                                "name": str(nr.get("name", nr["ticker"])),
+                                "score": int(nr["score"]),
+                                "sector": str(nr.get("sector", "N/A")),
+                                "pe": round(float(nr["pe"]), 2) if pd.notna(nr.get("pe")) else None,
+                                "book_passages": [],
+                            },
+                            "alert_date": today_str,
+                        })
+
+                    if len(new_high_scorers) > 0:
+                        print(f"Detected {len(new_high_scorers)} new high-scoring entries.")
+        except Exception as e:
+            print(f"New entry detection failed: {e}")
+            
  
     # ══════════════════════════════════════
     # 4. WRITE ALERTS TO SUPABASE
