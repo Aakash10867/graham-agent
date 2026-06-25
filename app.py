@@ -1756,7 +1756,8 @@ with st.sidebar:
                         st.error(f"Sign up failed: {e}")
 
     else:
-        st.caption(f"Logged in as {st.session_state.sb_user_email}")
+        _display_name = st.session_state.get("_profile_name") or st.session_state.sb_user_email
+        st.caption(f"Logged in as {_display_name}")
         sb = get_supabase()
 
         # ── One-time name collection for existing users ──
