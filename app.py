@@ -3158,12 +3158,19 @@ def get_macro_context(ticker: str) -> dict:
 
 def _sanitize_for_json(obj):
     """Replace NaN/Inf with None so Gemini gets valid JSON."""
-    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
-        return None
     if isinstance(obj, dict):
         return {k: _sanitize_for_json(v) for k, v in obj.items()}
     if isinstance(obj, list):
         return [_sanitize_for_json(v) for v in obj]
+    # Catch Python float, numpy.float64, numpy.float32, and any numeric type
+    try:
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+    except (TypeError, ValueError, OverflowError):
+        pass
+    # Convert stray numpy scalars to Python native so json.dumps never chokes
+    if hasattr(obj, 'item'):
+        return obj.item()
     return obj
 
 # ──────────────────────────────────────────────
@@ -3771,14 +3778,16 @@ if st.session_state.sb_view_mode == "chat":
 
         if prompt:
             # ── Fuzzy search: disambiguate before LLM call ──
-            _fz = fuzzy_search_universe(prompt, universe_df)
-            _good = [m for m in _fz if m["match_score"] > 0.5]
-            if len(_good) >= 2 and _good[0]["match_score"] < 0.9:
-                st.session_state.pending_disambiguation = {
-                    "original_query": prompt,
-                    "matches": _good[:6],
-                }
-                st.rerun()
+            _is_disambiguated = "(company:" in prompt and "ticker:" in prompt
+            if not _is_disambiguated:
+                _fz = fuzzy_search_universe(prompt, universe_df)
+                _good = [m for m in _fz if m["match_score"] > 0.5]
+                if len(_good) >= 2 and _good[0]["match_score"] < 0.9:
+                    st.session_state.pending_disambiguation = {
+                        "original_query": prompt,
+                        "matches": _good[:6],
+                    }
+                    st.rerun()
 
             st.session_state.messages.append({"role": "user", "content": prompt})
             with st.chat_message("user", avatar=USER_AVATAR):
@@ -3789,7 +3798,8 @@ if st.session_state.sb_view_mode == "chat":
                 model_used = None
                 with st.spinner("Routing & Analyzing..."):
                     try:
-                        if len(st.session_state.messages) <= 1:
+                        _is_disambiguated = "(company:" in prompt and "ticker:" in prompt
+                        if len(st.session_state.messages) <= 1 and not _is_disambiguated:
                             rewritten_directive = intercept_and_rewrite_query(prompt)
                         else:
                             rewritten_directive = prompt
