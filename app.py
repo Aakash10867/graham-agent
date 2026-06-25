@@ -1757,6 +1757,7 @@ with st.sidebar:
 
     else:
         st.caption(f"Logged in as {st.session_state.sb_user_email}")
+        sb = get_supabase()
 
         # ── One-time name collection for existing users ──
         if not st.session_state.get("_profile_name_checked"):
