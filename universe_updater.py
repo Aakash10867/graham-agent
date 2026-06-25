@@ -19,7 +19,7 @@ import yfinance as yf
 import time
 import io
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- ADD THIS GLOBAL SESSION BLOCK HERE ---
@@ -232,9 +232,6 @@ def combine_and_deduplicate(nse_tickers, bse_tickers):
 # ──────────────────────────────────────────────
 # FUNDAMENTALS FETCHER (per stock)
 # ──────────────────────────────────────────────
-# ──────────────────────────────────────────────
-# FUNDAMENTALS FETCHER (per stock)
-# ──────────────────────────────────────────────
 def fetch_fundamentals(ticker, retries=3):
     """Fetch all metrics needed for the 4 frameworks. Returns dict or None. Includes backoff."""
     for attempt in range(retries):
@@ -245,7 +242,13 @@ def fetch_fundamentals(ticker, retries=3):
             
             if not info or not info.get("regularMarketPrice"):
                 return None
-
+            # Compute years listed for Graham 7-year guard
+            first_trade = info.get("firstTradeDateEpochUtc")
+            if first_trade:
+                first_date = datetime.fromtimestamp(first_trade, tz=timezone.utc)
+                data["years_listed"] = round((datetime.now(tz=timezone.utc) - first_date).days / 365.25, 1)
+            else:
+                data["years_listed"] = None
             pe = info.get("trailingPE")
 
             data = {
@@ -522,7 +525,8 @@ def score_frameworks(data):
     ni_g = data.get("ni_growth")
     debt_g = data.get("debt_growth")
 
-    graham = bool(pe and pb and pe <= 15 and pb <= 1.5)
+    years_listed = data.get("years_listed")
+    graham = bool(pe and pb and pe <= 15 and pb <= 1.5 and (years_listed is None or years_listed >= 7))
     greenblatt = bool(roe and ey and roe > 0.15 and ey > 5)
     dorsey = bool(roe and de is not None and roe > 0.15 and de < 50)
 
