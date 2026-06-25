@@ -527,7 +527,7 @@ def score_frameworks(data):
     debt_g = data.get("debt_growth")
 
     years_listed = data.get("years_listed")
-    graham = bool(pe and pb and pe <= 15 and pb <= 1.5 and (years_listed is None or years_listed >= 7))
+    graham = bool(pe and pb and pe <= 15 and pb <= 1.5 and years_listed is not None and years_listed >= 7)
     greenblatt = bool(roe and ey and roe > 0.15 and ey > 5)
     dorsey = bool(roe and de is not None and roe > 0.15 and de < 50)
 
