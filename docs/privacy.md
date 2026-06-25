@@ -93,7 +93,7 @@ We may update this policy from time to time. If we make material changes, we wil
 
 For questions, data access requests, or deletion requests:
 
-**Email:** [your-email@example.com]
+**Email:** kordent.advisor@gmail.com
 
 ---
 
