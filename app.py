@@ -3566,15 +3566,20 @@ def agent_turn(user_message):
                 text_chunk = _extract_text(analyst_response)
                 if text_chunk:
                     all_text_parts.append(text_chunk)
+                    
                 function_responses = []
                 for fc in analyst_response.function_calls:
                     if fc.name in tool_functions:
-                        result = _sanitize_for_json(tool_functions[fc.name](**fc.args))
+                        # Execute the tool function, then immediately sanitize the dictionary output
+                        raw_tool_output = tool_functions[fc.name](**fc.args)
+                        result = _sanitize_for_json(raw_tool_output)
                     else:
                         result = {"error": f"Unknown tool: {fc.name}"}
+                        
                     function_responses.append(
                         types.Part.from_function_response(name=fc.name, response=result)
                     )
+                # Send the sanitized parameters back to the chat manager
                 analyst_response = analyst_chat.send_message(function_responses)
 
             final_chunk = _extract_text(analyst_response)
@@ -3593,11 +3598,7 @@ def agent_turn(user_message):
                 recovery_response = analyst_chat.send_message(recovery_prompt)
                 draft_text = _extract_text(recovery_response).strip()
 
-            # --- PHASE 2: AUDITOR REVIEWS DRAFT (with independent data) ---
-            # ... existing code below ...
-
-            # --- PHASE 2: AUDITOR REVIEWS DRAFT (with independent data) ---
-            # Extract tickers mentioned in draft and run quality checks
+            # --- PHASE 2: AUDITOR REVIEWS DRAFT (with independent data) -----
             NOISE_WORDS = {"PASS", "FAIL", "YES", "NO", "ROE", "EPS", "SIP",
                            "AND", "THE", "FOR", "NOT", "USE", "ALL", "WHY",
                            "HOW", "BUY", "TOP", "LOW", "HIGH", "CAP", "NET",
