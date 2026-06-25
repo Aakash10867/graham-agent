@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100%" height="100%">
+  <defs>
+    <filter id="glass-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.3"/>
+    </filter>
+    
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="1.5" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <linearGradient id="glass-glare" x1="10%" y1="0%" x2="90%" y2="100%">
+      <stop offset="0%" stop-color="rgba(255,255,255,0.7)" />
+      <stop offset="30%" stop-color="rgba(255,255,255,0.1)" />
+      <stop offset="100%" stop-color="rgba(255,255,255,0)" />
+    </linearGradient>
+
+    <path id="arc" d="M 85 50 A 35 35 0 0 0 50 15" fill="none" stroke="#002366" stroke-width="10" stroke-linecap="round" filter="url(#glass-shadow)" />
+  </defs>
+
+  <use href="#arc" transform="rotate(5 50 50)" />
+  <use href="#arc" transform="rotate(95 50 50)" />
+  <use href="#arc" transform="rotate(185 50 50)" />
+  <use href="#arc" transform="rotate(275 50 50)" />
+
+  <circle cx="50" cy="50" r="28" fill="rgba(255, 136, 0, 0.35)" filter="url(#glass-shadow)" />
+  <circle cx="50" cy="50" r="28" fill="url(#glass-glare)" />
+  <circle cx="50" cy="50" r="28" fill="none" stroke="rgba(255, 255, 255, 0.6)" stroke-width="1.5" />
+
+  <path d="M50 25 L54 46 L75 50 L54 54 L50 75 L46 54 L25 50 L46 46 Z" fill="rgba(255, 255, 255, 0.25)" filter="url(#glass-shadow)" />
+  <path d="M50 25 L54 46 L75 50 L54 54 L50 75 L46 54 L25 50 L46 46 Z" fill="url(#glass-glare)" />
+  <path d="M50 25 L54 46 L75 50 L54 54 L50 75 L46 54 L25 50 L46 46 Z" fill="none" stroke="rgba(255, 255, 255, 0.9)" stroke-width="1" />
+  
+  <circle cx="36" cy="38" r="1.2" fill="#FFF" filter="url(#glow)">
+    <animate attributeName="opacity" values="0.1; 1; 0.1" dur="1.3s" repeatCount="indefinite" />
+  </circle>
+  
+  <circle cx="64" cy="34" r="0.8" fill="#FFF" filter="url(#glow)">
+    <animate attributeName="opacity" values="0.1; 1; 0.1" dur="2.7s" repeatCount="indefinite" />
+  </circle>
+  
+  <circle cx="32" cy="60" r="1.5" fill="#FFF" filter="url(#glow)">
+    <animate attributeName="opacity" values="0.1; 1; 0.1" dur="1.8s" repeatCount="indefinite" />
+  </circle>
+  
+  <circle cx="62" cy="64" r="1.0" fill="#FFF" filter="url(#glow)">
+    <animate attributeName="opacity" values="0.1; 1; 0.1" dur="3.1s" repeatCount="indefinite" />
+  </circle>
+
+  <circle cx="48" cy="32" r="0.9" fill="#FFF" filter="url(#glow)">
+    <animate attributeName="opacity" values="0.1; 1; 0.1" dur="2.2s" repeatCount="indefinite" />
+  </circle>
+
+  <circle cx="56" cy="68" r="1.3" fill="#FFF" filter="url(#glow)">
+    <animate attributeName="opacity" values="0.1; 1; 0.1" dur="1.5s" repeatCount="indefinite" />
+  </circle>
+</svg>
