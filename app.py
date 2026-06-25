@@ -1757,6 +1757,35 @@ with st.sidebar:
 
     else:
         st.caption(f"Logged in as {st.session_state.sb_user_email}")
+
+        # ── One-time name collection for existing users ──
+        if not st.session_state.get("_profile_name_checked"):
+            try:
+                _prof = sb.table("profiles").select("full_name").eq(
+                    "id", st.session_state.sb_user_id
+                ).execute()
+                _existing_name = (_prof.data[0].get("full_name") or "") if _prof.data else ""
+                st.session_state["_profile_name_checked"] = True
+                st.session_state["_profile_name"] = _existing_name
+            except Exception:
+                _existing_name = ""
+                st.session_state["_profile_name_checked"] = True
+                st.session_state["_profile_name"] = ""
+        
+        if st.session_state.get("_profile_name_checked") and not st.session_state.get("_profile_name"):
+            with st.container(border=True):
+                st.caption("👋 Add your name for personalized reports & emails")
+                _name_input = st.text_input("Full Name", key="profile_name_fill")
+                if st.button("Save", key="save_profile_name") and _name_input and _name_input.strip():
+                    try:
+                        sb.table("profiles").upsert({
+                            "id": st.session_state.sb_user_id,
+                            "full_name": _name_input.strip()
+                        }, on_conflict="id").execute()
+                        st.session_state["_profile_name"] = _name_input.strip()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed: {e}")
         
         if st.session_state.sb_view_mode != "import":
             if st.button("📥 Import Existing Portfolio", width="stretch"):
