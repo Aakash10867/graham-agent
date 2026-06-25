@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<body>
+<p>Signing you in...</p>
+<script>
+  var hash = window.location.hash.substring(1);
+  var params = new URLSearchParams(hash);
+  var at = params.get('access_token');
+  var rt = params.get('refresh_token');
+  if (at) {
+    window.location.replace(
+      'https://kordent.streamlit.app/?access_token=' + encodeURIComponent(at) +
+      '&refresh_token=' + encodeURIComponent(rt)
+    );
+  } else {
+    document.body.innerText = 'Login failed — no token received.';
+  }
+</script>
+</body>
+</html>
