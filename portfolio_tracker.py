@@ -200,6 +200,32 @@ def run_daily_tracker():
 
         print(f"Updated [{port['name']}]: Value {current_total_value:,.2f} | Return {return_pct:+.2f}%")
 
+        # ── SIP budget management (30% cap for mid-cycle opportunities) ──
+        sip_amount = port.get("sip_amount") or 0
+        opp_budget = sip_amount * 0.3
+        budget_reset_date = port.get("sip_budget_reset_date")
+        sip_budget = port.get("sip_budget_remaining")
+
+        needs_reset = False
+        if sip_budget is None or budget_reset_date is None:
+            needs_reset = True
+        else:
+            try:
+                reset_dt = date.fromisoformat(str(budget_reset_date))
+                if reset_dt.month != date.today().month or reset_dt.year != date.today().year:
+                    needs_reset = True
+            except (ValueError, TypeError):
+                needs_reset = True
+
+        if needs_reset:
+            sip_budget = opp_budget
+            supabase.table("portfolios").update({
+                "sip_budget_remaining": round(sip_budget, 2),
+                "sip_budget_reset_date": today_str,
+            }).eq("id", port_id).execute()
+            if sip_amount > 0:
+                print(f"  Budget reset for [{port['name']}]: ₹{sip_budget:,.0f}")
+
         # ══════════════════════════════════════
         # 3. ALERT DETECTION (with book passages)
         # ══════════════════════════════════════
@@ -334,15 +360,25 @@ def run_daily_tracker():
         opps = opps.sort_values("pe").head(3)
 
         for _, opp_row in opps.iterrows():
+            stock_price = round(float(opp_row["price"]), 2) if pd.notna(opp_row.get("price")) else 0
+            can_afford = sip_budget >= stock_price and stock_price > 0
+            act_now = can_afford and sip_amount > 0
+            suggested_shares = int(sip_budget // stock_price) if can_afford else 0
+            suggested_amount = round(suggested_shares * stock_price, 2) if suggested_shares > 0 else 0
+
             all_alerts.append(make_alert(
                 "opportunity", opp_row["ticker"],
                 f"{opp_row.get('name', opp_row['ticker'])} hit 4/4 — fits your {investor_type} profile",
                 {"name": str(opp_row.get("name", opp_row["ticker"])),
                  "sector": str(opp_row.get("sector", "N/A")),
-                 "price": round(float(opp_row["price"]), 2) if pd.notna(opp_row.get("price")) else 0,
+                 "price": stock_price,
                  "pe": round(float(opp_row["pe"]), 2) if pd.notna(opp_row.get("pe")) else 0,
                  "roe_pct": round(float(opp_row["roe_pct"]), 2) if pd.notna(opp_row.get("roe_pct")) else 0,
-                 "score": 4},
+                 "score": 4,
+                 "act_now": act_now,
+                 "suggested_shares": suggested_shares,
+                 "suggested_amount": suggested_amount,
+                 "budget_remaining": round(sip_budget, 2)},
                 "opportunity"
             ))
         # ── 3d. Portfolio-level health warnings ──
