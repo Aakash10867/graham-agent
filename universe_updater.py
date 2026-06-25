@@ -246,13 +246,14 @@ def fetch_fundamentals(ticker, retries=3):
             first_trade = info.get("firstTradeDateEpochUtc")
             if first_trade:
                 first_date = datetime.fromtimestamp(first_trade, tz=timezone.utc)
-                data["years_listed"] = round((datetime.now(tz=timezone.utc) - first_date).days / 365.25, 1)
+                calc_years_listed = round((datetime.now(tz=timezone.utc) - first_date).days / 365.25, 1)
             else:
-                data["years_listed"] = None
+                calc_years_listed = None
             pe = info.get("trailingPE")
 
             data = {
                 "ticker": ticker,
+                "years_listed": calc_years_listed,
                 "name": info.get("longName") or info.get("shortName", ticker),
                 "sector": info.get("sector", ""),
                 "price": info.get("regularMarketPrice") or info.get("currentPrice"),
@@ -626,6 +627,10 @@ def main():
 
     # ── Step 3: Save scored universe ──
     print("\n--- STEP 3: Saving scored universe ---\n")
+
+    if not scored_results:
+        print("ERROR: No valid data was retrieved for any ticker. Exiting to prevent DataFrame crash.")
+        sys.exit(1)
 
     # Convert ROE and dividend_yield from decimal to percentage for readability
     for r in scored_results:
