@@ -440,6 +440,14 @@ def run_daily_tracker():
                 except (ValueError, TypeError) as e:
                     print(f"Goal drift check failed for {port['name']}: {e}")
 
+    # ── TODO [Sprint 2]: Watchlist monitoring alerts ──
+        # When watchlist table exists, add these alert types here:
+        # - watchlist_score_up: watched stock's score increased
+        # - watchlist_score_down: watched stock's score decreased
+        # - watchlist_quality_flip: watched stock's quality_pass changed
+        # - watchlist_near_low: watched stock within 5% of 52-week low
+        # See roadmap Layer 1A for trigger definitions.
+
     # ══════════════════════════════════════
     # 3e. SCORE HISTORY TRACKING
     # ══════════════════════════════════════
