@@ -1701,6 +1701,8 @@ with st.sidebar:
             "Account", ["Login", "Sign Up"],
             horizontal=True, label_visibility="collapsed"
         )
+        if auth_mode == "Sign Up":
+            auth_full_name = st.text_input("Full Name", key="auth_name_input")
         auth_email = st.text_input("Email", key="auth_email_input")
         auth_password = st.text_input("Password", type="password", key="auth_password_input")
 
@@ -1724,7 +1726,9 @@ with st.sidebar:
                         st.error(f"Login failed: {e}")
         else:
             if st.button("Sign Up", width="stretch"):
-                if not auth_email or not auth_password:
+                if not auth_full_name or not auth_full_name.strip():
+                    st.warning("Enter your full name.")
+                elif not auth_email or not auth_password:
                     st.warning("Enter email and password.")
                 elif len(auth_password) < 6:
                     st.warning("Password must be at least 6 characters.")
@@ -1733,12 +1737,20 @@ with st.sidebar:
                         sb = get_supabase()
                         resp = sb.auth.sign_up({
                             "email": auth_email,
-                            "password": auth_password
+                            "password": auth_password,
+                            "options": {"data": {"full_name": auth_full_name.strip()}}
                         })
                         st.session_state.sb_access_token = resp.session.access_token
                         st.session_state.sb_refresh_token = resp.session.refresh_token
                         st.session_state.sb_user_email = resp.user.email
                         st.session_state.sb_user_id = str(resp.user.id)
+                        try:
+                            sb.table("profiles").upsert({
+                                "id": st.session_state.sb_user_id,
+                                "full_name": auth_full_name.strip()
+                            }, on_conflict="id").execute()
+                        except Exception:
+                            pass  # non-blocking — name also lives in user_metadata
                         st.rerun()
                     except Exception as e:
                         st.error(f"Sign up failed: {e}")
