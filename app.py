@@ -1932,6 +1932,54 @@ with st.sidebar:
                 st.session_state.sb_view_mode = "chat"
                 st.rerun()
 
+        # ── My Watchlist ──
+        st.divider()
+        st.markdown("**👁 My Watchlist**")
+        try:
+            _wl_resp = sb.table("watchlist").select("*").eq(
+                "user_id", st.session_state.sb_user_id
+            ).order("added_date", desc=True).execute()
+            _wl_items = _wl_resp.data or []
+        except Exception:
+            _wl_items = []
+
+        if _wl_items:
+            for _wl in _wl_items:
+                _wl_ticker = _wl["ticker"]
+                _wl_name = _wl.get("name") or _wl_ticker
+                _wl_row = universe_df[universe_df["ticker"] == _wl_ticker]
+                if not _wl_row.empty and pd.notna(_wl_row["score"].iloc[0]):
+                    _wl_cur_score = int(_wl_row["score"].iloc[0])
+                else:
+                    _wl_cur_score = "?"
+                _wl_added = _wl.get("score_when_added")
+                _wl_days = 0
+                if _wl.get("added_date"):
+                    try:
+                        _wl_days = (datetime.date.today() - datetime.date.fromisoformat(str(_wl["added_date"]))).days
+                    except Exception:
+                        pass
+
+                _c1, _c2 = st.columns([5, 1])
+                with _c1:
+                    _score_delta = ""
+                    if _wl_added is not None and _wl_cur_score != "?":
+                        _diff = _wl_cur_score - _wl_added
+                        if _diff > 0:
+                            _score_delta = f" ↑{_diff}"
+                        elif _diff < 0:
+                            _score_delta = f" ↓{abs(_diff)}"
+                    st.caption(f"**{_wl_name}**\n{_wl_cur_score}/4{_score_delta} · {_wl_days}d")
+                with _c2:
+                    if st.button("✕", key=f"wl_rm_{_wl['id']}", help="Remove"):
+                        try:
+                            sb.table("watchlist").delete().eq("id", _wl["id"]).execute()
+                            st.rerun()
+                        except Exception as _e:
+                            st.error(f"Failed: {_e}")
+        else:
+            st.caption("No stocks watched yet.\nAnalyze a stock in chat to add it.")
+
         st.divider()
 
         if st.button("Log Out", width="stretch", key="logout_btn"):
