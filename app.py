@@ -1323,7 +1323,8 @@ default_state = {
     "sb_user_id": None,
     "pending_portfolio": None,
     "pending_retry": None,
-    "pending_disambiguation": None
+    "pending_disambiguation": None,
+    "pending_watch_tickers": None
 }
 
 for key, value in default_state.items():
@@ -1932,53 +1933,18 @@ with st.sidebar:
                 st.session_state.sb_view_mode = "chat"
                 st.rerun()
 
-        # ── My Watchlist ──
-        st.divider()
-        st.markdown("**👁 My Watchlist**")
-        try:
-            _wl_resp = sb.table("watchlist").select("*").eq(
-                "user_id", st.session_state.sb_user_id
-            ).order("added_date", desc=True).execute()
-            _wl_items = _wl_resp.data or []
-        except Exception:
-            _wl_items = []
-
-        if _wl_items:
-            for _wl in _wl_items:
-                _wl_ticker = _wl["ticker"]
-                _wl_name = _wl.get("name") or _wl_ticker
-                try:
-                    _wl_row = universe_df[universe_df["ticker"] == _wl_ticker]
-                    _wl_cur_score = int(_wl_row["score"].iloc[0]) if not _wl_row.empty and pd.notna(_wl_row["score"].iloc[0]) else "?"
-                except NameError:
-                    _wl_cur_score = "?"
-                _wl_added = _wl.get("score_when_added")
-                _wl_days = 0
-                if _wl.get("added_date"):
-                    try:
-                        _wl_days = (datetime.date.today() - datetime.date.fromisoformat(str(_wl["added_date"]))).days
-                    except Exception:
-                        pass
-
-                _c1, _c2 = st.columns([5, 1])
-                with _c1:
-                    _score_delta = ""
-                    if _wl_added is not None and _wl_cur_score != "?":
-                        _diff = _wl_cur_score - _wl_added
-                        if _diff > 0:
-                            _score_delta = f" ↑{_diff}"
-                        elif _diff < 0:
-                            _score_delta = f" ↓{abs(_diff)}"
-                    st.caption(f"**{_wl_name}**\n{_wl_cur_score}/4{_score_delta} · {_wl_days}d")
-                with _c2:
-                    if st.button("✕", key=f"wl_rm_{_wl['id']}", help="Remove"):
-                        try:
-                            sb.table("watchlist").delete().eq("id", _wl["id"]).execute()
-                            st.rerun()
-                        except Exception as _e:
-                            st.error(f"Failed: {_e}")
-        else:
-            st.caption("No stocks watched yet.\nAnalyze a stock in chat to add it.")
+        # ── My Watchlist nav ──
+        if st.session_state.sb_view_mode != "watchlist":
+            try:
+                _wl_count = len((sb.table("watchlist").select("id").eq(
+                    "user_id", st.session_state.sb_user_id
+                ).execute()).data or [])
+            except Exception:
+                _wl_count = 0
+            _wl_label = f"👁 My Watchlist ({_wl_count})" if _wl_count else "👁 My Watchlist"
+            if st.button(_wl_label, width="stretch"):
+                st.session_state.sb_view_mode = "watchlist"
+                st.rerun()
 
         st.divider()
 
@@ -3982,6 +3948,100 @@ if st.session_state.sb_view_mode == "chat":
 
             if not _any_actionable:
                 st.session_state.pop("pending_watch_tickers", None)
+elif st.session_state.sb_view_mode == "watchlist":
+    st.markdown("### 👁 My Watchlist")
+
+    if st.session_state.sb_user_id is None:
+        st.warning("Please log in to view your watchlist.")
+    else:
+        _w_sb = get_supabase()
+        try:
+            _w_resp = _w_sb.table("watchlist").select("*").eq(
+                "user_id", st.session_state.sb_user_id
+            ).order("added_date", desc=True).execute()
+            _w_items = _w_resp.data or []
+        except Exception as _w_err:
+            st.error(f"Failed to load watchlist: {_w_err}")
+            _w_items = []
+
+        if not _w_items:
+            st.info("Your watchlist is empty. Analyze a stock in chat — if it gets a YES verdict, you'll see a Watch button.")
+        else:
+            for _w in _w_items:
+                _w_ticker = _w["ticker"]
+                _w_name = _w.get("name") or _w_ticker
+                _w_bare = _w_ticker.replace(".NS", "").replace(".BO", "")
+                _w_added_score = _w.get("score_when_added")
+                _w_added_quality = _w.get("quality_when_added")
+                _w_note = _w.get("note") or ""
+                _w_added_date = _w.get("added_date", "")
+                _w_days = 0
+                if _w_added_date:
+                    try:
+                        _w_days = (datetime.date.today() - datetime.date.fromisoformat(str(_w_added_date))).days
+                    except Exception:
+                        pass
+
+                # Current data from universe_df
+                _w_cur_score = "?"
+                _w_cur_quality = None
+                _w_sector = "—"
+                _w_pe = "—"
+                _w_pb = "—"
+                try:
+                    _w_row = universe_df[universe_df["ticker"] == _w_ticker]
+                    if not _w_row.empty:
+                        if pd.notna(_w_row["score"].iloc[0]):
+                            _w_cur_score = int(_w_row["score"].iloc[0])
+                        if "quality_pass" in _w_row.columns and pd.notna(_w_row["quality_pass"].iloc[0]):
+                            _w_cur_quality = bool(_w_row["quality_pass"].iloc[0])
+                        _w_sector = str(_w_row["sector"].iloc[0]) if pd.notna(_w_row.get("sector", pd.Series([None])).iloc[0]) else "—"
+                        _w_pe = round(float(_w_row["pe"].iloc[0]), 1) if pd.notna(_w_row.get("pe", pd.Series([None])).iloc[0]) else "—"
+                        _w_pb = round(float(_w_row["pb"].iloc[0]), 2) if pd.notna(_w_row.get("pb", pd.Series([None])).iloc[0]) else "—"
+                except NameError:
+                    pass
+
+                with st.container(border=True):
+                    _wh1, _wh2 = st.columns([4, 1])
+                    with _wh1:
+                        # Score delta
+                        _w_delta_str = ""
+                        if _w_added_score is not None and _w_cur_score != "?":
+                            _w_diff = _w_cur_score - _w_added_score
+                            if _w_diff > 0:
+                                _w_delta_str = f"  ↑{_w_diff} since added"
+                            elif _w_diff < 0:
+                                _w_delta_str = f"  ↓{abs(_w_diff)} since added"
+                        st.markdown(f"**{_w_name}** ({_w_bare})")
+                        st.caption(f"Score: {_w_cur_score}/4{_w_delta_str} · {_w_sector} · PE {_w_pe} · PB {_w_pb} · Watching {_w_days}d")
+
+                        # Quality flip warning
+                        if _w_added_quality is not None and _w_cur_quality is not None and _w_added_quality != _w_cur_quality:
+                            if _w_cur_quality:
+                                st.success("Quality flipped to PASS since you added this.")
+                            else:
+                                st.warning("Quality flipped to FAIL since you added this.")
+
+                    with _wh2:
+                        if st.button("✕ Remove", key=f"wl_rm_{_w['id']}", use_container_width=True):
+                            try:
+                                _w_sb.table("watchlist").delete().eq("id", _w["id"]).execute()
+                                st.rerun()
+                            except Exception as _e:
+                                st.error(f"Failed: {_e}")
+
+                    # Editable note
+                    _w_new_note = st.text_input(
+                        "Note", value=_w_note, key=f"wl_note_{_w['id']}",
+                        placeholder="e.g. Waiting for PE to drop below 12",
+                        label_visibility="collapsed"
+                    )
+                    if _w_new_note != _w_note:
+                        try:
+                            _w_sb.table("watchlist").update({"note": _w_new_note}).eq("id", _w["id"]).execute()
+                        except Exception:
+                            pass
+
 
 elif st.session_state.sb_view_mode == "import":
     st.markdown("### 📥 Import Your Existing Portfolio")
