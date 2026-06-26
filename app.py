@@ -685,9 +685,9 @@ BOOK CONTEXT:
 
 Write a diagnostic with these sections:
 1. VERDICT (one line: is this portfolio healthy, needs attention, or at risk?)
-2. STRENGTHS (what is working well — cite book principles)
-3. RISKS (what could go wrong — cite book warnings, be specific about which holdings)
-4. ACTION ITEMS — ONLY if the portfolio has real problems. If diversification score is above 80, no sector exceeds 30%, and quality scores are 3+, then state "Portfolio is well-constructed. No changes recommended." and output ACTIONS_JSON: []. Do NOT recommend changes just to have something to say. A good portfolio deserves acknowledgment, not perpetual tinkering. Graham explicitly warns against excessive trading and over-optimization.
+2. STRENGTHS (what is working well. cite book principles)
+3. RISKS (what could go wrong. cite book warnings, be specific about which holdings)
+4. ACTION ITEMS ONLY if the portfolio has real problems. If diversification score is above 80, no sector exceeds 30%, and quality scores are 3+, then state "Portfolio is well-constructed. No changes recommended." and output ACTIONS_JSON: []. Do NOT recommend changes just to have something to say. A good portfolio deserves acknowledgment, not perpetual tinkering. Graham explicitly warns against excessive trading and over-optimization.
 
 Be direct and specific. Reference actual holdings by name. Under 300 words total.
 
