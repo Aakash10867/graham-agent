@@ -5325,23 +5325,38 @@ elif st.session_state.sb_view_mode == "portfolios":
                                             })
                                     
                                     if sip_stocks:
-                                        allocated, unallocated = allocate_shares(sip_stocks, exec_amount)
+                                        allocated, _ = allocate_shares(sip_stocks, exec_amount)
+                                        
+                                        # ── TRACK LIVE SPENDING ──
+                                        live_spent = 0
+                                        
                                         for a in allocated:
                                             c1, c2, c3 = st.columns([2,1,1])
                                             with c1: st.markdown(f"**{a['name']}**")
-                                            with c2: st.number_input("Shares", value=a["shares"], key=f"sip_q_{port['id']}_{a['ticker']}")
-                                            with c3: st.number_input("Price (₹)", value=float(a["price"]), key=f"sip_p_{port['id']}_{a['ticker']}")
+                                            with c2: 
+                                                live_q = st.number_input("Shares", value=a["shares"], key=f"sip_q_{port['id']}_{a['ticker']}")
+                                            with c3: 
+                                                live_p = st.number_input("Price (₹)", value=float(a["price"]), key=f"sip_p_{port['id']}_{a['ticker']}")
+                                            
+                                            # Add the live input values to our running total
+                                            live_spent += (live_q * live_p)
+                                        
+                                        # Calculate real-time unallocated cash
+                                        live_unallocated = exec_amount - live_spent
                                         
                                         # --- FRACTIONAL SAVER: Smart Cash Drag Mitigation ---
-                                        if unallocated > 0:
-                                            affordable = [s for s in sip_stocks if 0 < s["price"] <= unallocated]
+                                        if live_unallocated > 0:
+                                            affordable = [s for s in sip_stocks if 0 < s["price"] <= live_unallocated]
                                             if affordable:
-                                                # Suggest the stock that uses up the most idle cash without going over
                                                 best_opt = sorted(affordable, key=lambda x: x["price"], reverse=True)[0]
-                                                extra_shares = int(unallocated // best_opt["price"])
-                                                st.info(f"💡 **₹{unallocated:,.0f} unallocated.** You can't hit exact target percentages, but you could buy **{extra_shares} more share(s) of {best_opt['name']}** (₹{best_opt['price']:,.2f}) to put that cash to work. Just increase the shares above.")
+                                                extra_shares = int(live_unallocated // best_opt["price"])
+                                                st.info(f"💡 **₹{live_unallocated:,.0f} unallocated.** You can't hit exact target percentages, but you could buy **{extra_shares} more share(s) of {best_opt['name']}** (₹{best_opt['price']:,.2f}) to put that cash to work. Just increase the shares above.")
                                             else:
-                                                st.caption(f"ℹ️ ₹{unallocated:,.0f} unallocated (not enough to buy any of your holdings). Leave it in your bank.")
+                                                st.caption(f"ℹ️ ₹{live_unallocated:,.0f} unallocated (not enough to buy any of your holdings). Leave it in your bank.")
+                                        elif live_unallocated < 0:
+                                            st.warning(f"⚠️ You have exceeded your deployment amount by ₹{abs(live_unallocated):,.0f}.")
+                                        else:
+                                            st.success("✅ Perfect allocation! Zero unallocated cash.")
                                         
                                         bc1, bc2 = st.columns(2)
                                         with bc1:
