@@ -1396,26 +1396,42 @@ st.markdown("""
 
 /* ── Fix 3: Clean up radio buttons (Login/Signup) ── */
 
-/* 1. Force the layout wrappers to remain transparent so they don't form blocks */
-[data-testid="stRadio"] [data-baseweb="radio"] > div {
-    background-color: transparent !important;
-}
-
-/* 2. Base state for the outer circle */
+/* 1. Force the outer circle to retain its perfect shape and size */
 [data-testid="stRadio"] [data-baseweb="radio"] input[type="radio"] + div {
     background-color: #FFFFFF !important;
-    border-color: #D1D5DB !important;
+    border: 2px solid #D1D5DB !important;
+    border-radius: 50% !important; /* Locks the circle shape */
+    width: 18px !important;
+    height: 18px !important;
+    min-width: 18px !important;
+    min-height: 18px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    box-sizing: border-box !important;
+    transition: all 0.2s ease-in-out !important;
 }
 
-/* 3. Active state for the outer circle ONLY */
+/* 2. Active state for the outer circle */
 [data-testid="stRadio"] [data-baseweb="radio"] input[type="radio"]:checked + div {
-    background-color: #1D4ED8 !important; 
+    background-color: #1D4ED8 !important; /* Trust blue */
     border-color: #1D4ED8 !important;
 }
 
-/* 4. The inner white dot */
+/* 3. Force the inner dot to retain its perfect shape */
 [data-testid="stRadio"] [data-baseweb="radio"] input[type="radio"]:checked + div > div {
-    background-color: #FFFFFF !important; 
+    background-color: #FFFFFF !important;
+    border-radius: 50% !important; /* Locks the dot shape */
+    width: 8px !important;
+    height: 8px !important;
+    min-width: 8px !important;
+    min-height: 8px !important;
+    box-sizing: border-box !important;
+}
+
+/* 4. Reset the label text background so it doesn't form blocks */
+[data-testid="stRadio"] [data-baseweb="radio"] > div:last-child {
+    background-color: transparent !important;
 }
 
 /* ── Fix 5: Force All Standard Buttons to Light Theme ── */
