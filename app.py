@@ -4107,7 +4107,7 @@ elif st.session_state.sb_view_mode == "watchlist":
                                 pass
 
 
-with _wl_tab_paper:
+    with _wl_tab_paper:
             if st.session_state.get("_paper_just_saved"):
                 st.success("Paper portfolio saved! Track its performance here.")
                 st.session_state.pop("_paper_just_saved", None)
