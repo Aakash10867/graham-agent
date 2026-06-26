@@ -663,6 +663,7 @@ def generate_health_check(portfolio, holdings, universe_df, collection):
 Portfolio: {portfolio.get('name')} | Type: {investor_type} | Horizon: {time_horizon}
 Holdings: {total} stocks
 {user_context}
+    prompt = f"""You are Kordent's Chief Risk Officer diagnosing a portfolio's health.
 
 Portfolio: {portfolio.get('name')} | Type: {investor_type} | Horizon: {time_horizon}
 Holdings: {total} stocks
@@ -1414,7 +1415,7 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@700;900&family=Inter:wght@400;500;600&display=swap');
 
-# ── Fix 1: Nuke the dark chat container ──
+/* ── Fix 1: Nuke the dark chat container ── */
 [data-testid="stChatInput"] {
     background-color: #FFFFFF !important;
     border: 1px solid #D1D5DB !important;
