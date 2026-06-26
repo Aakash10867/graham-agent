@@ -1218,7 +1218,10 @@ def fuzzy_search_universe(query: str, df, max_results: int = 6):
     noise = {"should", "i", "buy", "sell", "analyse", "analyze", "about", "what",
              "how", "is", "the", "a", "an", "tell", "me", "give", "show", "check",
              "review", "of", "for", "can", "you", "do", "think", "worth", "good",
-             "investment", "stock", "company", "investing", "in", "it", "my", "best"}
+             "investment", "stock", "stocks", "company", "investing", "in", "it",
+             "my", "best", "share", "shares", "price", "any", "this", "that",
+             "are", "get", "please", "want", "like", "look", "into", "at",
+             "analyse", "analysis", "value", "valued", "undervalued", "overvalued"}
     q_words = [w for w in q.split() if w not in noise]
     q_clean = " ".join(q_words).strip()
 
