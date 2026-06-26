@@ -649,11 +649,20 @@ def generate_health_check(portfolio, holdings, universe_df, collection):
     except Exception:
         pass
 
+    # ── User Decision Context ──
+    user_context = ""
+    _profile = portfolio.get("portfolio_profile") or {}
+    if isinstance(_profile, str):
+        try: _profile = json.loads(_profile)
+        except: _profile = {}
+    if _profile.get("decision_context"):
+        user_context = f"\nUSER DECISION CONTEXT:\n{_profile.get('decision_context')}\n(CRITICAL: Do not penalize the portfolio for risks or sector concentrations that the user explicitly accepted during portfolio creation.)\n"
+
     prompt = f"""You are Kordent's Chief Risk Officer diagnosing a portfolio's health.
 
 Portfolio: {portfolio.get('name')} | Type: {investor_type} | Horizon: {time_horizon}
 Holdings: {total} stocks
-
+{user_context}
 PORTFOLIO METRICS:
 Diversification Score: {diversification_score}/100 (based on sector HHI)
 Sector Distribution: {dict(sector_counts)}
@@ -908,8 +917,37 @@ def build_review_context(holdings, port):
     return enriched
 
 
-def generate_review_recommendations(enriched_holdings, investor_type, time_horizon):
+def generate_review_recommendations(enriched_holdings, investor_type, time_horizon, portfolio):
     """LLM-powered review recommendations grounded in book philosophy."""
+    holdings_text = ""
+    for i, h in enumerate(enriched_holdings):
+        holdings_text += (
+            f"\nStock {i+1}: {h['name']} ({h['ticker']})\n"
+            f"- Shares: {h['shares']}, Entry: INR {h['entry_price']:.2f}, Now: INR {h['now_price']:.2f}\n"
+            f"- Stock return: {h['stock_return']:+.1f}%, Nifty return: {h['nifty_return']}%, Market-relative: {h['market_relative']}%\n"
+            f"- Score: {h['entry_score']} to {h['now_score']} (change: {h['score_change']:+d})\n"
+            f"- ROE trend (recent to oldest): {h['roe_trend']}\n"
+            f"- Earnings quality: {', '.join(h['quality_flags']) if isinstance(h['quality_flags'], list) else h['quality_flags']}\n"
+            f"- Cash conversion ratio: {h['cash_conversion']}\n"
+            f"- Held for: {h['holding_days']} days\n"
+            f"- Relevant book passage: {h['book_passage']}\n"
+        )
+
+    # ── User Decision Context ──
+    user_context = ""
+    _profile = portfolio.get("portfolio_profile") or {}
+    if isinstance(_profile, str):
+        try: _profile = json.loads(_profile)
+        except: _profile = {}
+    if _profile.get("decision_context"):
+        user_context = f"\nUSER DECISION CONTEXT:\n{_profile.get('decision_context')}\n(CRITICAL: Honor these preferences. Do not recommend selling a stock solely for a trait the user explicitly accepted, such as sector volatility.)\n"
+
+    review_prompt = (
+        f"You are the Kordent Investment Committee reviewing a {investor_type} investor's "
+        f"portfolio with a {time_horizon}-term horizon.\n\n"
+        f"{user_context}\n"
+        f"For each stock below, provide a recommendation.\n\n"
+        f"DECISION FRAMEWORK (apply in order):\n"
     holdings_text = ""
     for i, h in enumerate(enriched_holdings):
         holdings_text += (
@@ -971,7 +1009,7 @@ def generate_review_recommendations(enriched_holdings, investor_type, time_horiz
 
 
 
-def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int, time_horizon: str, review_days: int = 90, stocks_json: str = "[]", portfolio_profile: str = "{}", target_amount: float = 0, target_date: str = "") -> dict:
+def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int, time_horizon: str, review_days: int = 90, stocks_json: str = "[]", portfolio_profile: str = "{}", target_amount: float = 0, target_date: str = "", decision_context: str = "") -> dict:
     """Register a finalized SIP portfolio so the user can save it to their account.
     Call this ONLY after you have presented the final portfolio table with all stocks and allocations.
 
@@ -985,6 +1023,7 @@ def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int,
         portfolio_profile: JSON string of the full investor profile from the builder form. Pass through from the [BUILDER_PROFILE] message.
         target_amount: Savings goal in INR. 0 if no goal set.
         target_date: Goal deadline as ISO date string (YYYY-MM-DD). Empty string if no goal.
+        decision_context: A brief summary of any specific preferences, trade-offs, or choices the user made during the Phase 1 clarification questions. Pass an empty string if no questions were asked.
     """
     try:
         stocks = json.loads(stocks_json) if isinstance(stocks_json, str) else stocks_json
@@ -996,6 +1035,9 @@ def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int,
 
     _profile = st.session_state.get("builder_profile") or {}
     
+    if decision_context:
+        _profile["decision_context"] = decision_context
+        
     final_target = _profile.get("target_amount") or (target_amount if target_amount > 0 else None)
     final_date = _profile.get("target_date") or (target_date if target_date else None)
 
@@ -3401,7 +3443,7 @@ PHASE 2: FINALIZE & REGISTER (TRIGGERED ONLY AFTER USER REPLIES)
 1. When the user answers your questions, finalize the stock selection.
 2. Output the final portfolio table. NOW you may explain the quantitative reasoning using book philosophies (Graham/Greenblatt/Dorsey) to educate them on why these picks were made.
 3. CRITICAL: Generate this textual explanation FIRST.
-4. Call register_portfolio with all fields including portfolio_profile, target_amount, and target_date. Do not ask for permission to save, just call the tool.
+4. Call register_portfolio with all fields including portfolio_profile, target_amount, and target_date. CRITICAL: Use the `decision_context` parameter to summarize the user's answers to your Phase 1 questions so the system remembers their accepted trade-offs (e.g. "User accepted volatility in Industrials for higher growth"). Do not ask for permission to save, just call the tool.
 
 If someone asks to build a portfolio WITHOUT a [BUILDER_PROFILE] prefix, direct them to click the 🏗️ Build Portfolio button in the sidebar. If they insist or provide enough info inline, you may proceed by mapping their inputs to the profile parameters.
 
@@ -3831,7 +3873,8 @@ if st.session_state.sb_view_mode == "chat":
                             "review_freq": str(review_days),
                             "next_review_date": next_review,
                             "next_sip_date": next_sip,
-                            "is_paper": portfolio.get("is_paper", False)
+                            "is_paper": portfolio.get("is_paper", False),
+                            "portfolio_profile": portfolio.get("portfolio_profile", {})
                         }).execute()
                         portfolio_id = port_resp.data[0]["id"]
                         stocks_for_alloc = []
@@ -5333,7 +5376,8 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 enriched = build_review_context(holdings, port)
                                 llm_recs = generate_review_recommendations(
                                     enriched, port.get("investor_type", "balanced"),
-                                    port.get("time_horizon", "medium")
+                                    port.get("time_horizon", "medium"),
+                                    port
                                 )
 
                                 # Merge LLM recommendations with enriched data
