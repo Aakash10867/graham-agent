@@ -3865,7 +3865,7 @@ if st.session_state.sb_view_mode == "chat":
                 elif len(_good) >= 2:
                     st.session_state.pending_disambiguation = {
                         "original_query": prompt,
-                        "matches": _good[:6],
+                        "matches": _good[:10],
                     }
                     st.rerun()
 
