@@ -2,7 +2,7 @@ name: Daily Watchlist Email
 
 on:
   schedule:
-    - cron: '0 12 * * 1-5'  # Weekdays 12:00 UTC = 5:30 PM IST
+    - cron: '30 13 * * 1-5'  # Weekdays 13:30 UTC = 7:00 PM IST
   workflow_dispatch:
 
 jobs:
