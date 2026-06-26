@@ -1414,7 +1414,7 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@700;900&family=Inter:wght@400;500;600&display=swap');
 
-/* ── Fix 1: Nuke the dark chat container ── */
+# ── Fix 1: Nuke the dark chat container ──
 [data-testid="stChatInput"] {
     background-color: #FFFFFF !important;
     border: 1px solid #D1D5DB !important;
