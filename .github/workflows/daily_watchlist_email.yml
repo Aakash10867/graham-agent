@@ -1,0 +1,23 @@
+name: Daily Watchlist Email
+
+on:
+  schedule:
+    - cron: '0 12 * * 1-5'  # Weekdays 12:00 UTC = 5:30 PM IST
+  workflow_dispatch:
+
+jobs:
+  watchlist-email:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install supabase yfinance google-genai pandas
+      - run: python daily_watchlist_email.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+          ALERT_EMAIL_PASSWORD: ${{ secrets.ALERT_EMAIL_PASSWORD }}
