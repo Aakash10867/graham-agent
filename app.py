@@ -3899,6 +3899,80 @@ if st.session_state.sb_view_mode == "chat":
                     if st.session_state.get("pending_portfolio"):
                         st.rerun()
 
+                    # ── Chat → Watchlist bridge ──
+                    if st.session_state.sb_user_id and "YES" in answer.upper():
+                        _bridge_sb = get_supabase()
+                        # Extract tickers from the response
+                        _resp_tickers = set(re.findall(r'\b[A-Z][A-Z0-9&]+\.(?:NS|BO)\b', answer))
+                        # Also check disambiguated prompt for the explicit ticker
+                        _disambig = re.search(r'ticker:\s*([A-Z][A-Z0-9&]+\.(?:NS|BO))', prompt)
+                        if _disambig:
+                            _resp_tickers.add(_disambig.group(1))
+
+                        # Find which tickers got a YES verdict (within 300 chars of YES)
+                        _answer_upper = answer.upper()
+                        _yes_tickers = []
+                        for _t in _resp_tickers:
+                            _t_up = _t.upper()
+                            if re.search(
+                                rf'(?:{re.escape(_t_up)}.{{0,300}}VERDICT.*?YES)|(?:YES.{{0,300}}{re.escape(_t_up)})',
+                                _answer_upper
+                            ):
+                                _yes_tickers.append(_t)
+                        # Single-stock shortcut: if only one ticker and YES in response
+                        if not _yes_tickers and len(_resp_tickers) == 1:
+                            _yes_tickers = list(_resp_tickers)
+
+                        if _yes_tickers:
+                            # Check what user already holds
+                            try:
+                                _u_ports = _bridge_sb.table("portfolios").select("id").eq(
+                                    "user_id", st.session_state.sb_user_id
+                                ).execute().data or []
+                                _port_ids = [p["id"] for p in _u_ports]
+                                if _port_ids:
+                                    _held = {h["ticker"] for h in (_bridge_sb.table("holdings").select(
+                                        "ticker"
+                                    ).in_("portfolio_id", _port_ids).execute().data or [])}
+                                else:
+                                    _held = set()
+                            except Exception:
+                                _held = set()
+
+                            # Check what user already watches
+                            try:
+                                _watched = {w["ticker"] for w in (_bridge_sb.table("watchlist").select(
+                                    "ticker"
+                                ).eq("user_id", st.session_state.sb_user_id).execute().data or [])}
+                            except Exception:
+                                _watched = set()
+
+                            for _yt in _yes_tickers:
+                                _bare = _yt.replace(".NS", "").replace(".BO", "")
+                                if _yt in _held:
+                                    st.caption(f"✅ {_bare} — already in your portfolio")
+                                elif _yt in _watched:
+                                    st.caption(f"👁 {_bare} — already on your watchlist")
+                                else:
+                                    if st.button(f"👁 Watch {_bare}", key=f"watch_{_yt}", use_container_width=True):
+                                        _wl_row = universe_df[universe_df["ticker"] == _yt]
+                                        _wl_data = {
+                                            "user_id": st.session_state.sb_user_id,
+                                            "ticker": _yt,
+                                            "name": str(_wl_row["name"].iloc[0]) if not _wl_row.empty else _bare,
+                                            "score_when_added": int(_wl_row["score"].iloc[0]) if not _wl_row.empty and pd.notna(_wl_row["score"].iloc[0]) else None,
+                                            "quality_when_added": bool(_wl_row["quality_pass"].iloc[0]) if not _wl_row.empty and "quality_pass" in _wl_row.columns and pd.notna(_wl_row["quality_pass"].iloc[0]) else None,
+                                        }
+                                        try:
+                                            _bridge_sb.table("watchlist").insert(_wl_data).execute()
+                                            st.success(f"Added {_wl_data['name']} to your watchlist!")
+                                            st.rerun()
+                                        except Exception as _we:
+                                            if "duplicate" in str(_we).lower() or "unique" in str(_we).lower():
+                                                st.caption(f"👁 {_bare} — already on your watchlist")
+                                            else:
+                                                st.error(f"Failed: {_we}")
+
         if st.session_state.get("pending_retry"):
             if st.button("🔄 Retry last query", width="stretch"):
                 st.session_state.pending_prompt = st.session_state.pop("pending_retry")
