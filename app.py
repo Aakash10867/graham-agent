@@ -3814,6 +3814,10 @@ if st.session_state.sb_view_mode == "chat":
                             })
                         st.dataframe(pd.DataFrame(breakdown_data), hide_index=True, width="stretch")
                         st.session_state.pending_portfolio = None
+                        if portfolio.get("is_paper"):
+                            st.session_state._paper_just_saved = True
+                            st.session_state.sb_view_mode = "watchlist"
+                            st.rerun()
                     except Exception as e:
                         st.error(f"Save failed: {e}")
 
@@ -3971,134 +3975,272 @@ if st.session_state.sb_view_mode == "chat":
 elif st.session_state.sb_view_mode == "watchlist":
     st.markdown("### 👁 My Watchlist")
 
-    if st.session_state.sb_user_id is None:
-        st.warning("Please log in to view your watchlist.")
+    st.warning("Please log in to view your watchlist.")
     else:
-        _w_sb = get_supabase()
-        try:
-            _w_resp = _w_sb.table("watchlist").select("*").eq(
-                "user_id", st.session_state.sb_user_id
-            ).order("added_date", desc=True).execute()
-            _w_items = _w_resp.data or []
-        except Exception as _w_err:
-            st.error(f"Failed to load watchlist: {_w_err}")
-            _w_items = []
+        _wl_tab_stocks, _wl_tab_paper = st.tabs(["📊 Stocks", "📁 Paper Portfolios"])
 
-        # Fetch today's watchlist alerts (auto-expire after 24h)
-        _wl_alerts_by_ticker = {}
-        if _w_items:
+        with _wl_tab_stocks:
+            _w_sb = get_supabase()
             try:
-                _wl_alert_resp = _w_sb.table("portfolio_alerts").select("*").eq(
+                _w_resp = _w_sb.table("watchlist").select("*").eq(
                     "user_id", st.session_state.sb_user_id
-                ).eq("alert_date", datetime.date.today().isoformat()).in_(
-                    "alert_type", ["watchlist_score_up", "watchlist_score_down",
-                                   "watchlist_quality_flip", "watchlist_near_low"]
-                ).execute()
-                for _wa in (_wl_alert_resp.data or []):
-                    _wl_alerts_by_ticker.setdefault(_wa["ticker"], []).append(_wa)
-            except Exception:
-                pass
-
-        if not _w_items:
-            st.info("Your watchlist is empty. Analyze a stock in chat — if it gets a YES verdict, you'll see a Watch button.")
-        else:
-            for _w in _w_items:
-                _w_ticker = _w["ticker"]
-                _w_name = _w.get("name") or _w_ticker
-                _w_bare = _w_ticker.replace(".NS", "").replace(".BO", "")
-                _w_added_score = _w.get("score_when_added")
-                _w_added_quality = _w.get("quality_when_added")
-                _w_note = _w.get("note") or ""
-                _w_added_date = _w.get("added_date", "")
-                _w_days = 0
-                if _w_added_date:
-                    try:
-                        _w_days = (datetime.date.today() - datetime.date.fromisoformat(str(_w_added_date))).days
-                    except Exception:
-                        pass
-
-                # Current data from universe_df
-                _w_cur_score = "?"
-                _w_cur_quality = None
-                _w_sector = "—"
-                _w_pe = "—"
-                _w_pb = "—"
+                ).order("added_date", desc=True).execute()
+                _w_items = _w_resp.data or []
+            except Exception as _w_err:
+                st.error(f"Failed to load watchlist: {_w_err}")
+                _w_items = []
+    
+            # Fetch today's watchlist alerts (auto-expire after 24h)
+            _wl_alerts_by_ticker = {}
+            if _w_items:
                 try:
-                    _w_row = universe_df[universe_df["ticker"] == _w_ticker]
-                    if not _w_row.empty:
-                        if pd.notna(_w_row["score"].iloc[0]):
-                            _w_cur_score = int(_w_row["score"].iloc[0])
-                        if "quality_pass" in _w_row.columns and pd.notna(_w_row["quality_pass"].iloc[0]):
-                            _w_cur_quality = bool(_w_row["quality_pass"].iloc[0])
-                        _w_sector = str(_w_row["sector"].iloc[0]) if pd.notna(_w_row.get("sector", pd.Series([None])).iloc[0]) else "—"
-                        _w_pe = round(float(_w_row["pe"].iloc[0]), 1) if pd.notna(_w_row.get("pe", pd.Series([None])).iloc[0]) else "—"
-                        _w_pb = round(float(_w_row["pb"].iloc[0]), 2) if pd.notna(_w_row.get("pb", pd.Series([None])).iloc[0]) else "—"
-                except NameError:
+                    _wl_alert_resp = _w_sb.table("portfolio_alerts").select("*").eq(
+                        "user_id", st.session_state.sb_user_id
+                    ).eq("alert_date", datetime.date.today().isoformat()).in_(
+                        "alert_type", ["watchlist_score_up", "watchlist_score_down",
+                                       "watchlist_quality_flip", "watchlist_near_low"]
+                    ).execute()
+                    for _wa in (_wl_alert_resp.data or []):
+                        _wl_alerts_by_ticker.setdefault(_wa["ticker"], []).append(_wa)
+                except Exception:
                     pass
-
-                with st.container(border=True):
-                    _wh1, _wh2 = st.columns([4, 1])
-                    with _wh1:
-                        # Score delta
-                        _w_delta_str = ""
-                        if _w_added_score is not None and _w_cur_score != "?":
-                            _w_diff = _w_cur_score - _w_added_score
-                            if _w_diff > 0:
-                                _w_delta_str = f"  ↑{_w_diff} since added"
-                            elif _w_diff < 0:
-                                _w_delta_str = f"  ↓{abs(_w_diff)} since added"
-                        st.markdown(f"**{_w_name}** ({_w_bare})")
-                        st.caption(f"Score: {_w_cur_score}/4{_w_delta_str} · {_w_sector} · PE {_w_pe} · PB {_w_pb} · Watching {_w_days}d")
-
-                        # Quality flip warning
-                        if _w_added_quality is not None and _w_cur_quality is not None and _w_added_quality != _w_cur_quality:
-                            if _w_cur_quality:
-                                st.success("Quality flipped to PASS since you added this.")
-                            else:
-                                st.warning("Quality flipped to FAIL since you added this.")
-
-                    with _wh2:
-                        if st.button("✕ Remove", key=f"wl_rm_{_w['id']}", use_container_width=True):
-                            try:
-                                _w_sb.table("watchlist").delete().eq("id", _w["id"]).execute()
-                                st.rerun()
-                            except Exception as _e:
-                                st.error(f"Failed: {_e}")
-                    # Daily alerts (auto-expire after 24h)
-                    _card_alerts = _wl_alerts_by_ticker.get(_w_ticker, [])
-                    for _ca in _card_alerts:
-                        _ca_type = _ca["alert_type"]
-                        _ca_headline = _ca.get("headline", "")
-                        if _ca_type in ("watchlist_score_up", "watchlist_near_low"):
-                            st.success(f"{_ca_headline}")
-                        elif _ca_type == "watchlist_score_down":
-                            st.warning(f"{_ca_headline}")
-                        elif _ca_type == "watchlist_quality_flip":
-                            _ca_detail = _ca.get("detail") or {}
-                            if isinstance(_ca_detail, str):
-                                import json as _json
-                                try:
-                                    _ca_detail = _json.loads(_ca_detail)
-                                except Exception:
-                                    _ca_detail = {}
-                            if _ca_detail.get("current"):
-                                st.success(f"{_ca_headline}")
-                            else:
-                                st.warning(f"{_ca_headline}")
-
-                    
-                    # Editable note
-                    _w_new_note = st.text_input(
-                        "Note", value=_w_note, key=f"wl_note_{_w['id']}",
-                        placeholder="e.g. Waiting for PE to drop below 12",
-                        label_visibility="collapsed"
-                    )
-                    if _w_new_note != _w_note:
+    
+            if not _w_items:
+                st.info("Your watchlist is empty. Analyze a stock in chat — if it gets a YES verdict, you'll see a Watch button.")
+            else:
+                for _w in _w_items:
+                    _w_ticker = _w["ticker"]
+                    _w_name = _w.get("name") or _w_ticker
+                    _w_bare = _w_ticker.replace(".NS", "").replace(".BO", "")
+                    _w_added_score = _w.get("score_when_added")
+                    _w_added_quality = _w.get("quality_when_added")
+                    _w_note = _w.get("note") or ""
+                    _w_added_date = _w.get("added_date", "")
+                    _w_days = 0
+                    if _w_added_date:
                         try:
-                            _w_sb.table("watchlist").update({"note": _w_new_note}).eq("id", _w["id"]).execute()
+                            _w_days = (datetime.date.today() - datetime.date.fromisoformat(str(_w_added_date))).days
                         except Exception:
                             pass
+    
+                    # Current data from universe_df
+                    _w_cur_score = "?"
+                    _w_cur_quality = None
+                    _w_sector = "—"
+                    _w_pe = "—"
+                    _w_pb = "—"
+                    try:
+                        _w_row = universe_df[universe_df["ticker"] == _w_ticker]
+                        if not _w_row.empty:
+                            if pd.notna(_w_row["score"].iloc[0]):
+                                _w_cur_score = int(_w_row["score"].iloc[0])
+                            if "quality_pass" in _w_row.columns and pd.notna(_w_row["quality_pass"].iloc[0]):
+                                _w_cur_quality = bool(_w_row["quality_pass"].iloc[0])
+                            _w_sector = str(_w_row["sector"].iloc[0]) if pd.notna(_w_row.get("sector", pd.Series([None])).iloc[0]) else "—"
+                            _w_pe = round(float(_w_row["pe"].iloc[0]), 1) if pd.notna(_w_row.get("pe", pd.Series([None])).iloc[0]) else "—"
+                            _w_pb = round(float(_w_row["pb"].iloc[0]), 2) if pd.notna(_w_row.get("pb", pd.Series([None])).iloc[0]) else "—"
+                    except NameError:
+                        pass
+    
+                    with st.container(border=True):
+                        _wh1, _wh2 = st.columns([4, 1])
+                        with _wh1:
+                            # Score delta
+                            _w_delta_str = ""
+                            if _w_added_score is not None and _w_cur_score != "?":
+                                _w_diff = _w_cur_score - _w_added_score
+                                if _w_diff > 0:
+                                    _w_delta_str = f"  ↑{_w_diff} since added"
+                                elif _w_diff < 0:
+                                    _w_delta_str = f"  ↓{abs(_w_diff)} since added"
+                            st.markdown(f"**{_w_name}** ({_w_bare})")
+                            st.caption(f"Score: {_w_cur_score}/4{_w_delta_str} · {_w_sector} · PE {_w_pe} · PB {_w_pb} · Watching {_w_days}d")
+    
+                            # Quality flip warning
+                            if _w_added_quality is not None and _w_cur_quality is not None and _w_added_quality != _w_cur_quality:
+                                if _w_cur_quality:
+                                    st.success("Quality flipped to PASS since you added this.")
+                                else:
+                                    st.warning("Quality flipped to FAIL since you added this.")
+    
+                        with _wh2:
+                            if st.button("✕ Remove", key=f"wl_rm_{_w['id']}", use_container_width=True):
+                                try:
+                                    _w_sb.table("watchlist").delete().eq("id", _w["id"]).execute()
+                                    st.rerun()
+                                except Exception as _e:
+                                    st.error(f"Failed: {_e}")
+                        # Daily alerts (auto-expire after 24h)
+                        _card_alerts = _wl_alerts_by_ticker.get(_w_ticker, [])
+                        for _ca in _card_alerts:
+                            _ca_type = _ca["alert_type"]
+                            _ca_headline = _ca.get("headline", "")
+                            if _ca_type in ("watchlist_score_up", "watchlist_near_low"):
+                                st.success(f"{_ca_headline}")
+                            elif _ca_type == "watchlist_score_down":
+                                st.warning(f"{_ca_headline}")
+                            elif _ca_type == "watchlist_quality_flip":
+                                _ca_detail = _ca.get("detail") or {}
+                                if isinstance(_ca_detail, str):
+                                    import json as _json
+                                    try:
+                                        _ca_detail = _json.loads(_ca_detail)
+                                    except Exception:
+                                        _ca_detail = {}
+                                if _ca_detail.get("current"):
+                                    st.success(f"{_ca_headline}")
+                                else:
+                                    st.warning(f"{_ca_headline}")
+    
+                        
+                        # Editable note
+                        _w_new_note = st.text_input(
+                            "Note", value=_w_note, key=f"wl_note_{_w['id']}",
+                            placeholder="e.g. Waiting for PE to drop below 12",
+                            label_visibility="collapsed"
+                        )
+                        if _w_new_note != _w_note:
+                            try:
+                                _w_sb.table("watchlist").update({"note": _w_new_note}).eq("id", _w["id"]).execute()
+                            except Exception:
+                                pass
 
+
+with _wl_tab_paper:
+            if st.session_state.get("_paper_just_saved"):
+                st.success("Paper portfolio saved! Track its performance here.")
+                st.session_state.pop("_paper_just_saved", None)
+
+            _pp_sb = get_supabase()
+            try:
+                _pp_resp = _pp_sb.table("portfolios").select("*").eq(
+                    "user_id", st.session_state.sb_user_id
+                ).eq("is_paper", True).order("created_at", desc=True).execute()
+                _pp_ports = _pp_resp.data or []
+            except Exception as _pp_err:
+                st.error(f"Failed to load paper portfolios: {_pp_err}")
+                _pp_ports = []
+
+            if not _pp_ports:
+                st.info("No paper portfolios yet. Use 🏗️ Build Portfolio and check 'Watch only' to create one.")
+            else:
+                for _pp in _pp_ports:
+                    with st.container(border=True):
+                        st.markdown(f"**👁 {_pp['name']}**")
+
+                        try:
+                            _pp_h_resp = _pp_sb.table("holdings").select("*").eq(
+                                "portfolio_id", _pp["id"]
+                            ).execute()
+                            _pp_holdings = _pp_h_resp.data or []
+                        except Exception:
+                            _pp_holdings = []
+
+                        if _pp_holdings:
+                            _pp_enriched = enrich_holdings_live(_pp_holdings, cache_key=f"paper_{_pp['id']}")
+                            _pp_invested = sum(h.get("shares", 0) * h.get("price_at_entry", 0) for h in _pp_enriched)
+                            _pp_current = sum(h.get("current_value", 0) for h in _pp_enriched)
+                            _pp_ret = ((_pp_current - _pp_invested) / _pp_invested * 100) if _pp_invested > 0 else 0
+
+                            _pm1, _pm2, _pm3 = st.columns(3)
+                            with _pm1:
+                                st.metric("Invested", f"₹{_pp_invested:,.0f}")
+                            with _pm2:
+                                st.metric("Current Value", f"₹{_pp_current:,.0f}")
+                            with _pm3:
+                                st.metric("Return", f"{_pp_ret:+.1f}%")
+
+                            _pp_rows = []
+                            for _h in _pp_enriched:
+                                _h_entry = _h.get("price_at_entry", 0)
+                                _h_now = _h.get("current_price", 0)
+                                _h_sh = _h.get("shares", 0)
+                                _h_pnl = (_h_now - _h_entry) * _h_sh
+                                _h_ret = ((_h_now - _h_entry) / _h_entry * 100) if _h_entry > 0 else 0
+                                _pp_rows.append({
+                                    "Stock": _h.get("name") or _h.get("ticker", ""),
+                                    "Shares": _h_sh,
+                                    "Entry": f"₹{_h_entry:,.2f}",
+                                    "Now": f"₹{_h_now:,.2f}",
+                                    "P&L": f"₹{_h_pnl:,.0f}",
+                                    "Return": f"{_h_ret:+.1f}%",
+                                })
+                            st.dataframe(pd.DataFrame(_pp_rows), hide_index=True, use_container_width=True)
+
+                            _pp_profile = _pp.get("portfolio_profile") or {}
+                            if isinstance(_pp_profile, str):
+                                try:
+                                    _pp_profile = json.loads(_pp_profile)
+                                except Exception:
+                                    _pp_profile = {}
+                            _pp_cap_parts = [_pp.get("created_at", "")[:10]]
+                            if _pp.get("investor_type"):
+                                _pp_cap_parts.append(_pp["investor_type"])
+                            if _pp.get("time_horizon"):
+                                _pp_cap_parts.append(f"{_pp['time_horizon']} horizon")
+                            if _pp.get("target_amount"):
+                                _pp_cap_parts.append(f"Goal: ₹{_pp['target_amount']:,.0f}")
+                            st.caption(" · ".join(_pp_cap_parts))
+                        else:
+                            st.caption("No holdings recorded.")
+
+                        # ── Action buttons ──
+                        _pp_c1, _pp_c2 = st.columns(2)
+                        with _pp_c1:
+                            if st.button("🚀 Make This Real", key=f"make_real_{_pp['id']}", use_container_width=True):
+                                st.session_state[f"confirm_real_{_pp['id']}"] = True
+                        with _pp_c2:
+                            if st.button("🗑️ Delete", key=f"del_paper_{_pp['id']}", use_container_width=True, type="secondary"):
+                                st.session_state[f"confirm_del_paper_{_pp['id']}"] = True
+
+                        # ── Make This Real confirmation ──
+                        if st.session_state.get(f"confirm_real_{_pp['id']}"):
+                            st.warning("This converts to a real portfolio at **current market prices** (not original paper prices). Tracking restarts from today.")
+                            _rc1, _rc2 = st.columns(2)
+                            with _rc1:
+                                if st.button("Yes, make it real", key=f"real_yes_{_pp['id']}", use_container_width=True):
+                                    try:
+                                        for _rh in _pp_holdings:
+                                            try:
+                                                _rh_price = yf.Ticker(_rh.get("ticker", "")).fast_info.last_price or _rh.get("price_at_entry", 0)
+                                            except Exception:
+                                                _rh_price = _rh.get("price_at_entry", 0)
+                                            _pp_sb.table("holdings").update({
+                                                "price_at_entry": round(_rh_price, 2),
+                                                "sip_amount_inr": round(_rh.get("shares", 0) * _rh_price, 2),
+                                            }).eq("id", _rh["id"]).execute()
+                                        _pp_sb.table("portfolios").update({"is_paper": False}).eq("id", _pp["id"]).execute()
+                                        try:
+                                            _pp_sb.table("portfolio_history").delete().eq("portfolio_id", _pp["id"]).execute()
+                                        except Exception:
+                                            pass
+                                        st.session_state.pop(f"confirm_real_{_pp['id']}", None)
+                                        st.success("Portfolio is now real! Find it in My Portfolios.")
+                                        st.rerun()
+                                    except Exception as _re:
+                                        st.error(f"Failed: {_re}")
+                            with _rc2:
+                                if st.button("Cancel", key=f"real_no_{_pp['id']}", use_container_width=True):
+                                    st.session_state.pop(f"confirm_real_{_pp['id']}", None)
+                                    st.rerun()
+
+                        # ── Delete confirmation ──
+                        if st.session_state.get(f"confirm_del_paper_{_pp['id']}"):
+                            st.warning("Delete this paper portfolio? This cannot be undone.")
+                            _dc1, _dc2 = st.columns(2)
+                            with _dc1:
+                                if st.button("Yes, delete", key=f"del_yes_{_pp['id']}", use_container_width=True):
+                                    try:
+                                        _pp_sb.table("holdings").delete().eq("portfolio_id", _pp["id"]).execute()
+                                        _pp_sb.table("portfolios").delete().eq("id", _pp["id"]).execute()
+                                        st.session_state.pop(f"confirm_del_paper_{_pp['id']}", None)
+                                        st.rerun()
+                                    except Exception as _de:
+                                        st.error(f"Failed: {_de}")
+                            with _dc2:
+                                if st.button("Cancel", key=f"del_no_{_pp['id']}", use_container_width=True):
+                                    st.session_state.pop(f"confirm_del_paper_{_pp['id']}", None)
+                                    st.rerun()
 
 elif st.session_state.sb_view_mode == "import":
     st.markdown("### 📥 Import Your Existing Portfolio")
@@ -4401,7 +4543,7 @@ elif st.session_state.sb_view_mode == "portfolios":
         port_resp = sb.table("portfolios").select("*").eq(
             "user_id", st.session_state.sb_user_id
         ).order("created_at", desc=True).execute()
-        portfolios = port_resp.data
+        portfolios = [p for p in (port_resp.data or []) if not p.get("is_paper")]
     except Exception as e:
         st.error(f"Failed to load portfolios: {e}")
         portfolios = []
