@@ -527,7 +527,14 @@ def score_frameworks(data):
     debt_g = data.get("debt_growth")
 
     years_listed = data.get("years_listed")
-    graham = bool(pe and pb and pe <= 15 and pb <= 1.5 and years_listed is not None and years_listed >= 7)
+    years_of_data = data.get("years_of_data") or 0
+    div_yield = data.get("dividend_yield")  # raw ratio, not pct
+    graham = bool(
+        pe and pb and pe <= 15 and pb <= 1.5
+        and div_yield is not None and div_yield > 0
+        and years_listed is not None and years_listed >= 7
+        and years_of_data >= 5
+    )
     greenblatt = bool(roe and ey and roe > 0.15 and ey > 5)
     dorsey = bool(roe and de is not None and roe > 0.15 and de < 50)
 
@@ -644,7 +651,7 @@ def main():
             r["dividend_yield_pct"] = None
 
     columns = [
-        "ticker", "name", "sector", "price", "market_cap",
+        "ticker", "name", "sector", "price", "market_cap", "years_listed",
         "pe", "pb", "roe_pct", "de", "eps", "earnings_yield",
         "dividend_yield_pct", "profit_margin",
         "current_ratio", "beta",
