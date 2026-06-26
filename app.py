@@ -3975,7 +3975,8 @@ if st.session_state.sb_view_mode == "chat":
 elif st.session_state.sb_view_mode == "watchlist":
     st.markdown("### 👁 My Watchlist")
 
-    st.warning("Please log in to view your watchlist.")
+    if st.session_state.sb_user_id is None:
+        st.warning("Please log in to view your watchlist.")
     else:
         _wl_tab_stocks, _wl_tab_paper = st.tabs(["📊 Stocks", "📁 Paper Portfolios"])
 
