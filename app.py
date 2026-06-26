@@ -3082,9 +3082,23 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
 
     candidates = _sanitize(candidates)
 
-    # ── Hard constraints only — LLM decides the count ──
     max_stocks = min(20, sip_amount // 750)
     min_stocks = max(5, max_stocks // 3)
+
+    fringe_candidates = []
+    try:
+        # Find 5 highly-scored stocks (3 or 4) that were excluded due to sector restrictions
+        _exc = json.loads(avoid_sectors) if isinstance(avoid_sectors, str) else avoid_sectors
+        if _exc:
+            fringe_df = universe_df[(universe_df["score"] >= 3) & (universe_df["sector"].isin(_exc))].head(5)
+            for _, r in fringe_df.iterrows():
+                fringe_candidates.append({
+                    "ticker": r["ticker"], "name": str(r.get("name", r["ticker"])),
+                    "sector": str(r.get("sector", "N/A")), "score": int(r["score"]),
+                    "reason_excluded": f"Sector ({r.get('sector')}) was excluded by user."
+                })
+    except Exception:
+        pass
 
     return {
         "investor_profile": {
@@ -3100,6 +3114,7 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
         },
         "candidates_count": len(candidates),
         "candidates": candidates,
+        "fringe_candidates": fringe_candidates, # Inject fringe list here
         "selection_instruction": (
             f"You have {len(candidates)} pre-filtered candidates. "
             f"Pick between {min_stocks} and {max_stocks} stocks. YOU decide the exact count — "
@@ -3365,17 +3380,24 @@ You have 11 tools available. Pick the right combination for each question — yo
 17. register_portfolio — After presenting your finalized SIP portfolio, call this to register it for saving. Pass portfolio_name, investor_type, sip_amount, time_horizon, review_days (integer), stocks_json (JSON string list with ticker/name/sector/allocation_pct per item), portfolio_profile (JSON string of the full builder profile), target_amount (number, 0 if no goal), and target_date (ISO date string, empty if no goal). ALWAYS call this after presenting the final portfolio table.
 
 SIP PORTFOLIO PROTOCOL:
-Portfolio building uses the embedded Builder form (🏗️ Build Portfolio sidebar button). The user has ALREADY answered all profiling questions through structured inputs before you see their message.
+Portfolio building uses the embedded Builder form (🏗️ Build Portfolio sidebar button). When you receive a message starting with [BUILDER_PROFILE], you must execute a strict 2-Phase process.
 
-When you receive a message starting with [BUILDER_PROFILE], do NOT re-ask profiling questions. The profile contains: sip_amount, time_horizon, investor_type, risk, preference, avoid_sectors, review_days, and optionally target_amount, target_date, is_paper.
+PHASE 1: DRAFT & INTERROGATE (DO NOT SHOW THE PORTFOLIO YET)
+1. Call get_sip_candidates with the profile parameters.
+2. Silently construct a "V1" portfolio in your mind. Do NOT output a table, do NOT list the stocks, and do NOT call register_portfolio.
+3. Analyze the trade-offs in your V1 draft and review the "fringe_candidates" returned by the tool.
+4. Output a brief, layman-friendly summary of the strategy you are considering.
+5. Ask the user 1 to 3 targeted questions to refine the build. 
+   - RULE: Speak to them as a layman. Do NOT use jargon like "Graham", "Dorsey", "moat", "beta", or "PE expansion". 
+   - Example (Fringe Candidate): "I found a highly profitable company that fits your goals perfectly, but it's in the Energy sector which you asked to avoid. Are you open to making an exception for a top-tier performer?"
+   - Example (Risk Trade-off): "To hit your target, we need a bit more growth. Would you prefer adding a fast-growing but bumpier stock, or stick to steady, slow-moving giants?"
+6. Stop and wait for the user's reply.
 
-Proceed directly:
-1. Call get_sip_candidates with: sip_amount, time_horizon, investor_type, review_freq (from the profile), and avoid_sectors (as a JSON string list).
-2. EXCEPTION — If there is a clear mathematical tension (e.g., conservative risk + ₹50L goal in 5 years requiring 18%+ CAGR), ask ONE clarifying question. Otherwise skip straight to stock selection.
-3. Select stocks. Write your stock-by-stock analysis and reasoning FIRST, explaining why each pick fits using Graham/Greenblatt/Dorsey.
-4. CRITICAL: Generate the textual explanation BEFORE calling register_portfolio. Tool call first = explanation truncated.
-5. Call register_portfolio with all fields including portfolio_profile (pass the full profile JSON from the message), target_amount, and target_date.
-6. Do NOT ask the user for permission to save — just call the tool.
+PHASE 2: FINALIZE & REGISTER (TRIGGERED ONLY AFTER USER REPLIES)
+1. When the user answers your questions, finalize the stock selection.
+2. Output the final portfolio table. NOW you may explain the quantitative reasoning using book philosophies (Graham/Greenblatt/Dorsey) to educate them on why these picks were made.
+3. CRITICAL: Generate this textual explanation FIRST.
+4. Call register_portfolio with all fields including portfolio_profile, target_amount, and target_date. Do not ask for permission to save, just call the tool.
 
 If someone asks to build a portfolio WITHOUT a [BUILDER_PROFILE] prefix, direct them to click the 🏗️ Build Portfolio button in the sidebar. If they insist or provide enough info inline, you may proceed by mapping their inputs to the profile parameters.
 
