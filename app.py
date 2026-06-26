@@ -3800,6 +3800,7 @@ if st.session_state.sb_view_mode == "chat":
                             "time_horizon": portfolio["time_horizon"],
                             "review_freq": str(review_days),
                             "next_review_date": next_review,
+                            "next_sip_date": next_sip,
                             "is_paper": portfolio.get("is_paper", False)
                         }).execute()
                         portfolio_id = port_resp.data[0]["id"]
@@ -4366,6 +4367,8 @@ elif st.session_state.sb_view_mode == "import":
                             _port_data["target_date"] = portfolio["target_date"]
                         if portfolio.get("is_paper"):
                             _port_data["is_paper"] = True
+                        next_sip = (datetime.date.today() + datetime.timedelta(days=30)).isoformat()
+                        _port_data["next_sip_date"] = next_sip
                         port_resp = sb.table("portfolios").insert(_port_data).execute()
                         
                         portfolio_id = port_resp.data[0]["id"]
@@ -5195,30 +5198,113 @@ elif st.session_state.sb_view_mode == "portfolios":
                                     st.error(f"Health check failed: {e}")
 
                 
+                # --- NEW COLLISION PROTOCOL & SIP MODULE ---
                 today = datetime.date.today()
                 _auto_key = f"auto_trigger_review_{port['id']}"
                 _auto_run = st.session_state.pop(_auto_key, False)
+                
+                # 1. Calculate Review Clock
                 review_date = None
+                rev_due_days = 0
                 if port.get("next_review_date"):
                     try:
                         review_date = datetime.date.fromisoformat(str(port["next_review_date"]))
+                        rev_due_days = (review_date - today).days
                     except (ValueError, TypeError):
-                        review_date = None
+                        pass
 
-                if holdings and (review_date or _auto_run):
-                    days_until = (review_date - today).days if review_date else 0
-                    if days_until > 7 and not _auto_run:
-                        st.caption(f"📅 Next review in {days_until} days ({review_date.isoformat()})")
-                    else:
+                # 2. Calculate SIP Clock
+                sip_date_str = port.get("next_sip_date")
+                sip_due_days = 0
+                if sip_date_str:
+                    try:
+                        sip_due_days = (datetime.date.fromisoformat(str(sip_date_str)) - today).days
+                    except (ValueError, TypeError):
+                        pass
+
+                _review_clicked = False
+                
+                if holdings:
+                    if _auto_run or rev_due_days <= 0:
+                        # STATE 1: PRIORITY OVERRIDE (Review is Due)
                         if not _auto_run:
-                            if days_until > 0:
-                                st.warning(f"📅 Review due in {days_until} days!")
-                            elif days_until == 0:
-                                st.warning("📅 Review due today!")
-                            else:
-                                st.error(f"📅 Review overdue by {abs(days_until)} days!")
-
+                            st.warning(f"📅 Review overdue by {abs(rev_due_days)} days! You must evaluate fundamentals before deploying more capital.")
                         _review_clicked = st.button("🔄 Review Portfolio", key=f"review_{port['id']}", width="stretch")
+                    
+                    elif sip_due_days <= 0:
+                        # STATE 2: MECHANICAL SIP DEPLOYMENT
+                        st.success(f"💰 Monthly SIP of ₹{port.get('sip_amount', 0):,} is due!")
+                        if st.button("💵 Deploy SIP", key=f"deploy_sip_{port['id']}", width="stretch"):
+                            st.session_state[f"active_sip_{port['id']}"] = True
+                        
+                        if st.session_state.get(f"active_sip_{port['id']}"):
+                            with st.container(border=True):
+                                st.markdown(f"**Mechanical SIP Deployment (₹{port.get('sip_amount', 0):,})**")
+                                sip_stocks = []
+                                for h in display_holdings:
+                                    if h.get("allocation_pct", 0) > 0:
+                                        sip_stocks.append({
+                                            "ticker": h["ticker"],
+                                            "name": h.get("name", h["ticker"]),
+                                            "allocation_pct": h["allocation_pct"],
+                                            "price": h.get("current_price", h.get("price_at_entry", 1)),
+                                            "id": h["id"],
+                                            "old_shares": h["shares"],
+                                            "old_entry": h.get("price_at_entry", 1)
+                                        })
+                                
+                                if sip_stocks:
+                                    allocated, unallocated = allocate_shares(sip_stocks, port.get("sip_amount", 0))
+                                    for a in allocated:
+                                        c1, c2, c3 = st.columns([2,1,1])
+                                        with c1: st.markdown(f"**{a['name']}**")
+                                        with c2: st.number_input("Shares", value=a["shares"], key=f"sip_q_{port['id']}_{a['ticker']}")
+                                        with c3: st.number_input("Price (₹)", value=float(a["price"]), key=f"sip_p_{port['id']}_{a['ticker']}")
+                                    
+                                    st.caption(f"Unallocated: ₹{unallocated:,.0f} (not enough for another full share)")
+                                    
+                                    bc1, bc2 = st.columns(2)
+                                    with bc1:
+                                        if st.button("✅ Confirm Purchase", key=f"conf_sip_{port['id']}", width="stretch"):
+                                            try:
+                                                for a in allocated:
+                                                    buy_q = st.session_state[f"sip_q_{port['id']}_{a['ticker']}"]
+                                                    buy_p = st.session_state[f"sip_p_{port['id']}_{a['ticker']}"]
+                                                    if buy_q > 0:
+                                                        new_total_shares = a["old_shares"] + buy_q
+                                                        old_value = a["old_shares"] * a["old_entry"]
+                                                        new_value = buy_q * buy_p
+                                                        new_avg_price = (old_value + new_value) / new_total_shares
+                                                        sb.table("holdings").update({
+                                                            "shares": new_total_shares,
+                                                            "price_at_entry": round(new_avg_price, 2),
+                                                            "sip_amount_inr": round(new_total_shares * new_avg_price, 2)
+                                                        }).eq("id", a["id"]).execute()
+                                                
+                                                # Bump the SIP timer by 30 days
+                                                new_sip_date = (today + datetime.timedelta(days=30)).isoformat()
+                                                sb.table("portfolios").update({"next_sip_date": new_sip_date}).eq("id", port["id"]).execute()
+                                                
+                                                del st.session_state[f"active_sip_{port['id']}"]
+                                                st.success("SIP Deployed Successfully!")
+                                                st.rerun()
+                                            except Exception as e:
+                                                st.error(f"Failed: {e}")
+                                    with bc2:
+                                        if st.button("Cancel", key=f"canc_sip_{port['id']}", width="stretch"):
+                                            del st.session_state[f"active_sip_{port['id']}"]
+                                            st.rerun()
+                                else:
+                                    st.warning("No active holdings found to allocate to.")
+
+                    else:
+                        # STATE 3: NO ACTION REQUIRED (Anti-Tinkering)
+                        st.caption(f"📅 Next Review due in {rev_due_days} days ({review_date.isoformat() if review_date else '—'})")
+                        if sip_date_str:
+                            st.caption(f"💰 Next SIP due in {sip_due_days} days ({sip_date_str})")
+                        else:
+                            st.caption(f"💰 Next SIP due in N/A")
+
                         if _review_clicked or _auto_run:
                             with st.spinner("Analyzing holdings with market context and book philosophy..."):
                                 enriched = build_review_context(holdings, port)
@@ -5567,13 +5653,9 @@ elif st.session_state.sb_view_mode == "portfolios":
 
                     st.markdown("---")
 
-                    # Calculate this cycle's SIP allocation
-                    monthly_sip = port.get("sip_amount", 0)
-                    try:
-                        review_days = int(port.get("review_freq", 30))
-                    except (ValueError, TypeError):
-                        review_days = 30
-                    cycle_amount = round(monthly_sip * review_days / 30)
+                    # Review is now strictly analytical. SIP is handled mechanically elsewhere.
+                    # We only deploy freed capital from sells during a review.
+                    cycle_amount = 0
 
                     sip_stocks = []
                     for r in review_rows:
