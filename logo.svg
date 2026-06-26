@@ -20,9 +20,15 @@
     </linearGradient>
 
     <linearGradient id="dark-refraction" x1="80%" y1="100%" x2="20%" y2="0%">
-      <stop offset="0%" stop-color="rgba(0, 10, 30, 0.85)" />
-      <stop offset="50%" stop-color="rgba(0, 10, 30, 0.15)" />
-      <stop offset="100%" stop-color="rgba(0, 10, 30, 0)" />
+      <stop offset="0%" stop-color="#000a1e" stop-opacity="0.85">
+        <animate attributeName="stop-color" values="#ffffff; #000a1e; #ffffff" dur="4s" repeatCount="indefinite" />
+        <animate attributeName="stop-opacity" values="0.95; 0.85; 0.95" dur="4s" repeatCount="indefinite" />
+      </stop>
+      <stop offset="50%" stop-color="#000a1e" stop-opacity="0.15">
+        <animate attributeName="stop-color" values="#ffffff; #000a1e; #ffffff" dur="4s" repeatCount="indefinite" />
+        <animate attributeName="stop-opacity" values="0.6; 0.15; 0.6" dur="4s" repeatCount="indefinite" />
+      </stop>
+      <stop offset="100%" stop-color="#000a1e" stop-opacity="0" />
     </linearGradient>
 
     <path id="sparkle" d="M 0,-4 Q 0,0 4,0 Q 0,0 0,4 Q 0,0 -4,0 Q 0,0 0,-4 Z" fill="#FFFFFF" filter="url(#glow)" />
