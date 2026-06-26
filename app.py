@@ -3964,6 +3964,21 @@ elif st.session_state.sb_view_mode == "watchlist":
             st.error(f"Failed to load watchlist: {_w_err}")
             _w_items = []
 
+        # Fetch today's watchlist alerts (auto-expire after 24h)
+        _wl_alerts_by_ticker = {}
+        if _w_items:
+            try:
+                _wl_alert_resp = _w_sb.table("portfolio_alerts").select("*").eq(
+                    "user_id", st.session_state.sb_user_id
+                ).eq("alert_date", datetime.date.today().isoformat()).in_(
+                    "alert_type", ["watchlist_score_up", "watchlist_score_down",
+                                   "watchlist_quality_flip", "watchlist_near_low"]
+                ).execute()
+                for _wa in (_wl_alert_resp.data or []):
+                    _wl_alerts_by_ticker.setdefault(_wa["ticker"], []).append(_wa)
+            except Exception:
+                pass
+
         if not _w_items:
             st.info("Your watchlist is empty. Analyze a stock in chat — if it gets a YES verdict, you'll see a Watch button.")
         else:
@@ -4029,7 +4044,29 @@ elif st.session_state.sb_view_mode == "watchlist":
                                 st.rerun()
                             except Exception as _e:
                                 st.error(f"Failed: {_e}")
+                    # Daily alerts (auto-expire after 24h)
+                    _card_alerts = _wl_alerts_by_ticker.get(_w_ticker, [])
+                    for _ca in _card_alerts:
+                        _ca_type = _ca["alert_type"]
+                        _ca_headline = _ca.get("headline", "")
+                        if _ca_type in ("watchlist_score_up", "watchlist_near_low"):
+                            st.success(f"{_ca_headline}")
+                        elif _ca_type == "watchlist_score_down":
+                            st.warning(f"{_ca_headline}")
+                        elif _ca_type == "watchlist_quality_flip":
+                            _ca_detail = _ca.get("detail") or {}
+                            if isinstance(_ca_detail, str):
+                                import json as _json
+                                try:
+                                    _ca_detail = _json.loads(_ca_detail)
+                                except Exception:
+                                    _ca_detail = {}
+                            if _ca_detail.get("current"):
+                                st.success(f"{_ca_headline}")
+                            else:
+                                st.warning(f"{_ca_headline}")
 
+                    
                     # Editable note
                     _w_new_note = st.text_input(
                         "Note", value=_w_note, key=f"wl_note_{_w['id']}",
