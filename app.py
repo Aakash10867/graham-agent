@@ -1369,8 +1369,6 @@ SCREENER_PRESETS = [
      "Find the best Indian stocks to invest in right now. Show me which stocks pass all 4 frameworks and which pass 3 out of 4 and which pass 2 out of 4, with upto top 10 from each tier. Explain why each tier is a good investment using the book philosophies."),
     ("💎 Find Hidden Gems",
      "Find hidden gem stocks — small and mid cap Indian companies outside the Nifty 50 that pass at least 3 out of 4 frameworks. Show top 10 with key metrics. Explain why each is a good investment using book philosophies."),
-    ("💼 Build SIP Portfolio",
-     "I want to build a SIP portfolio. Help me pick the right stocks based on my goals and investment amount."),
 ]
 
 # ══════════════════════════════════════════════
@@ -3709,7 +3707,6 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
 
-
 USER_AVATAR = "👤"
 AGENT_AVATAR = "logo.svg"
 
@@ -3718,7 +3715,7 @@ if st.session_state.sb_view_mode == "chat":
 
     st.markdown("")
     st.caption("Market screeners")
-    scr_cols = st.columns(3)
+    scr_cols = st.columns(len(SCREENER_PRESETS))
     for i, (label, template) in enumerate(SCREENER_PRESETS):
         with scr_cols[i]:
             if st.button(label, key=f"screener_{i}", width="stretch"):
@@ -4410,7 +4407,7 @@ elif st.session_state.sb_view_mode == "portfolios":
         portfolios = []
 
     if not portfolios:
-        st.info("No saved portfolios yet. Use the SIP Portfolio builder to create one!")
+        st.info("No saved portfolios yet. Click 🏗️ Build Portfolio in the sidebar to get started!")
     else:
         for port in portfolios:
             with st.container(border=True):
