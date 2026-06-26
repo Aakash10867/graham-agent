@@ -148,6 +148,7 @@ def get_portfolio_summaries(ports, supabase, nifty_weekly_pct):
             "goal_amount": p.get("target_amount"),
             "goal_date": p.get("target_date"),
             "link": f"{APP_URL}/?portfolio={pid}",
+            "is_paper": p.get("is_paper", False),
         })
 
     return summaries
@@ -172,8 +173,9 @@ def build_gemini_prompt(name, summaries, alerts):
             used = s["budget_total"] - s["budget_remaining"]
             budget_line = f"\n  Opportunity budget: ₹{used:,.0f} used of ₹{s['budget_total']:,.0f}"
 
+        _paper_tag = " 👁 (Paper — not yet invested)" if s.get("is_paper") else ""
         port_block += f"""
-Portfolio: {s['name']}
+Portfolio: {s['name']}{_paper_tag}
   Value: ₹{s['value']:,.0f} | Overall return: {s['return_pct']:+.1f}%
   This week: {weekly} (Nifty: {nifty}){goal_line}{budget_line}
   View: {s['link']}
@@ -242,9 +244,10 @@ Write a warm, personal weekly email. Rules:
 3. For each alert, explain WHY it matters using the book context provided. Reference Graham, Greenblatt, or Dorsey naturally — "Graham would say..." not "According to Benjamin Graham's The Intelligent Investor..."
 4. If there are opportunities with budget remaining, mention the suggested amount. If budget is used up, say so matter-of-factly.
 5. If a goal is set, give a one-line status: on track, behind, or ahead.
-6. End with a patience reminder — one sentence, not preachy. Vary it each week.
-7. Include the portfolio link(s) so they can take action.
-8. Sign off as "Kordent"
+6. If a portfolio is marked "Paper", note it's a watchlist portfolio — tracking performance without real money. Be encouraging about what they're learning from the simulation.
+7. End with a patience reminder — one sentence, not preachy. Vary it each week.
+8. Include the portfolio link(s) so they can take action.
+9. Sign off as "Kordent"
 
 TONE: You're a wise friend who happens to be great with money. Not a robot, not a salesperson, not a professor. Use simple language. If you must use a financial term, define it in parentheses.
 LENGTH: Under 400 words. Shorter is better.
