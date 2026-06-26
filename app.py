@@ -3792,6 +3792,8 @@ if st.session_state.sb_view_mode == "chat":
                         sb = get_supabase()
                         review_days = portfolio.get("review_days", 90)
                         next_review = (datetime.date.today() + datetime.timedelta(days=review_days)).isoformat()
+                        next_sip = (datetime.date.today() + datetime.timedelta(days=30)).isoformat()
+                        
                         port_resp = sb.table("portfolios").insert({
                             "user_id": st.session_state.sb_user_id,
                             "name": portfolio["name"],
@@ -4349,28 +4351,21 @@ elif st.session_state.sb_view_mode == "import":
                         sb = get_supabase()
                         review_days = 90 if horizon == "medium" else (180 if horizon == "long" else 30)
                         next_review = (datetime.date.today() + datetime.timedelta(days=review_days)).isoformat()
+                        next_sip = (datetime.date.today() + datetime.timedelta(days=30)).isoformat()
                         
                         _port_data = {
                             "user_id": st.session_state.sb_user_id,
-                            "name": portfolio["name"],
-                            "investor_type": portfolio["investor_type"],
-                            "sip_amount": portfolio["sip_amount"],
-                            "time_horizon": portfolio["time_horizon"],
+                            "name": p_name,
+                            "investor_type": inv_type,
+                            "sip_amount": sip_amt,
+                            "time_horizon": horizon,
                             "review_freq": str(review_days),
                             "next_review_date": next_review,
+                            "next_sip_date": next_sip,
+                            "is_paper": False
                         }
-                        if portfolio.get("portfolio_profile"):
-                            _port_data["portfolio_profile"] = portfolio["portfolio_profile"]
-                        if portfolio.get("target_amount"):
-                            _port_data["target_amount"] = portfolio["target_amount"]
-                        if portfolio.get("target_date"):
-                            _port_data["target_date"] = portfolio["target_date"]
-                        if portfolio.get("is_paper"):
-                            _port_data["is_paper"] = True
-                        next_sip = (datetime.date.today() + datetime.timedelta(days=30)).isoformat()
-                        _port_data["next_sip_date"] = next_sip
-                        port_resp = sb.table("portfolios").insert(_port_data).execute()
                         
+                        port_resp = sb.table("portfolios").insert(_port_data).execute()
                         portfolio_id = port_resp.data[0]["id"]
                         
                         for s in st.session_state.import_holding_pool:
