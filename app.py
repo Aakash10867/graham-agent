@@ -663,7 +663,6 @@ def generate_health_check(portfolio, holdings, universe_df, collection):
 Portfolio: {portfolio.get('name')} | Type: {investor_type} | Horizon: {time_horizon}
 Holdings: {total} stocks
 {user_context}
-    prompt = f"""You are Kordent's Chief Risk Officer diagnosing a portfolio's health.
 
 Portfolio: {portfolio.get('name')} | Type: {investor_type} | Horizon: {time_horizon}
 Holdings: {total} stocks
