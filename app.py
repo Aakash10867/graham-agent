@@ -1932,14 +1932,13 @@ with st.sidebar:
                 
         if st.session_state.sb_view_mode != "portfolios":
             try:
-                # Query Supabase for the number of portfolios owned by the user
-                _port_count = len((sb.table("portfolios").select("id").eq(
+                _all_ports = sb.table("portfolios").select("id, is_paper").eq(
                     "user_id", st.session_state.sb_user_id
-                ).execute()).data or [])
+                ).execute().data or []
+                _port_count = len([p for p in _all_ports if not p.get("is_paper")])
             except Exception:
                 _port_count = 0
             
-            # Format the label dynamically
             _port_label = f"📁 My Portfolios ({_port_count})" if _port_count else "📁 My Portfolios"
             
             if st.button(_port_label, width="stretch"):
@@ -1954,9 +1953,14 @@ with st.sidebar:
         # ── My Watchlist nav ──
         if st.session_state.sb_view_mode != "watchlist":
             try:
-                _wl_count = len((sb.table("watchlist").select("id").eq(
+                _wl_stocks = len((sb.table("watchlist").select("id").eq(
                     "user_id", st.session_state.sb_user_id
                 ).execute()).data or [])
+                _all_ports_wl = sb.table("portfolios").select("id, is_paper").eq(
+                    "user_id", st.session_state.sb_user_id
+                ).execute().data or []
+                _wl_paper_ports = len([p for p in _all_ports_wl if p.get("is_paper")])
+                _wl_count = _wl_stocks + _wl_paper_ports
             except Exception:
                 _wl_count = 0
             _wl_label = f"👁 My Watchlist ({_wl_count})" if _wl_count else "👁 My Watchlist"
