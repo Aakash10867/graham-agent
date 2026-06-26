@@ -994,10 +994,10 @@ def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int,
     if not stocks:
         return {"error": "No stocks provided."}
 
-    try:
-        _profile = json.loads(portfolio_profile) if isinstance(portfolio_profile, str) else portfolio_profile
-    except (json.JSONDecodeError, TypeError):
-        _profile = {}
+    _profile = st.session_state.get("builder_profile") or {}
+    
+    final_target = _profile.get("target_amount") or (target_amount if target_amount > 0 else None)
+    final_date = _profile.get("target_date") or (target_date if target_date else None)
 
     st.session_state.pending_portfolio = {
         "name": portfolio_name,
@@ -1007,9 +1007,9 @@ def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int,
         "review_days": int(review_days),
         "stocks": stocks,
         "portfolio_profile": _profile if _profile else None,
-        "target_amount": target_amount if target_amount > 0 else None,
-        "target_date": target_date if target_date else None,
-        "is_paper": _profile.get("is_paper", False) if _profile else False,
+        "target_amount": final_target,
+        "target_date": final_date,
+        "is_paper": _profile.get("is_paper", False),
     }
     return {"status": f"Portfolio '{portfolio_name}' registered with {len(stocks)} stocks. Review every {review_days} days. The user can now save it."}
 
