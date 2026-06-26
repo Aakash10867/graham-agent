@@ -1915,7 +1915,18 @@ with st.sidebar:
                 st.rerun()
                 
         if st.session_state.sb_view_mode != "portfolios":
-            if st.button("📁 My Portfolios", width="stretch"):
+            try:
+                # Query Supabase for the number of portfolios owned by the user
+                _port_count = len((sb.table("portfolios").select("id").eq(
+                    "user_id", st.session_state.sb_user_id
+                ).execute()).data or [])
+            except Exception:
+                _port_count = 0
+            
+            # Format the label dynamically
+            _port_label = f"📁 My Portfolios ({_port_count})" if _port_count else "📁 My Portfolios"
+            
+            if st.button(_port_label, width="stretch"):
                 st.session_state.sb_view_mode = "portfolios"
                 st.rerun()
                 
