@@ -1215,13 +1215,35 @@ def fuzzy_search_universe(query: str, df, max_results: int = 6):
     if not q:
         return []
 
-    noise = {"should", "i", "buy", "sell", "analyse", "analyze", "about", "what",
-             "how", "is", "the", "a", "an", "tell", "me", "give", "show", "check",
-             "review", "of", "for", "can", "you", "do", "think", "worth", "good",
-             "investment", "stock", "stocks", "company", "investing", "in", "it",
-             "my", "best", "share", "shares", "price", "any", "this", "that",
-             "are", "get", "please", "want", "like", "look", "into", "at",
-             "analyse", "analysis", "value", "valued", "undervalued", "overvalued"}
+    noise = {
+        # pronouns / determiners
+        "i", "me", "my", "you", "your", "we", "our", "it", "its", "a", "an",
+        "the", "this", "that", "these", "those", "any", "some", "all", "each",
+        # verbs / auxiliaries
+        "is", "are", "was", "were", "be", "been", "am", "do", "does", "did",
+        "will", "would", "could", "should", "shall", "may", "might", "can",
+        "have", "has", "had", "get", "got", "make", "let", "go", "going",
+        # common action verbs in finance queries
+        "buy", "sell", "hold", "invest", "investing", "invested", "analyse",
+        "analyze", "analysis", "review", "check", "show", "tell", "give",
+        "find", "look", "looking", "think", "want", "need", "know", "see",
+        "compare", "pick", "choose", "suggest", "recommend", "evaluate",
+        # prepositions / conjunctions / adverbs
+        "in", "on", "at", "to", "of", "for", "with", "from", "by", "about",
+        "into", "between", "through", "after", "before", "up", "down", "out",
+        "and", "or", "but", "not", "nor", "so", "if", "then", "than", "also",
+        "just", "only", "very", "really", "how", "what", "why", "when", "where",
+        "which", "who", "whom", "whose", "whether", "now", "still", "yet",
+        # finance generic words
+        "stock", "stocks", "share", "shares", "company", "companies", "price",
+        "market", "investment", "portfolio", "sector", "industry", "worth",
+        "good", "bad", "best", "worst", "top", "right", "safe", "risky",
+        "value", "valued", "undervalued", "overvalued", "growth", "income",
+        "dividend", "return", "returns", "profit", "loss", "money", "rupee",
+        "long", "short", "term", "today", "currently", "recent", "recently",
+        # filler
+        "please", "thanks", "hey", "hi", "hello", "ok", "okay",
+    }
     q_words = [w for w in q.split() if w not in noise]
     q_clean = " ".join(q_words).strip()
 
@@ -3768,10 +3790,13 @@ if st.session_state.sb_view_mode == "chat":
                 st.markdown(pd_data["original_query"])
             st.info("🔍 Multiple matches found. Which company did you mean?")
             _matches = pd_data["matches"]
-            _ncols = min(len(_matches), 3)
-            _btn_cols = st.columns(_ncols)
-            for _i, _m in enumerate(_matches):
-                with _btn_cols[_i % _ncols]:
+            _ncols = min(len(_matches), 4)
+            for _row_start in range(0, len(_matches), _ncols):
+                _row_items = _matches[_row_start:_row_start + _ncols]
+                _btn_cols = st.columns(len(_row_items))
+                for _j, _m in enumerate(_row_items):
+                    _i = _row_start + _j
+                    with _btn_cols[_j]:
                     _lbl = f"{_m['name']} ({_m['ticker'].replace('.NS','').replace('.BO','')})"
                     if st.button(_lbl, key=f"disambig_{_i}", use_container_width=True):
                         _resolved = f"{pd_data['original_query']} (company: {_m['name']}, ticker: {_m['ticker']})"
@@ -3784,8 +3809,12 @@ if st.session_state.sb_view_mode == "chat":
             _is_disambiguated = "(company:" in prompt and "ticker:" in prompt
             if not _is_disambiguated:
                 _fz = fuzzy_search_universe(prompt, universe_df)
-                _good = [m for m in _fz if m["match_score"] > 0.5]
-                if len(_good) >= 2 and _good[0]["match_score"] < 0.9:
+                _good = [m for m in _fz if m["match_score"] > 0.4]
+                # Only skip disambiguation if there's EXACTLY one strong match
+                _exact = [m for m in _good if m["match_score"] >= 0.95]
+                if len(_exact) == 1 and len(_good) <= 1:
+                    pass  # single exact match — go straight to LLM
+                elif len(_good) >= 2:
                     st.session_state.pending_disambiguation = {
                         "original_query": prompt,
                         "matches": _good[:6],
