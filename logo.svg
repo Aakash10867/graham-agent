@@ -13,6 +13,10 @@
       </feMerge>
     </filter>
 
+    <filter id="god-ray-blur" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="2.5" />
+    </filter>
+
     <linearGradient id="glass-glare" x1="10%" y1="0%" x2="90%" y2="100%">
       <stop offset="0%" stop-color="rgba(255,255,255,0.95)" />
       <stop offset="35%" stop-color="rgba(255,255,255,0.2)" />
@@ -29,9 +33,17 @@
       <stop offset="100%" stop-color="#000a1e" stop-opacity="0" />
     </linearGradient>
 
-    <path id="sparkle" d="M 0,-4 Q 0,0 4,0 Q 0,0 0,4 Q 0,0 -4,0 Q 0,0 0,-4 Z" fill="#FFFFFF" filter="url(#glow)" />
+    <linearGradient id="ray-fade" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="rgba(255, 245, 220, 0.4)" />
+      <stop offset="50%" stop-color="rgba(255, 230, 180, 0.1)" />
+      <stop offset="100%" stop-color="rgba(255, 255, 255, 0)" />
+    </linearGradient>
 
+    <path id="sparkle" d="M 0,-4 Q 0,0 4,0 Q 0,0 0,4 Q 0,0 -4,0 Q 0,0 0,-4 Z" fill="#FFFFFF" filter="url(#glow)" />
     <path id="arc" d="M 85 50 A 35 35 0 0 0 50 15" fill="none" stroke="#002366" stroke-width="10" stroke-linecap="round" filter="url(#glass-shadow)" />
+    
+    <polygon id="ray-wide" points="47,50 53,50 75,-40 25,-40" fill="url(#ray-fade)" filter="url(#god-ray-blur)" />
+    <polygon id="ray-thin" points="49,50 51,50 60,-40 40,-40" fill="url(#ray-fade)" filter="url(#god-ray-blur)" />
   </defs>
 
   <use href="#arc" transform="rotate(5 50 50)" />
@@ -46,6 +58,20 @@
   <g style="transform-origin: 50px 50px;">
     <animateTransform attributeName="transform" type="scale" values="1; 1.15; 1.15; 1.05; 1.1; 1.1; 1" keyTimes="0; 0.05; 0.15; 0.25; 0.3; 0.45; 1" dur="2.5s" repeatCount="indefinite" />
     
+    <g>
+      <animate attributeName="opacity" values="0.3; 0.9; 0.9; 0.4; 0.7; 0.7; 0.3" keyTimes="0; 0.05; 0.15; 0.25; 0.3; 0.45; 1" dur="2.5s" repeatCount="indefinite" />
+      
+      <g style="transform-origin: 50px 50px;">
+        <animateTransform attributeName="transform" type="rotate" values="136; 144; 136" dur="12s" repeatCount="indefinite" />
+        
+        <use href="#ray-wide" transform="rotate(-22 50 50) scale(1, 1.2)" />
+        <use href="#ray-thin" transform="rotate(-8 50 50)" />
+        <use href="#ray-wide" transform="rotate(5 50 50) scale(1, 0.95)" />
+        <use href="#ray-thin" transform="rotate(18 50 50) scale(1, 1.15)" />
+        <use href="#ray-wide" transform="rotate(32 50 50) scale(1, 0.85)" />
+      </g>
+    </g>
+
     <path d="M50 25 L54 46 L75 50 L54 54 L50 75 L46 54 L25 50 L46 46 Z" fill="url(#dark-refraction)" filter="url(#glass-shadow)" />
     
     <path d="M50 25 L54 46 L75 50 L54 54 L50 75 L46 54 L25 50 L46 46 Z" fill="rgba(255, 255, 255, 0.35)" />
