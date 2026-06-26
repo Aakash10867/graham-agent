@@ -971,14 +971,9 @@ def generate_review_recommendations(enriched_holdings, investor_type, time_horiz
 
 
 
-def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int, time_horizon: str, review_days: int = 90, stocks_json: str = "[]", portfolio_profile: str = "{}", target_amount: float = 0, target_date: str = "", decision_context: str = "") -> dict:
+def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int, time_horizon: str, review_days: int = 90, stocks_json: str = "[]", portfolio_profile: str = "{}", target_amount: float = 0, target_date: str = "") -> dict:
     """Register a finalized SIP portfolio so the user can save it to their account.
     Call this ONLY after you have presented the final portfolio table with all stocks and allocations.
-
-    Args:
-        ... (keep existing args) ...
-        decision_context: A brief summary of any specific preferences, trade-offs, or choices the user made during the Phase 1 clarification questions (e.g., 'User explicitly accepted volatility in Basic Materials for deep value'). Pass an empty string if no questions were asked.
-    """
 
     Args:
         portfolio_name: Short descriptive name, e.g. 'Conservative Growth SIP - June 2026'
@@ -999,12 +994,7 @@ def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int,
     if not stocks:
         return {"error": "No stocks provided."}
 
-    # --- FIX: Bypass LLM amnesia by pulling directly from secure session state ---
     _profile = st.session_state.get("builder_profile") or {}
-    
-    # INJECT CONVERSATION CONTEXT
-    if decision_context:
-        _profile["decision_context"] = decision_context
     
     final_target = _profile.get("target_amount") or (target_amount if target_amount > 0 else None)
     final_date = _profile.get("target_date") or (target_date if target_date else None)
@@ -3841,8 +3831,7 @@ if st.session_state.sb_view_mode == "chat":
                             "review_freq": str(review_days),
                             "next_review_date": next_review,
                             "next_sip_date": next_sip,
-                            "is_paper": portfolio.get("is_paper", False),
-                            "portfolio_profile": portfolio.get("portfolio_profile", {})
+                            "is_paper": portfolio.get("is_paper", False)
                         }).execute()
                         portfolio_id = port_resp.data[0]["id"]
                         stocks_for_alloc = []
