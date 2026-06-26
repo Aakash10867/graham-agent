@@ -89,6 +89,35 @@ def allocate_shares(stocks, sip_amount):
 
     return result, round(remaining, 2)
 
+def record_transaction(sb, portfolio_id, user_id, ticker, shares, price, amount_inr, txn_type="buy", nifty_cache=None):
+    """Record a buy/sell in sip_transactions with Nifty BeES shadow data. Non-blocking."""
+    nifty_px = nifty_cache
+    if nifty_px is None:
+        try:
+            nifty_px = yf.Ticker("NIFTYBEES.NS").fast_info.last_price
+        except Exception:
+            nifty_px = None
+    nifty_u = None
+    if nifty_px and nifty_px > 0:
+        raw = float(amount_inr) / nifty_px
+        nifty_u = round(raw, 6) if txn_type == "buy" else round(-raw, 6)
+    try:
+        sb.table("sip_transactions").insert({
+            "portfolio_id": str(portfolio_id),
+            "user_id": str(user_id),
+            "ticker": ticker,
+            "shares": float(shares),
+            "price": round(float(price), 2),
+            "amount_inr": round(float(amount_inr), 2),
+            "transaction_type": txn_type,
+            "transaction_date": datetime.date.today().isoformat(),
+            "nifty_price": round(nifty_px, 2) if nifty_px else None,
+            "nifty_units": nifty_u,
+        }).execute()
+    except Exception as e:
+        print(f"Txn log failed (non-blocking): {e}")
+    return nifty_px
+
 def enrich_holdings_live(holdings, cache_key=None):
     """Compute live allocation_pct from current market prices.
 
@@ -3876,6 +3905,7 @@ if st.session_state.sb_view_mode == "chat":
                                 "pe": pe, "roe": roe, "score": score,
                             })
                         allocated, unallocated = allocate_shares(stocks_for_alloc, portfolio["sip_amount"])
+                        _nifty_c = None
                         for s in allocated:
                             sb.table("holdings").insert({
                                 "portfolio_id": portfolio_id, "ticker": s["ticker"], "name": s["name"],
@@ -3883,6 +3913,7 @@ if st.session_state.sb_view_mode == "chat":
                                 "sip_amount_inr": s["actual_amount"], "price_at_entry": s["price"],
                                 "pe_at_entry": s["pe"], "roe_at_entry": s["roe"], "score_at_entry": s["score"],
                             }).execute()
+                            _nifty_c = record_transaction(sb, portfolio_id, st.session_state.sb_user_id, s["ticker"], s["shares"], s["price"], s["actual_amount"], "buy", _nifty_c)
                         st.success(f"Portfolio saved! Invested ₹{portfolio['sip_amount'] - unallocated:,.0f} of ₹{portfolio['sip_amount']:,}.")
                         if unallocated > 0:
                             st.info(f"₹{unallocated:,.0f} unallocated (not enough for another share of any holding).")
@@ -4426,6 +4457,7 @@ elif st.session_state.sb_view_mode == "import":
                             score = int(row["score"].iloc[0]) if len(row) and pd.notna(row["score"].iloc[0]) else None
                             sect = str(row["sector"].iloc[0]) if len(row) and "sector" in row.columns and pd.notna(row["sector"].iloc[0]) else "Unknown"
                             
+                            _imp_invested = round(s["shares"] * s["price"], 2)
                             sb.table("holdings").insert({
                                 "portfolio_id": portfolio_id, 
                                 "ticker": s["ticker"], 
@@ -4433,12 +4465,13 @@ elif st.session_state.sb_view_mode == "import":
                                 "sector": sect, 
                                 "allocation_pct": 0, 
                                 "shares": s["shares"],
-                                "sip_amount_inr": round(s["shares"] * s["price"], 2), 
+                                "sip_amount_inr": _imp_invested, 
                                 "price_at_entry": s["price"],
                                 "pe_at_entry": pe, 
                                 "roe_at_entry": roe, 
                                 "score_at_entry": score
                             }).execute()
+                            record_transaction(sb, portfolio_id, st.session_state.sb_user_id, s["ticker"], s["shares"], s["price"], _imp_invested, "buy")
                         
                         st.session_state.import_holding_pool = []
                         st.session_state[f"auto_trigger_review_{portfolio_id}"] = True
@@ -4765,6 +4798,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                                     "price_at_entry": round(buy_price, 2),
                                                     "score_at_entry": detail.get("score"),
                                                 }).execute()
+                                                record_transaction(sb, port["id"], st.session_state.sb_user_id, ticker, buy_qty, buy_price, invested, "buy")
                                                 new_budget = max(0, budget_left - invested)
                                                 sb.table("portfolios").update({
                                                     "sip_budget_remaining": round(new_budget, 2)
@@ -5152,6 +5186,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                                             "price_at_entry": round(add_price, 2),
                                                             "score_at_entry": act_score,
                                                         }).execute()
+                                                        record_transaction(sb, port["id"], st.session_state.sb_user_id, act_ticker, add_qty, add_price, invested, "buy")
 
                                                         # Normalize all allocations to sum to 100%
                                                         all_h = sb.table("holdings").select("id, allocation_pct").eq(
@@ -5375,6 +5410,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                                                 "price_at_entry": round(new_avg_price, 2),
                                                                 "sip_amount_inr": round(new_total_shares * new_avg_price, 2)
                                                             }).eq("id", a["id"]).execute()
+                                                            record_transaction(sb, port["id"], st.session_state.sb_user_id, a["ticker"], buy_q, buy_p, round(new_value, 2), "buy")
                                                     
                                                     # Bump the SIP timer by 30 days based on *today's* real-world action
                                                     new_sip_date = (today + datetime.timedelta(days=30)).isoformat()
@@ -5887,6 +5923,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                             "price_at_entry": round(avg_price, 2),
                                             "sip_amount_inr": round(total_shares * avg_price, 2),
                                         }).eq("id", h_id).execute()
+                                        record_transaction(sb, port["id"], st.session_state.sb_user_id, r["_ticker"], new_qty, buy_price, round(new_qty * buy_price, 2), "buy")
                         if sell_stocks and candidates:
                             for c in candidates:
                                 qty = st.session_state.get(f"repl_qty_{port['id']}_{c['ticker']}", 0)
@@ -5896,12 +5933,14 @@ elif st.session_state.sb_view_mode == "portfolios":
                                     sc_val = int(urow["score"].iloc[0]) if len(urow) and pd.notna(urow["score"].iloc[0]) else None
                                     pe_val = float(urow["pe"].iloc[0]) if len(urow) and pd.notna(urow["pe"].iloc[0]) else None
                                     roe_val = float(urow["roe_y0"].iloc[0]) if len(urow) and "roe_y0" in urow.columns and pd.notna(urow["roe_y0"].iloc[0]) else None
+                                    _repl_invested = round(qty * px, 2)
                                     sb.table("holdings").insert({
                                         "portfolio_id": port["id"], "ticker": c["ticker"], "name": c["name"],
                                         "sector": c["sector"], "allocation_pct": 0, "shares": qty,
-                                        "sip_amount_inr": round(qty * px, 2), "price_at_entry": round(px, 2),
+                                        "sip_amount_inr": _repl_invested, "price_at_entry": round(px, 2),
                                         "pe_at_entry": pe_val, "roe_at_entry": roe_val, "score_at_entry": sc_val,
                                     }).execute()
+                                    record_transaction(sb, port["id"], st.session_state.sb_user_id, c["ticker"], qty, px, _repl_invested, "buy")
                         st.session_state.pop(f"review_data_{port['id']}", None)
                         st.success("Portfolio updated.")
                         st.rerun()
