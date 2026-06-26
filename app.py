@@ -945,26 +945,6 @@ def generate_review_recommendations(enriched_holdings, investor_type, time_horiz
     review_prompt = (
         f"You are the Kordent Investment Committee reviewing a {investor_type} investor's "
         f"portfolio with a {time_horizon}-term horizon.\n\n"
-        f"{user_context}\n"
-        f"For each stock below, provide a recommendation.\n\n"
-        f"DECISION FRAMEWORK (apply in order):\n"
-    holdings_text = ""
-    for i, h in enumerate(enriched_holdings):
-        holdings_text += (
-            f"\nStock {i+1}: {h['name']} ({h['ticker']})\n"
-            f"- Shares: {h['shares']}, Entry: INR {h['entry_price']:.2f}, Now: INR {h['now_price']:.2f}\n"
-            f"- Stock return: {h['stock_return']:+.1f}%, Nifty return: {h['nifty_return']}%, Market-relative: {h['market_relative']}%\n"
-            f"- Score: {h['entry_score']} to {h['now_score']} (change: {h['score_change']:+d})\n"
-            f"- ROE trend (recent to oldest): {h['roe_trend']}\n"
-            f"- Earnings quality: {', '.join(h['quality_flags']) if isinstance(h['quality_flags'], list) else h['quality_flags']}\n"
-            f"- Cash conversion ratio: {h['cash_conversion']}\n"
-            f"- Held for: {h['holding_days']} days\n"
-            f"- Relevant book passage: {h['book_passage']}\n"
-        )
-
-    review_prompt = (
-        f"You are the Kordent Investment Committee reviewing a {investor_type} investor's "
-        f"portfolio with a {time_horizon}-term horizon.\n\n"
         f"For each stock below, provide a recommendation.\n\n"
         f"DECISION FRAMEWORK (apply in order):\n"
         f"1. RED FLAGS OVERRIDE: If earnings quality has RED FLAGS, recommend SELL ALL. Cite Graham on value traps.\n"
