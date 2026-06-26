@@ -2004,6 +2004,7 @@ with st.sidebar:
         st.session_state.sb_view_mode = "chat" 
         if "pending_portfolio" in st.session_state:
             st.session_state.pending_portfolio = None
+            st.session_state.pop("pending_watch_tickers", None)
         st.rerun()
 
 
@@ -3899,15 +3900,27 @@ if st.session_state.sb_view_mode == "chat":
                     if st.session_state.get("pending_portfolio"):
                         st.rerun()
 
-                    # ── Chat → Watchlist bridge ──
+                    # ── Chat → Watchlist bridge: store YES tickers for buttons ──
                     if st.session_state.sb_user_id and "YES" in answer.upper():
-                        _bridge_sb = get_supabase()
-                        # Extract tickers from the response
                         _resp_tickers = set(re.findall(r'\b[A-Z][A-Z0-9&]+\.(?:NS|BO)\b', answer))
-                        # Also check disambiguated prompt for the explicit ticker
                         _disambig = re.search(r'ticker:\s*([A-Z][A-Z0-9&]+\.(?:NS|BO))', prompt)
                         if _disambig:
                             _resp_tickers.add(_disambig.group(1))
+
+                        _answer_upper = answer.upper()
+                        _yes_tickers = []
+                        for _t in _resp_tickers:
+                            _t_up = _t.upper()
+                            if re.search(
+                                rf'(?:{re.escape(_t_up)}.{{0,300}}VERDICT.*?YES)|(?:YES.{{0,300}}{re.escape(_t_up)})',
+                                _answer_upper
+                            ):
+                                _yes_tickers.append(_t)
+                        if not _yes_tickers and len(_resp_tickers) == 1:
+                            _yes_tickers = list(_resp_tickers)
+
+                        if _yes_tickers:
+                            st.session_state.pending_watch_tickers = _yes_tickers
 
                         # Find which tickers got a YES verdict (within 300 chars of YES)
                         _answer_upper = answer.upper()
@@ -3977,6 +3990,62 @@ if st.session_state.sb_view_mode == "chat":
             if st.button("🔄 Retry last query", width="stretch"):
                 st.session_state.pending_prompt = st.session_state.pop("pending_retry")
                 st.rerun()
+
+        # ── Watchlist bridge buttons (persistent across reruns) ──
+        if st.session_state.get("pending_watch_tickers") and st.session_state.sb_user_id:
+            _pw_sb = get_supabase()
+            _pw_tickers = st.session_state.pending_watch_tickers
+
+            try:
+                _pw_ports = _pw_sb.table("portfolios").select("id").eq(
+                    "user_id", st.session_state.sb_user_id
+                ).execute().data or []
+                _pw_port_ids = [p["id"] for p in _pw_ports]
+                if _pw_port_ids:
+                    _pw_held = {h["ticker"] for h in (_pw_sb.table("holdings").select(
+                        "ticker"
+                    ).in_("portfolio_id", _pw_port_ids).execute().data or [])}
+                else:
+                    _pw_held = set()
+            except Exception:
+                _pw_held = set()
+
+            try:
+                _pw_watched = {w["ticker"] for w in (_pw_sb.table("watchlist").select(
+                    "ticker"
+                ).eq("user_id", st.session_state.sb_user_id).execute().data or [])}
+            except Exception:
+                _pw_watched = set()
+
+            _any_actionable = False
+            for _yt in _pw_tickers:
+                _bare = _yt.replace(".NS", "").replace(".BO", "")
+                if _yt in _pw_held:
+                    st.caption(f"✅ {_bare} — already in your portfolio")
+                elif _yt in _pw_watched:
+                    st.caption(f"👁 {_bare} — already on your watchlist")
+                else:
+                    _any_actionable = True
+                    if st.button(f"👁 Watch {_bare}", key=f"watch_{_yt}", use_container_width=True):
+                        _wl_row = universe_df[universe_df["ticker"] == _yt]
+                        _wl_data = {
+                            "user_id": st.session_state.sb_user_id,
+                            "ticker": _yt,
+                            "name": str(_wl_row["name"].iloc[0]) if not _wl_row.empty else _bare,
+                            "score_when_added": int(_wl_row["score"].iloc[0]) if not _wl_row.empty and pd.notna(_wl_row["score"].iloc[0]) else None,
+                            "quality_when_added": bool(_wl_row["quality_pass"].iloc[0]) if not _wl_row.empty and "quality_pass" in _wl_row.columns and pd.notna(_wl_row["quality_pass"].iloc[0]) else None,
+                        }
+                        try:
+                            _pw_sb.table("watchlist").insert(_wl_data).execute()
+                            st.session_state.pending_watch_tickers = [t for t in _pw_tickers if t != _yt]
+                            if not st.session_state.pending_watch_tickers:
+                                del st.session_state["pending_watch_tickers"]
+                            st.rerun()
+                        except Exception as _we:
+                            st.error(f"Failed: {_we}")
+
+            if not _any_actionable:
+                st.session_state.pop("pending_watch_tickers", None)
 
 elif st.session_state.sb_view_mode == "import":
     st.markdown("### 📥 Import Your Existing Portfolio")
