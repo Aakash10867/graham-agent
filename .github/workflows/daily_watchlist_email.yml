@@ -1,19 +1,28 @@
 name: Daily Watchlist Email
 
 on:
-  schedule:
-    - cron: '30 13 * * 1-5'  # Weekdays 13:30 UTC = 7:00 PM IST
+  # Trigger this workflow automatically when the Universe Update finishes
+  workflow_run:
+    workflows: ["Daily Universe Update"]
+    types:
+      - completed
+  # Still allow manual triggering for testing
   workflow_dispatch:
 
 jobs:
   watchlist-email:
     runs-on: ubuntu-latest
+    # CRITICAL: Only run if it was triggered manually OR if the Universe Update actually succeeded
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - uses: actions/checkout@v4
+      
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          
       - run: pip install supabase yfinance google-genai pandas
+      
       - run: python daily_watchlist_email.py
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
