@@ -3715,7 +3715,7 @@ if st.session_state.sb_view_mode == "chat":
     with chat_area:
         if not st.session_state.messages:
             st.markdown("")
-            st.info("Type a company name or question below to get started, or use the screeners above.")
+            st.info("Type a company name or question below to get started, or use the screeners below.")
 
         for msg in st.session_state.messages:
             avatar = USER_AVATAR if msg["role"] == "user" else AGENT_AVATAR
