@@ -971,7 +971,7 @@ def generate_review_recommendations(enriched_holdings, investor_type, time_horiz
 
 
 
-def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int, time_horizon: str, review_days: int = 90, stocks_json: str = "[]") -> dict:
+def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int, time_horizon: str, review_days: int = 90, stocks_json: str = "[]", portfolio_profile: str = "{}", target_amount: float = 0, target_date: str = "") -> dict:
     """Register a finalized SIP portfolio so the user can save it to their account.
     Call this ONLY after you have presented the final portfolio table with all stocks and allocations.
 
@@ -979,9 +979,12 @@ def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int,
         portfolio_name: Short descriptive name, e.g. 'Conservative Growth SIP - June 2026'
         investor_type: The investor profile - defensive, balanced, or enterprising
         sip_amount: Monthly SIP amount in INR
-        time_horizon: Investment time horizon from the questionnaire
-        review_days: Number of days between portfolio reviews. Convert the user preference to days. Monthly=30, Quarterly=90, Semi-annually=180, Annually=365. Any number is valid.
-        stocks_json: A JSON string representing a list of stock objects. Each object must have keys: ticker (str), name (str), sector (str), allocation_pct (number). Example: [{"ticker":"TCS.NS","name":"TCS","sector":"Technology","allocation_pct":20}]
+        time_horizon: Investment time horizon from the builder profile
+        review_days: Number of days between portfolio reviews from the builder profile.
+        stocks_json: A JSON string representing a list of stock objects. Each object must have keys: ticker (str), name (str), sector (str), allocation_pct (number).
+        portfolio_profile: JSON string of the full investor profile from the builder form. Pass through from the [BUILDER_PROFILE] message.
+        target_amount: Savings goal in INR. 0 if no goal set.
+        target_date: Goal deadline as ISO date string (YYYY-MM-DD). Empty string if no goal.
     """
     try:
         stocks = json.loads(stocks_json) if isinstance(stocks_json, str) else stocks_json
@@ -991,13 +994,22 @@ def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int,
     if not stocks:
         return {"error": "No stocks provided."}
 
+    try:
+        _profile = json.loads(portfolio_profile) if isinstance(portfolio_profile, str) else portfolio_profile
+    except (json.JSONDecodeError, TypeError):
+        _profile = {}
+
     st.session_state.pending_portfolio = {
         "name": portfolio_name,
         "investor_type": investor_type,
         "sip_amount": sip_amount,
         "time_horizon": time_horizon,
         "review_days": int(review_days),
-        "stocks": stocks
+        "stocks": stocks,
+        "portfolio_profile": _profile if _profile else None,
+        "target_amount": target_amount if target_amount > 0 else None,
+        "target_date": target_date if target_date else None,
+        "is_paper": _profile.get("is_paper", False) if _profile else False,
     }
     return {"status": f"Portfolio '{portfolio_name}' registered with {len(stocks)} stocks. Review every {review_days} days. The user can now save it."}
 
@@ -1324,7 +1336,8 @@ default_state = {
     "pending_portfolio": None,
     "pending_retry": None,
     "pending_disambiguation": None,
-    "pending_watch_tickers": None
+    "pending_watch_tickers": None,
+    "builder_profile": None
 }
 
 for key, value in default_state.items():
@@ -1909,6 +1922,11 @@ with st.sidebar:
                     except Exception as e:
                         st.error(f"Failed: {e}")
         
+        if st.session_state.sb_view_mode != "builder":
+            if st.button("🏗️ Build Portfolio", width="stretch"):
+                st.session_state.sb_view_mode = "builder"
+                st.rerun()
+
         if st.session_state.sb_view_mode != "import":
             if st.button("📥 Import Existing Portfolio", width="stretch"):
                 st.session_state.sb_view_mode = "import"
@@ -2913,13 +2931,12 @@ def find_investments(market: str) -> dict:
         "note": "Pre-scored universe of ~4500 Indian stocks (NSE + BSE). Data updated monthly. After presenting results, use search_book to explain WHY each investment style delivers returns, citing Graham, Greenblatt, and Dorsey.",
     }
 
-def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, review_freq: str) -> dict:
-    """Filter the pre-scored universe to 30-50 SIP-suitable candidates based on investor profile.
+def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, review_freq: str, avoid_sectors: str = "[]") -> dict:
+    """Filter the pre-scored universe to SIP-suitable candidates based on investor profile.
     Returns a min/max stock count range computed from the SIP amount. The LLM decides the
     exact count within that range based on candidate quality, not a hardcoded number.
 
-    Use this when the user wants to build a SIP portfolio. First collect the 4 inputs
-    through natural conversation, then call this tool.
+    Use this when building a portfolio from a [BUILDER_PROFILE] message.
 
     Args:
         sip_amount: Monthly SIP amount in INR (e.g. 5000, 25000, 50000)
@@ -2927,7 +2944,7 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
                       short  - 1 to 3 years
                       medium - 3 to 7 years
                       long   - 7+ years
-        investor_type: Risk profile derived from goal question. Must be one of:
+        investor_type: Risk profile. Must be one of:
                        defensive    - wants to beat FD returns with safety
                        balanced     - wants to build wealth steadily over time
                        enterprising - wants maximum growth, patient through volatility
@@ -2935,16 +2952,25 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
                      passive  - set it and forget for years
                      moderate - review every few months
                      active   - likes staying informed and adjusting
+        avoid_sectors: JSON string list of sector names to exclude, e.g. '["Energy", "Basic Materials"]'.
+                       Pass '[]' for no exclusions.
     """
     df = universe_df.copy()
 
-    # ── Base quality filter (all profiles) ──
     # ── Base quality filter (all profiles) ──
     if "quality_pass" in df.columns:
         df = df[df["quality_pass"] != False]
     df = df[df["years_of_data"] >= 2]
     df = df[pd.notna(df["pe"]) & pd.notna(df["roe_pct"]) & pd.notna(df["de"])]
     df = df[df["pe"] > 0]  # Exclude negative P/E (loss-making)
+
+    # ── Sector exclusions from builder profile ──
+    try:
+        _excluded = json.loads(avoid_sectors) if isinstance(avoid_sectors, str) else avoid_sectors
+        if _excluded:
+            df = df[~df["sector"].isin(_excluded)]
+    except (json.JSONDecodeError, TypeError):
+        pass
 
     # ── Profile-specific filtering ──
     if investor_type == "defensive":
@@ -3337,31 +3363,23 @@ You have 11 tools available. Pick the right combination for each question — yo
 13. show_stock_chart — Renders a visual 13-month line chart of a stock's closing price directly in the UI. Use this whenever the user asks for a chart, graph, or visual trajectory.
 14. get_csv_financial_data — Reads the pre-scored universe database for a specific ticker to get proprietary framework scores (Graham, Greenblatt, Dorsey, Trajectory pass/fail flags).
 15. get_macro_context — Gets the sector and 5-day performance of the broader market (Nifty 50) to gauge macro momentum versus asset momentum.
-16. get_sip_candidates — Build a SIP portfolio. Collects investor profile (sip_amount, time_horizon, investor_type, review_freq) and returns pre-filtered candidates with a min/max stock count range computed from the SIP amount. You decide the exact count within that range based on candidate quality. Do NOT default to 5-8. Use when the user wants to start a SIP, build a portfolio, or asks where to invest monthly.
-17. register_portfolio — After presenting your finalized SIP portfolio to the user, call this to register it for saving. Pass portfolio_name, investor_type, sip_amount, time_horizon, review_days (integer number of days between reviews), and stocks_json (a JSON string list where each item has ticker, name, sector, allocation_pct). ALWAYS call this after presenting the final SIP portfolio table.
+16. get_sip_candidates — Build a SIP portfolio from a builder profile. Takes sip_amount, time_horizon, investor_type, review_freq, and avoid_sectors (a JSON string list of sector names to exclude, e.g. '["Energy"]'; pass '[]' for no exclusions). Returns pre-filtered candidates with a min/max stock count range. You decide the exact count based on candidate quality.
+17. register_portfolio — After presenting your finalized SIP portfolio, call this to register it for saving. Pass portfolio_name, investor_type, sip_amount, time_horizon, review_days (integer), stocks_json (JSON string list with ticker/name/sector/allocation_pct per item), portfolio_profile (JSON string of the full builder profile), target_amount (number, 0 if no goal), and target_date (ISO date string, empty if no goal). ALWAYS call this after presenting the final portfolio table.
 
 SIP PORTFOLIO PROTOCOL:
-When the user wants to build a SIP portfolio, you MUST ask exactly ONE question per message. Wait for the answer before asking the next. The sequence is:
+Portfolio building uses the embedded Builder form (🏗️ Build Portfolio sidebar button). The user has ALREADY answered all profiling questions through structured inputs before you see their message.
 
-Message 1: Ask ONLY "How much do you want to invest monthly in INR?"
-Message 2 (after they answer): Ask ONLY "How long do you plan to keep investing? 1-3 years, 3-7 years, or 7+ years?"
-Message 3 (after they answer): Ask ONLY "What is your goal with this SIP?" and give three options: "Steady returns that beat savings/FDs" / "Build long-term wealth with a good balance" / "Maximum growth — I am patient through market ups and downs"
-Message 4 (after they answer): Ask ONLY "How often do you want to check on your investments?" and give three options: "Set it and forget for years" / "Glance every few months" / "I like staying active and informed"
+When you receive a message starting with [BUILDER_PROFILE], do NOT re-ask profiling questions. The profile contains: sip_amount, time_horizon, investor_type, risk, preference, avoid_sectors, review_days, and optionally target_amount, target_date, is_paper.
 
-NEVER ask more than one question in a single message. If the user gives multiple answers at once, accept them and skip ahead.
+Proceed directly:
+1. Call get_sip_candidates with: sip_amount, time_horizon, investor_type, review_freq (from the profile), and avoid_sectors (as a JSON string list).
+2. EXCEPTION — If there is a clear mathematical tension (e.g., conservative risk + ₹50L goal in 5 years requiring 18%+ CAGR), ask ONE clarifying question. Otherwise skip straight to stock selection.
+3. Select stocks. Write your stock-by-stock analysis and reasoning FIRST, explaining why each pick fits using Graham/Greenblatt/Dorsey.
+4. CRITICAL: Generate the textual explanation BEFORE calling register_portfolio. Tool call first = explanation truncated.
+5. Call register_portfolio with all fields including portfolio_profile (pass the full profile JSON from the message), target_amount, and target_date.
+6. Do NOT ask the user for permission to save — just call the tool.
 
-After selecting your final stocks, you MUST write out your stock-by-stock analysis and reasoning FIRST. Explain why each pick fits the investor's profile using the Graham/Greenblatt/Dorsey frameworks. 
-
-CRITICAL: You must generate this textual explanation BEFORE calling the `register_portfolio` tool. If you output the tool call first, your explanation will be truncated. Once your analysis is written, call register_portfolio with the structured data. Do NOT ask the user for permission to save — just call the tool.
-
-After all 4 answers are collected, map them:
-- Goal answer 1 → investor_type="defensive"
-- Goal answer 2 → investor_type="balanced"  
-- Goal answer 3 → investor_type="enterprising"
-- Convert the user's review preference to a number of days (review_days). Use your judgment — "monthly" is 30, "every two weeks" is 14, "quarterly" is 90, "twice a year" is 180, "set and forget" is 365. Any reasonable number is valid; do not constrain to fixed options.
-- Time 1-3yr → time_horizon="short", 3-7yr → "medium", 7+yr → "long"
-
-Then call get_sip_candidates with the mapped parameters.
+If someone asks to build a portfolio WITHOUT a [BUILDER_PROFILE] prefix, direct them to click the 🏗️ Build Portfolio button in the sidebar. If they insist or provide enough info inline, you may proceed by mapping their inputs to the profile parameters.
 
 TOOL SELECTION RULES:
 - For a comprehensive stock analysis: call get_stock_data + get_historical_trends + get_financial_statements (income) + calculate_graham_value + search_book.
@@ -3743,7 +3761,9 @@ if st.session_state.sb_view_mode == "chat":
                         "Monthly": f"₹{portfolio['sip_amount'] * s.get('allocation_pct', 0) / 100:,.0f}",
                     })
                 st.dataframe(pd.DataFrame(preview_data), hide_index=True, width="stretch")
-                st.caption(f"Total SIP: ₹{portfolio['sip_amount']:,}/month · {portfolio.get('investor_type', '')} · {portfolio.get('time_horizon', '')} horizon")
+                _paper_tag = " · 👁 Paper Portfolio" if portfolio.get("is_paper") else ""
+                _goal_tag = f" · Goal: ₹{portfolio['target_amount']:,.0f}" if portfolio.get("target_amount") else ""
+                st.caption(f"Total SIP: ₹{portfolio['sip_amount']:,}/month · {portfolio.get('investor_type', '')} · {portfolio.get('time_horizon', '')} horizon{_goal_tag}{_paper_tag}")
                 if st.button("💾 Save Portfolio", width="stretch"):
                     try:
                         sb = get_supabase()
@@ -3823,8 +3843,9 @@ if st.session_state.sb_view_mode == "chat":
 
         if prompt:
             # ── Fuzzy search: disambiguate before LLM call ──
+            _is_builder = prompt.startswith("[BUILDER_PROFILE]")
             _is_disambiguated = "(company:" in prompt and "ticker:" in prompt
-            if not _is_disambiguated:
+            if not _is_disambiguated and not _is_builder:
                 _fz = fuzzy_search_universe(prompt, universe_df)
                 _good = [m for m in _fz if m["match_score"] > 0.4]
                 # Only skip disambiguation if there's EXACTLY one strong match
@@ -4161,15 +4182,24 @@ elif st.session_state.sb_view_mode == "import":
                         review_days = 90 if horizon == "medium" else (180 if horizon == "long" else 30)
                         next_review = (datetime.date.today() + datetime.timedelta(days=review_days)).isoformat()
                         
-                        port_resp = sb.table("portfolios").insert({
+                        _port_data = {
                             "user_id": st.session_state.sb_user_id,
-                            "name": p_name,
-                            "investor_type": inv_type,
-                            "sip_amount": sip_amt,
-                            "time_horizon": horizon,
+                            "name": portfolio["name"],
+                            "investor_type": portfolio["investor_type"],
+                            "sip_amount": portfolio["sip_amount"],
+                            "time_horizon": portfolio["time_horizon"],
                             "review_freq": str(review_days),
                             "next_review_date": next_review,
-                        }).execute()
+                        }
+                        if portfolio.get("portfolio_profile"):
+                            _port_data["portfolio_profile"] = portfolio["portfolio_profile"]
+                        if portfolio.get("target_amount"):
+                            _port_data["target_amount"] = portfolio["target_amount"]
+                        if portfolio.get("target_date"):
+                            _port_data["target_date"] = portfolio["target_date"]
+                        if portfolio.get("is_paper"):
+                            _port_data["is_paper"] = True
+                        port_resp = sb.table("portfolios").insert(_port_data).execute()
                         
                         portfolio_id = port_resp.data[0]["id"]
                         
@@ -4201,6 +4231,171 @@ elif st.session_state.sb_view_mode == "import":
                         
                     except Exception as e:
                         st.error(f"Failed to onboard portfolio: {e}")
+
+elif st.session_state.sb_view_mode == "builder":
+    st.markdown("### 🏗️ Build Your Portfolio")
+    st.caption("Answer a few simple questions — no financial jargon, we promise.")
+
+    if st.session_state.sb_user_id is None:
+        st.warning("Please log in via the sidebar to build a portfolio.")
+    else:
+        with st.form("portfolio_builder_form"):
+            # Q1 — Monthly investment
+            _b_sip = st.number_input(
+                "💰 How much can you invest every month? (₹)",
+                min_value=500, max_value=10000000, value=5000, step=500,
+                help="Start small — you can always increase later.",
+            )
+
+            st.divider()
+
+            # Q2 — Time horizon
+            _b_horizon_label = st.radio(
+                "⏳ How long do you plan to keep investing?",
+                options=["1–3 years", "3–7 years", "7+ years"],
+                index=1,
+                help="Longer horizons let compounding do the heavy lifting.",
+            )
+
+            st.divider()
+
+            # Q3 — Goal (optional)
+            st.markdown("**🎯 Do you have a specific savings target?** *(optional — leave amount at 0 to skip)*")
+            _b_goal_cols = st.columns(2)
+            with _b_goal_cols[0]:
+                _b_target_amt = st.number_input(
+                    "Target amount (₹)", min_value=0, value=0, step=100000,
+                    help="Leave at 0 if you don't have a number in mind.",
+                )
+            with _b_goal_cols[1]:
+                _b_target_dt = st.date_input(
+                    "By when?",
+                    value=datetime.date.today() + datetime.timedelta(days=365 * 5),
+                    min_value=datetime.date.today() + datetime.timedelta(days=180),
+                    help="Only matters if you set a target amount.",
+                )
+
+            st.divider()
+
+            # Q4 — Risk tolerance
+            _b_risk_resp = st.radio(
+                "📉 If your portfolio dropped 20% in a month, would you:",
+                options=[
+                    "Buy more — it's on sale!",
+                    "Hold and wait for recovery",
+                    "Sell some to sleep better",
+                ],
+                index=1,
+            )
+
+            st.divider()
+
+            # Q5 — Sector exclusions
+            _b_avoid = st.multiselect(
+                "🚫 Any industries you want to avoid?",
+                options=[
+                    "Energy", "Basic Materials", "Utilities",
+                    "Real Estate", "Financial Services", "Industrials",
+                ],
+                default=[],
+                help="Select sectors to stay away from. Leave empty for no preference.",
+            )
+
+            st.divider()
+
+            # Q6 — Income vs growth
+            _b_pref_resp = st.radio(
+                "🎚️ What matters more to you?",
+                options=[
+                    "Steady dividends and low risk",
+                    "Maximum growth, even if it's bumpy",
+                ],
+                index=1,
+            )
+
+            st.divider()
+
+            # Q7 — Paper portfolio toggle
+            _b_is_paper = st.checkbox(
+                "👁 Watch only — don't invest yet (paper portfolio)",
+                value=False,
+                help="Track how this portfolio would perform without putting real money in.",
+            )
+
+            _b_submitted = st.form_submit_button("Build My Portfolio →", use_container_width=True)
+
+        if _b_submitted:
+            # ── Map responses to profile dict ──
+            _risk_map = {
+                "Buy more — it's on sale!": "aggressive",
+                "Hold and wait for recovery": "moderate",
+                "Sell some to sleep better": "conservative",
+            }
+            _pref_map = {
+                "Steady dividends and low risk": "income",
+                "Maximum growth, even if it's bumpy": "growth",
+            }
+            _horizon_map = {"1–3 years": "short", "3–7 years": "medium", "7+ years": "long"}
+
+            _b_risk = _risk_map.get(_b_risk_resp, "moderate")
+            _b_pref = _pref_map.get(_b_pref_resp, "growth")
+            _b_time = _horizon_map.get(_b_horizon_label, "medium")
+
+            # investor_type from risk × preference
+            if _b_risk == "conservative" or _b_pref == "income":
+                _b_inv_type = "defensive"
+            elif _b_risk == "aggressive" and _b_pref == "growth":
+                _b_inv_type = "enterprising"
+            else:
+                _b_inv_type = "balanced"
+
+            # review cadence from investor_type
+            _rev_map = {"defensive": ("passive", 180), "balanced": ("moderate", 90), "enterprising": ("active", 60)}
+            _b_rev_freq, _b_rev_days = _rev_map.get(_b_inv_type, ("moderate", 90))
+
+            # Override time_horizon from target_date when goal is set
+            if _b_target_amt > 0:
+                _yrs = ((_b_target_dt - datetime.date.today()).days) / 365.25
+                if _yrs <= 3:
+                    _b_time = "short"
+                elif _yrs <= 7:
+                    _b_time = "medium"
+                else:
+                    _b_time = "long"
+
+            _b_profile = {
+                "sip_amount": _b_sip,
+                "target_amount": _b_target_amt if _b_target_amt > 0 else None,
+                "target_date": _b_target_dt.isoformat() if _b_target_amt > 0 else None,
+                "risk": _b_risk,
+                "avoid_sectors": _b_avoid,
+                "preference": _b_pref,
+                "investor_type": _b_inv_type,
+                "time_horizon": _b_time,
+                "review_freq": _b_rev_freq,
+                "review_days": _b_rev_days,
+                "is_paper": _b_is_paper,
+            }
+            st.session_state.builder_profile = _b_profile
+
+            # ── Build the chat prompt that triggers stock selection ──
+            _goal_line = f"\n- Goal: ₹{_b_target_amt:,.0f} by {_b_target_dt.isoformat()}" if _b_target_amt > 0 else ""
+            _avoid_line = f"\n- Avoid sectors: {', '.join(_b_avoid)}" if _b_avoid else ""
+            _paper_line = "\n- Mode: Paper portfolio (watch only)" if _b_is_paper else ""
+
+            st.session_state.pending_prompt = (
+                f"[BUILDER_PROFILE]\n"
+                f"Build me a portfolio with these preferences:\n"
+                f"- Monthly SIP: ₹{_b_sip:,}\n"
+                f"- Time horizon: {_b_time} ({_b_horizon_label})\n"
+                f"- Investor type: {_b_inv_type}\n"
+                f"- Risk tolerance: {_b_risk}\n"
+                f"- Preference: {_b_pref}\n"
+                f"- Review: every {_b_rev_days} days ({_b_rev_freq})"
+                f"{_goal_line}{_avoid_line}{_paper_line}"
+            )
+            st.session_state.sb_view_mode = "chat"
+            st.rerun()
 
 elif st.session_state.sb_view_mode == "portfolios":
     st.markdown("### 📁 My Portfolios")
