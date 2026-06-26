@@ -1,7 +1,7 @@
 """
 DAILY WATCHLIST EMAIL
 =====================
-Runs every weekday ~30 min after the daily engine (12:00 UTC / 5:30 PM IST).
+Runs every weekday ~2 hours after the daily engine (13:30 UTC / 7:00 PM IST).
 Sends a daily mentor-style email to each user who has stocks on their watchlist.
 Covers ONLY individual watched stocks — NOT watchlist portfolios (those go
 in the weekly mentor email).
