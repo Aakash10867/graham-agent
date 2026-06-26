@@ -3797,12 +3797,12 @@ if st.session_state.sb_view_mode == "chat":
                 for _j, _m in enumerate(_row_items):
                     _i = _row_start + _j
                     with _btn_cols[_j]:
-                    _lbl = f"{_m['name']} ({_m['ticker'].replace('.NS','').replace('.BO','')})"
-                    if st.button(_lbl, key=f"disambig_{_i}", use_container_width=True):
-                        _resolved = f"{pd_data['original_query']} (company: {_m['name']}, ticker: {_m['ticker']})"
-                        st.session_state.pending_prompt = _resolved
-                        st.session_state.pending_disambiguation = None
-                        st.rerun()
+                        _lbl = f"{_m['name']} ({_m['ticker'].replace('.NS','').replace('.BO','')})"
+                        if st.button(_lbl, key=f"disambig_{_i}", use_container_width=True):
+                            _resolved = f"{pd_data['original_query']} (company: {_m['name']}, ticker: {_m['ticker']})"
+                            st.session_state.pending_prompt = _resolved
+                            st.session_state.pending_disambiguation = None
+                            st.rerun()
 
         if prompt:
             # ── Fuzzy search: disambiguate before LLM call ──
