@@ -4108,140 +4108,140 @@ elif st.session_state.sb_view_mode == "watchlist":
 
 
         with _wl_tab_paper:
-                if st.session_state.get("_paper_just_saved"):
-                    st.success("Paper portfolio saved! Track its performance here.")
-                    st.session_state.pop("_paper_just_saved", None)
-    
-                _pp_sb = get_supabase()
-                try:
-                    _pp_resp = _pp_sb.table("portfolios").select("*").eq(
-                        "user_id", st.session_state.sb_user_id
-                    ).eq("is_paper", True).order("created_at", desc=True).execute()
-                    _pp_ports = _pp_resp.data or []
-                except Exception as _pp_err:
-                    st.error(f"Failed to load paper portfolios: {_pp_err}")
-                    _pp_ports = []
-    
-                if not _pp_ports:
-                    st.info("No paper portfolios yet. Use 🏗️ Build Portfolio and check 'Watch only' to create one.")
-                else:
-                    for _pp in _pp_ports:
-                        with st.container(border=True):
-                            st.markdown(f"**👁 {_pp['name']}**")
-    
-                            try:
-                                _pp_h_resp = _pp_sb.table("holdings").select("*").eq(
-                                    "portfolio_id", _pp["id"]
-                                ).execute()
-                                _pp_holdings = _pp_h_resp.data or []
-                            except Exception:
-                                _pp_holdings = []
-    
-                            if _pp_holdings:
-                                _pp_enriched = enrich_holdings_live(_pp_holdings, cache_key=f"paper_{_pp['id']}")
-                                _pp_invested = sum(h.get("shares", 0) * h.get("price_at_entry", 0) for h in _pp_enriched)
-                                _pp_current = sum(h.get("current_value", 0) for h in _pp_enriched)
-                                _pp_ret = ((_pp_current - _pp_invested) / _pp_invested * 100) if _pp_invested > 0 else 0
-    
-                                _pm1, _pm2, _pm3 = st.columns(3)
-                                with _pm1:
-                                    st.metric("Invested", f"₹{_pp_invested:,.0f}")
-                                with _pm2:
-                                    st.metric("Current Value", f"₹{_pp_current:,.0f}")
-                                with _pm3:
-                                    st.metric("Return", f"{_pp_ret:+.1f}%")
-    
-                                _pp_rows = []
-                                for _h in _pp_enriched:
-                                    _h_entry = _h.get("price_at_entry", 0)
-                                    _h_now = _h.get("current_price", 0)
-                                    _h_sh = _h.get("shares", 0)
-                                    _h_pnl = (_h_now - _h_entry) * _h_sh
-                                    _h_ret = ((_h_now - _h_entry) / _h_entry * 100) if _h_entry > 0 else 0
-                                    _pp_rows.append({
-                                        "Stock": _h.get("name") or _h.get("ticker", ""),
-                                        "Shares": _h_sh,
-                                        "Entry": f"₹{_h_entry:,.2f}",
-                                        "Now": f"₹{_h_now:,.2f}",
-                                        "P&L": f"₹{_h_pnl:,.0f}",
-                                        "Return": f"{_h_ret:+.1f}%",
-                                    })
-                                st.dataframe(pd.DataFrame(_pp_rows), hide_index=True, use_container_width=True)
-    
-                                _pp_profile = _pp.get("portfolio_profile") or {}
-                                if isinstance(_pp_profile, str):
+            if st.session_state.get("_paper_just_saved"):
+                st.success("Paper portfolio saved! Track its performance here.")
+                st.session_state.pop("_paper_just_saved", None)
+
+            _pp_sb = get_supabase()
+            try:
+                _pp_resp = _pp_sb.table("portfolios").select("*").eq(
+                    "user_id", st.session_state.sb_user_id
+                ).eq("is_paper", True).order("created_at", desc=True).execute()
+                _pp_ports = _pp_resp.data or []
+            except Exception as _pp_err:
+                st.error(f"Failed to load paper portfolios: {_pp_err}")
+                _pp_ports = []
+
+            if not _pp_ports:
+                st.info("No paper portfolios yet. Use 🏗️ Build Portfolio and check 'Watch only' to create one.")
+            else:
+                for _pp in _pp_ports:
+                    with st.container(border=True):
+                        st.markdown(f"**👁 {_pp['name']}**")
+
+                        try:
+                            _pp_h_resp = _pp_sb.table("holdings").select("*").eq(
+                                "portfolio_id", _pp["id"]
+                            ).execute()
+                            _pp_holdings = _pp_h_resp.data or []
+                        except Exception:
+                            _pp_holdings = []
+
+                        if _pp_holdings:
+                            _pp_enriched = enrich_holdings_live(_pp_holdings, cache_key=f"paper_{_pp['id']}")
+                            _pp_invested = sum(h.get("shares", 0) * h.get("price_at_entry", 0) for h in _pp_enriched)
+                            _pp_current = sum(h.get("current_value", 0) for h in _pp_enriched)
+                            _pp_ret = ((_pp_current - _pp_invested) / _pp_invested * 100) if _pp_invested > 0 else 0
+
+                            _pm1, _pm2, _pm3 = st.columns(3)
+                            with _pm1:
+                                st.metric("Invested", f"₹{_pp_invested:,.0f}")
+                            with _pm2:
+                                st.metric("Current Value", f"₹{_pp_current:,.0f}")
+                            with _pm3:
+                                st.metric("Return", f"{_pp_ret:+.1f}%")
+
+                            _pp_rows = []
+                            for _h in _pp_enriched:
+                                _h_entry = _h.get("price_at_entry", 0)
+                                _h_now = _h.get("current_price", 0)
+                                _h_sh = _h.get("shares", 0)
+                                _h_pnl = (_h_now - _h_entry) * _h_sh
+                                _h_ret = ((_h_now - _h_entry) / _h_entry * 100) if _h_entry > 0 else 0
+                                _pp_rows.append({
+                                    "Stock": _h.get("name") or _h.get("ticker", ""),
+                                    "Shares": _h_sh,
+                                    "Entry": f"₹{_h_entry:,.2f}",
+                                    "Now": f"₹{_h_now:,.2f}",
+                                    "P&L": f"₹{_h_pnl:,.0f}",
+                                    "Return": f"{_h_ret:+.1f}%",
+                                })
+                            st.dataframe(pd.DataFrame(_pp_rows), hide_index=True, use_container_width=True)
+
+                            _pp_profile = _pp.get("portfolio_profile") or {}
+                            if isinstance(_pp_profile, str):
+                                try:
+                                    _pp_profile = json.loads(_pp_profile)
+                                except Exception:
+                                    _pp_profile = {}
+                            _pp_cap_parts = [_pp.get("created_at", "")[:10]]
+                            if _pp.get("investor_type"):
+                                _pp_cap_parts.append(_pp["investor_type"])
+                            if _pp.get("time_horizon"):
+                                _pp_cap_parts.append(f"{_pp['time_horizon']} horizon")
+                            if _pp.get("target_amount"):
+                                _pp_cap_parts.append(f"Goal: ₹{_pp['target_amount']:,.0f}")
+                            st.caption(" · ".join(_pp_cap_parts))
+                        else:
+                            st.caption("No holdings recorded.")
+
+                        # ── Action buttons ──
+                        _pp_c1, _pp_c2 = st.columns(2)
+                        with _pp_c1:
+                            if st.button("🚀 Make This Real", key=f"make_real_{_pp['id']}", use_container_width=True):
+                                st.session_state[f"confirm_real_{_pp['id']}"] = True
+                        with _pp_c2:
+                            if st.button("🗑️ Delete", key=f"del_paper_{_pp['id']}", use_container_width=True, type="secondary"):
+                                st.session_state[f"confirm_del_paper_{_pp['id']}"] = True
+
+                        # ── Make This Real confirmation ──
+                        if st.session_state.get(f"confirm_real_{_pp['id']}"):
+                            st.warning("This converts to a real portfolio at **current market prices** (not original paper prices). Tracking restarts from today.")
+                            _rc1, _rc2 = st.columns(2)
+                            with _rc1:
+                                if st.button("Yes, make it real", key=f"real_yes_{_pp['id']}", use_container_width=True):
                                     try:
-                                        _pp_profile = json.loads(_pp_profile)
-                                    except Exception:
-                                        _pp_profile = {}
-                                _pp_cap_parts = [_pp.get("created_at", "")[:10]]
-                                if _pp.get("investor_type"):
-                                    _pp_cap_parts.append(_pp["investor_type"])
-                                if _pp.get("time_horizon"):
-                                    _pp_cap_parts.append(f"{_pp['time_horizon']} horizon")
-                                if _pp.get("target_amount"):
-                                    _pp_cap_parts.append(f"Goal: ₹{_pp['target_amount']:,.0f}")
-                                st.caption(" · ".join(_pp_cap_parts))
-                            else:
-                                st.caption("No holdings recorded.")
-    
-                            # ── Action buttons ──
-                            _pp_c1, _pp_c2 = st.columns(2)
-                            with _pp_c1:
-                                if st.button("🚀 Make This Real", key=f"make_real_{_pp['id']}", use_container_width=True):
-                                    st.session_state[f"confirm_real_{_pp['id']}"] = True
-                            with _pp_c2:
-                                if st.button("🗑️ Delete", key=f"del_paper_{_pp['id']}", use_container_width=True, type="secondary"):
-                                    st.session_state[f"confirm_del_paper_{_pp['id']}"] = True
-    
-                            # ── Make This Real confirmation ──
-                            if st.session_state.get(f"confirm_real_{_pp['id']}"):
-                                st.warning("This converts to a real portfolio at **current market prices** (not original paper prices). Tracking restarts from today.")
-                                _rc1, _rc2 = st.columns(2)
-                                with _rc1:
-                                    if st.button("Yes, make it real", key=f"real_yes_{_pp['id']}", use_container_width=True):
-                                        try:
-                                            for _rh in _pp_holdings:
-                                                try:
-                                                    _rh_price = yf.Ticker(_rh.get("ticker", "")).fast_info.last_price or _rh.get("price_at_entry", 0)
-                                                except Exception:
-                                                    _rh_price = _rh.get("price_at_entry", 0)
-                                                _pp_sb.table("holdings").update({
-                                                    "price_at_entry": round(_rh_price, 2),
-                                                    "sip_amount_inr": round(_rh.get("shares", 0) * _rh_price, 2),
-                                                }).eq("id", _rh["id"]).execute()
-                                            _pp_sb.table("portfolios").update({"is_paper": False}).eq("id", _pp["id"]).execute()
+                                        for _rh in _pp_holdings:
                                             try:
-                                                _pp_sb.table("portfolio_history").delete().eq("portfolio_id", _pp["id"]).execute()
+                                                _rh_price = yf.Ticker(_rh.get("ticker", "")).fast_info.last_price or _rh.get("price_at_entry", 0)
                                             except Exception:
-                                                pass
-                                            st.session_state.pop(f"confirm_real_{_pp['id']}", None)
-                                            st.success("Portfolio is now real! Find it in My Portfolios.")
-                                            st.rerun()
-                                        except Exception as _re:
-                                            st.error(f"Failed: {_re}")
-                                with _rc2:
-                                    if st.button("Cancel", key=f"real_no_{_pp['id']}", use_container_width=True):
-                                        st.session_state.pop(f"confirm_real_{_pp['id']}", None)
-                                        st.rerun()
-    
-                            # ── Delete confirmation ──
-                            if st.session_state.get(f"confirm_del_paper_{_pp['id']}"):
-                                st.warning("Delete this paper portfolio? This cannot be undone.")
-                                _dc1, _dc2 = st.columns(2)
-                                with _dc1:
-                                    if st.button("Yes, delete", key=f"del_yes_{_pp['id']}", use_container_width=True):
+                                                _rh_price = _rh.get("price_at_entry", 0)
+                                            _pp_sb.table("holdings").update({
+                                                "price_at_entry": round(_rh_price, 2),
+                                                "sip_amount_inr": round(_rh.get("shares", 0) * _rh_price, 2),
+                                            }).eq("id", _rh["id"]).execute()
+                                        _pp_sb.table("portfolios").update({"is_paper": False}).eq("id", _pp["id"]).execute()
                                         try:
-                                            _pp_sb.table("holdings").delete().eq("portfolio_id", _pp["id"]).execute()
-                                            _pp_sb.table("portfolios").delete().eq("id", _pp["id"]).execute()
-                                            st.session_state.pop(f"confirm_del_paper_{_pp['id']}", None)
-                                            st.rerun()
-                                        except Exception as _de:
-                                            st.error(f"Failed: {_de}")
-                                with _dc2:
-                                    if st.button("Cancel", key=f"del_no_{_pp['id']}", use_container_width=True):
+                                            _pp_sb.table("portfolio_history").delete().eq("portfolio_id", _pp["id"]).execute()
+                                        except Exception:
+                                            pass
+                                        st.session_state.pop(f"confirm_real_{_pp['id']}", None)
+                                        st.success("Portfolio is now real! Find it in My Portfolios.")
+                                        st.rerun()
+                                    except Exception as _re:
+                                        st.error(f"Failed: {_re}")
+                            with _rc2:
+                                if st.button("Cancel", key=f"real_no_{_pp['id']}", use_container_width=True):
+                                    st.session_state.pop(f"confirm_real_{_pp['id']}", None)
+                                    st.rerun()
+
+                        # ── Delete confirmation ──
+                        if st.session_state.get(f"confirm_del_paper_{_pp['id']}"):
+                            st.warning("Delete this paper portfolio? This cannot be undone.")
+                            _dc1, _dc2 = st.columns(2)
+                            with _dc1:
+                                if st.button("Yes, delete", key=f"del_yes_{_pp['id']}", use_container_width=True):
+                                    try:
+                                        _pp_sb.table("holdings").delete().eq("portfolio_id", _pp["id"]).execute()
+                                        _pp_sb.table("portfolios").delete().eq("id", _pp["id"]).execute()
                                         st.session_state.pop(f"confirm_del_paper_{_pp['id']}", None)
                                         st.rerun()
+                                    except Exception as _de:
+                                        st.error(f"Failed: {_de}")
+                            with _dc2:
+                                if st.button("Cancel", key=f"del_no_{_pp['id']}", use_container_width=True):
+                                    st.session_state.pop(f"confirm_del_paper_{_pp['id']}", None)
+                                    st.rerun()
 
 elif st.session_state.sb_view_mode == "import":
     st.markdown("### 📥 Import Your Existing Portfolio")
