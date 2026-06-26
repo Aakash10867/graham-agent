@@ -3817,7 +3817,7 @@ if st.session_state.sb_view_mode == "chat":
                             st.session_state.pending_retry = prompt
                 if answer:
                     response_placeholder.markdown(answer)
-                    st.caption(f"⚡ {model_used} | Routed via Interceptor")
+                    st.caption(f"⚡ {model_used}")
                     st.session_state.messages.append({"role": "assistant", "content": answer, "model": model_used})
                     if st.session_state.get("pending_portfolio"):
                         st.rerun()
