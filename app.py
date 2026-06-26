@@ -3157,40 +3157,21 @@ def get_macro_context(ticker: str) -> dict:
 
 
 def _sanitize_for_json(obj):
-    """Deep-cleans all data structures to ensure strict JSON spec compliance."""
-    import math
-    
-    # Handle Dictionaries
+    """Replace NaN/Inf with None so Gemini gets valid JSON."""
     if isinstance(obj, dict):
         return {k: _sanitize_for_json(v) for k, v in obj.items()}
-    
-    # Handle Iterables
-    if isinstance(obj, (list, tuple, set)):
+    if isinstance(obj, list):
         return [_sanitize_for_json(v) for v in obj]
-        
-    # Handle NumPy scalars/extractors
+    # Catch Python float, numpy.float64, numpy.float32, and any numeric type
+    try:
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+    except (TypeError, ValueError, OverflowError):
+        pass
+    # Convert stray numpy scalars to Python native so json.dumps never chokes
     if hasattr(obj, 'item'):
-        try:
-            obj = obj.item()
-        except Exception:
-            pass
-            
-    # Comprehensive check for any variant of NaN / Null / Inf
-    try:
-        import pandas as pd
-        if pd.isna(obj) or obj is None:
-            return None
-    except Exception:
-        pass
-
-    try:
-        if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
-            return None
-    except Exception:
-        pass
-        
+        return obj.item()
     return obj
-
 # ──────────────────────────────────────────────
 # TOOLS REGISTRY
 # ──────────────────────────────────────────────
@@ -3817,12 +3798,7 @@ if st.session_state.sb_view_mode == "chat":
                 model_used = None
                 with st.spinner("Routing & Analyzing..."):
                     try:
-                        _is_disambiguated = "(company:" in prompt and "ticker:" in prompt
-                        if len(st.session_state.messages) <= 1 and not _is_disambiguated:
-                            rewritten_directive = intercept_and_rewrite_query(prompt)
-                        else:
-                            rewritten_directive = prompt
-                        answer, model_used = agent_turn(rewritten_directive)
+                        answer, model_used = agent_turn(prompt)
                     except Exception as e:
                         error_msg = str(e)
                         error_upper = error_msg.upper()
