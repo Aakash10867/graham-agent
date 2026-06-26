@@ -3774,6 +3774,7 @@ if st.session_state.sb_view_mode == "chat":
                             "time_horizon": portfolio["time_horizon"],
                             "review_freq": str(review_days),
                             "next_review_date": next_review,
+                            "is_paper": portfolio.get("is_paper", False)
                         }).execute()
                         portfolio_id = port_resp.data[0]["id"]
                         stocks_for_alloc = []
