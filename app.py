@@ -1395,18 +1395,27 @@ st.markdown("""
 }
 
 /* ── Fix 3: Clean up radio buttons (Login/Signup) ── */
+
+/* 1. Force the layout wrappers to remain transparent so they don't form blocks */
+[data-testid="stRadio"] [data-baseweb="radio"] > div {
+    background-color: transparent !important;
+}
+
+/* 2. Base state for the outer circle */
 [data-testid="stRadio"] [data-baseweb="radio"] input[type="radio"] + div {
     background-color: #FFFFFF !important;
     border-color: #D1D5DB !important;
 }
 
+/* 3. Active state for the outer circle ONLY */
 [data-testid="stRadio"] [data-baseweb="radio"] input[type="radio"]:checked + div {
-    background-color: #1D4ED8 !important; /* Trust blue instead of red */
+    background-color: #1D4ED8 !important; 
     border-color: #1D4ED8 !important;
 }
 
+/* 4. The inner white dot */
 [data-testid="stRadio"] [data-baseweb="radio"] input[type="radio"]:checked + div > div {
-    background-color: #FFFFFF !important; /* The inner selection dot */
+    background-color: #FFFFFF !important; 
 }
 
 /* ── Fix 5: Force All Standard Buttons to Light Theme ── */
