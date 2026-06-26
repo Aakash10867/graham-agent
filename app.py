@@ -3699,13 +3699,41 @@ def agent_turn(user_message):
             # --- PHASE 3: RESOLUTION ---
             if audit_result.startswith("[REJECT]"):
                 # Force the Analyst to read the Auditor's rejection and rewrite
-                correction_prompt = f"The Chief Risk Officer REJECTED your draft with the following feedback:\n\n{audit_result}\n\nRewrite your entire analysis to comply with this feedback. Change your verdict if necessary."
+                correction_prompt = f"The Chief Risk Officer REJECTED your draft with the following feedback:\n\n{audit_result}\n\nRewrite your entire analysis to comply with this feedback. CRITICAL: If you are building a portfolio, you MUST call the register_portfolio tool AGAIN with your updated stock list to overwrite the rejected database entry."
                 final_response = analyst_chat.send_message(correction_prompt)
+                
+                # --- FIX: We must process tool calls during the correction phase too! ---
+                corr_text_parts = []
+                while final_response.function_calls:
+                    text_chunk = _extract_text(final_response)
+                    if text_chunk:
+                        corr_text_parts.append(text_chunk)
+                        
+                    function_responses = []
+                    for fc in final_response.function_calls:
+                        if fc.name in tool_functions:
+                            raw_tool_output = tool_functions[fc.name](**fc.args)
+                            result = _sanitize_for_json(raw_tool_output)
+                        else:
+                            result = {"error": f"Unknown tool: {fc.name}"}
+                            
+                        function_responses.append(
+                            types.Part.from_function_response(name=fc.name, response=result)
+                        )
+                    final_response = analyst_chat.send_message(function_responses)
+
+                final_chunk = _extract_text(final_response)
+                if final_chunk:
+                    corr_text_parts.append(final_chunk)
+                
+                clean_corr_parts = [p.strip() for p in corr_text_parts if p.strip()]
+                final_text = "\n\n".join(clean_corr_parts).strip()
+
                 st.session_state.chat_history = analyst_chat.get_history()
                 
                 # Append an internal note to the UI so the user sees the system working
                 st.session_state.last_working_model = model_name
-                return f"*(Internal Audit Triggered: Adjusted thesis based on earnings quality)*\n\n{final_response.text}", model_name
+                return f"*(Internal Audit Triggered: Adjusted thesis based on earnings quality)*\n\n{final_text}", model_name
             else:
                 # Auditor approved
                 st.session_state.chat_history = analyst_chat.get_history()
