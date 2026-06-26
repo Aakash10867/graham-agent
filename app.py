@@ -1395,13 +1395,18 @@ st.markdown("""
 }
 
 /* ── Fix 3: Clean up radio buttons (Login/Signup) ── */
-[data-baseweb="radio"] div {
+[data-testid="stRadio"] [data-baseweb="radio"] input[type="radio"] + div {
     background-color: #FFFFFF !important;
     border-color: #D1D5DB !important;
 }
-[data-baseweb="radio"] div[data-checked="true"] {
+
+[data-testid="stRadio"] [data-baseweb="radio"] input[type="radio"]:checked + div {
     background-color: #1D4ED8 !important; /* Trust blue instead of red */
     border-color: #1D4ED8 !important;
+}
+
+[data-testid="stRadio"] [data-baseweb="radio"] input[type="radio"]:checked + div > div {
+    background-color: #FFFFFF !important; /* The inner selection dot */
 }
 
 /* ── Fix 5: Force All Standard Buttons to Light Theme ── */
