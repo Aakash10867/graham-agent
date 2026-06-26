@@ -3132,8 +3132,8 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
             f"(3) whether the portfolio beta is balanced — avoid loading up on all high-beta or all low-beta stocks. "
             f"If the portfolio fails these checks, revise your selection before outputting. "
             f"Allocate the monthly SIP of INR {sip_amount} across selected stocks. "
-            f"For each pick, explain WHY it fits this investor using book philosophy. "
-            f"Output the final portfolio as a clean table with: ticker, name, sector, allocation_pct, sip_amount_inr, score, and a one-line thesis."
+            f"For each pick, be prepared to explain WHY it fits this investor using book philosophy. "
+            f"CRITICAL: If the user's message started with [BUILDER_PROFILE], you are in PHASE 1. DO NOT output the portfolio table yet. DO NOT call register_portfolio. Use this data ONLY to formulate your 1-3 clarification questions."
         ),
     }
 
