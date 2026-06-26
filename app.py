@@ -1394,45 +1394,6 @@ st.markdown("""
     box-shadow: 0 1px 2px rgba(0,0,0,0.02) !important;
 }
 
-/* ── Fix 3: Clean up radio buttons (Login/Signup) ── */
-
-/* 1. Force the outer circle to retain its perfect shape and size */
-[data-testid="stRadio"] [data-baseweb="radio"] input[type="radio"] + div {
-    background-color: #FFFFFF !important;
-    border: 2px solid #D1D5DB !important;
-    border-radius: 50% !important; /* Locks the circle shape */
-    width: 18px !important;
-    height: 18px !important;
-    min-width: 18px !important;
-    min-height: 18px !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    box-sizing: border-box !important;
-    transition: all 0.2s ease-in-out !important;
-}
-
-/* 2. Active state for the outer circle */
-[data-testid="stRadio"] [data-baseweb="radio"] input[type="radio"]:checked + div {
-    background-color: #1D4ED8 !important; /* Trust blue */
-    border-color: #1D4ED8 !important;
-}
-
-/* 3. Force the inner dot to retain its perfect shape */
-[data-testid="stRadio"] [data-baseweb="radio"] input[type="radio"]:checked + div > div {
-    background-color: #FFFFFF !important;
-    border-radius: 50% !important; /* Locks the dot shape */
-    width: 8px !important;
-    height: 8px !important;
-    min-width: 8px !important;
-    min-height: 8px !important;
-    box-sizing: border-box !important;
-}
-
-/* 4. Reset the label text background so it doesn't form blocks */
-[data-testid="stRadio"] [data-baseweb="radio"] > div:last-child {
-    background-color: transparent !important;
-}
 
 /* ── Fix 5: Force All Standard Buttons to Light Theme ── */
 .stButton > button, 
