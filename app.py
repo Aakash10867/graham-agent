@@ -649,20 +649,6 @@ def generate_health_check(portfolio, holdings, universe_df, collection):
     except Exception:
         pass
 
-    # ── User Decision Context ──
-    user_context = ""
-    _profile = portfolio.get("portfolio_profile") or {}
-    if isinstance(_profile, str):
-        try: _profile = json.loads(_profile)
-        except: _profile = {}
-    if _profile.get("decision_context"):
-        user_context = f"\nUSER DECISION CONTEXT:\n{_profile.get('decision_context')}\n(CRITICAL: Do not penalize the portfolio for risks or sector concentrations that the user explicitly accepted during portfolio creation.)\n"
-
-    prompt = f"""You are Kordent's Chief Risk Officer diagnosing a portfolio's health.
-
-Portfolio: {portfolio.get('name')} | Type: {investor_type} | Horizon: {time_horizon}
-Holdings: {total} stocks
-{user_context}
     prompt = f"""You are Kordent's Chief Risk Officer diagnosing a portfolio's health.
 
 Portfolio: {portfolio.get('name')} | Type: {investor_type} | Horizon: {time_horizon}
@@ -922,7 +908,7 @@ def build_review_context(holdings, port):
     return enriched
 
 
-def generate_review_recommendations(enriched_holdings, investor_type, time_horizon, portfolio):
+def generate_review_recommendations(enriched_holdings, investor_type, time_horizon):
     """LLM-powered review recommendations grounded in book philosophy."""
     holdings_text = ""
     for i, h in enumerate(enriched_holdings):
@@ -938,19 +924,6 @@ def generate_review_recommendations(enriched_holdings, investor_type, time_horiz
             f"- Relevant book passage: {h['book_passage']}\n"
         )
 
-    user_context = ""
-    _profile = portfolio.get("portfolio_profile") or {}
-    if isinstance(_profile, str):
-        try: _profile = json.loads(_profile)
-        except: _profile = {}
-    if _profile.get("decision_context"):
-        user_context = f"\nUSER DECISION CONTEXT:\n{_profile.get('decision_context')}\n(CRITICAL: Honor these preferences. Do not recommend selling a stock solely for a trait the user explicitly accepted, such as sector volatility.)\n"
-
-    review_prompt = (
-        f"You are the Kordent Investment Committee reviewing a {investor_type} investor's "
-        f"portfolio with a {time_horizon}-term horizon.\n\n"
-        f"{user_context}\n"
-    
     review_prompt = (
         f"You are the Kordent Investment Committee reviewing a {investor_type} investor's "
         f"portfolio with a {time_horizon}-term horizon.\n\n"
@@ -3426,7 +3399,7 @@ Portfolio building uses the embedded Builder form (🏗️ Build Portfolio sideb
 PHASE 1: DRAFT & INTERROGATE (DO NOT SHOW THE PORTFOLIO YET)
 1. Call get_sip_candidates with the profile parameters.
 2. Silently construct a "V1" portfolio in your mind. Do NOT output a table, do NOT list the stocks, and do NOT call register_portfolio.
-3. Call register_portfolio with all fields including portfolio_profile, target_amount, and target_date. CRITICAL: Use the `decision_context` parameter to summarize the user's answers to your Phase 1 questions so the system remembers their accepted trade-offs (e.g. "User accepted volatility in Industrials for higher growth").
+3. Analyze the trade-offs in your V1 draft and review the "fringe_candidates" returned by the tool.
 4. Output a brief, layman-friendly summary of the strategy you are considering.
 5. Ask the user 1 to 3 targeted questions to refine the build. 
    - RULE: Speak to them as a layman. Do NOT use jargon like "Graham", "Dorsey", "moat", "beta", or "PE expansion". 
@@ -5372,7 +5345,6 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 llm_recs = generate_review_recommendations(
                                     enriched, port.get("investor_type", "balanced"),
                                     port.get("time_horizon", "medium")
-                                    port
                                 )
 
                                 # Merge LLM recommendations with enriched data
