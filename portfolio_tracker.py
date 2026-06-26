@@ -148,6 +148,57 @@ def run_daily_tracker():
     except Exception as e:
         print(f"Warning: Could not fetch Nifty 50: {e}")
 
+    # ── Fetch Nifty BeES for shadow portfolio ──
+    nifty_bees_price = None
+    try:
+        _bees = yf.Ticker("NIFTYBEES.NS")
+        _bees_hist = _bees.history(period="5d")
+        if not _bees_hist.empty:
+            nifty_bees_price = round(float(_bees_hist["Close"].iloc[-1]), 2)
+            print(f"Nifty BeES close: {nifty_bees_price:,.2f}")
+    except Exception as e:
+        print(f"Warning: Could not fetch Nifty BeES: {e}")
+
+    # ── Fetch all transactions once ──
+    txn_resp = supabase.table("sip_transactions").select("portfolio_id, amount_inr, transaction_type, nifty_units").execute()
+    all_txns = txn_resp.data or []
+
+    # ── Bootstrap: create genesis transactions for portfolios with holdings but no transactions ──
+    _txn_port_ids = set(t["portfolio_id"] for t in all_txns)
+    holdings_resp_all = supabase.table("holdings").select("portfolio_id, ticker, shares, price_at_entry, created_at").execute()
+    _all_h = holdings_resp_all.data or []
+    _ports_needing_bootstrap = set()
+    for h in _all_h:
+        if h["portfolio_id"] not in _txn_port_ids:
+            _ports_needing_bootstrap.add(h["portfolio_id"])
+    if _ports_needing_bootstrap:
+        print(f"Bootstrapping {len(_ports_needing_bootstrap)} portfolios with genesis transactions...")
+        for h in _all_h:
+            if h["portfolio_id"] in _ports_needing_bootstrap:
+                _h_shares = float(h.get("shares") or 0)
+                _h_price = float(h.get("price_at_entry") or 0)
+                _h_amt = round(_h_shares * _h_price, 2)
+                _h_date = (h.get("created_at") or today_str)[:10]
+                _nifty_u = round(_h_amt / nifty_bees_price, 6) if nifty_bees_price and _h_amt > 0 else None
+                _port_user = next((p["user_id"] for p in portfolios if p["id"] == h["portfolio_id"]), None)
+                if _port_user and _h_amt > 0:
+                    supabase.table("sip_transactions").insert({
+                        "portfolio_id": h["portfolio_id"],
+                        "user_id": _port_user,
+                        "ticker": h["ticker"],
+                        "shares": _h_shares,
+                        "price": _h_price,
+                        "amount_inr": _h_amt,
+                        "transaction_type": "buy",
+                        "transaction_date": _h_date,
+                        "nifty_price": nifty_bees_price,
+                        "nifty_units": _nifty_u,
+                    }).execute()
+        # Refresh transactions after bootstrap
+        txn_resp = supabase.table("sip_transactions").select("portfolio_id, amount_inr, transaction_type, nifty_units").execute()
+        all_txns = txn_resp.data or []
+        print("Bootstrap complete.")
+
     price_cache = {}
     today_str = date.today().isoformat()
     all_alerts = []
@@ -188,13 +239,31 @@ def run_daily_tracker():
             "current_return_pct": round(return_pct, 2)
         }).eq("id", port_id).execute()
 
-        # ── 2. Log history ──
+        # ── 2. Compute cumulative invested & Nifty shadow from transaction ledger ──
+        port_txns = [t for t in all_txns if t["portfolio_id"] == port_id]
+        cumulative_invested = 0.0
+        total_nifty_units = 0.0
+        for t in port_txns:
+            amt = float(t.get("amount_inr") or 0)
+            if t.get("transaction_type") == "buy":
+                cumulative_invested += amt
+            else:
+                cumulative_invested -= amt
+            total_nifty_units += float(t.get("nifty_units") or 0)
+
+        nifty_shadow = round(total_nifty_units * nifty_bees_price, 2) if nifty_bees_price and total_nifty_units > 0 else None
+
+        # ── 3. Log history ──
         history_row = {
             "portfolio_id": port_id,
             "date": today_str,
             "total_value": round(current_total_value, 2),
             "daily_return_pct": round(return_pct, 2),
         }
+        if cumulative_invested > 0:
+            history_row["cumulative_invested"] = round(cumulative_invested, 2)
+        if nifty_shadow is not None:
+            history_row["nifty_shadow_value"] = nifty_shadow
         if nifty_close is not None:
             history_row["nifty_value"] = nifty_close
 
