@@ -84,6 +84,11 @@ ALERT_BOOK_QUERIES = {
     "goal_drift": "falling behind investment goals compounding patience increasing contributions discipline",
     "sector_headwind": "sector rotation industry downturn diversification concentration risk cyclical",
     "new_entry": "new investment opportunities emerging companies quality discovery fresh screening",
+    "watchlist_score_up": "improving fundamentals rising quality score upgrade strengthening competitive position",
+    "watchlist_score_down": "deteriorating fundamentals declining score weakening position watch carefully",
+    "watchlist_quality_flip": "earnings quality change cash flow quality reversal accounting red flags",
+    "watchlist_near_low": "buying near 52-week low discount margin of safety patience value opportunity",
+}
 }
 
 # Sector → Nifty sectoral index (yfinance tickers)
@@ -476,13 +481,135 @@ def run_daily_tracker():
                 except (ValueError, TypeError) as e:
                     print(f"Goal drift check failed for {port['name']}: {e}")
 
-    # ── TODO [Sprint 2]: Watchlist monitoring alerts ──
-        # When watchlist table exists, add these alert types here:
-        # - watchlist_score_up: watched stock's score increased
-        # - watchlist_score_down: watched stock's score decreased
-        # - watchlist_quality_flip: watched stock's quality_pass changed
-        # - watchlist_near_low: watched stock within 5% of 52-week low
-        # See roadmap Layer 1A for trigger definitions.
+    # ══════════════════════════════════════
+    # 3d. WATCHLIST MONITORING ALERTS
+    # ══════════════════════════════════════
+    if universe_df is not None:
+        try:
+            wl_resp = supabase.table("watchlist").select("*").execute()
+            wl_items = wl_resp.data or []
+        except Exception as e:
+            print(f"Warning: Could not fetch watchlist: {e}")
+            wl_items = []
+
+        if wl_items:
+            # Get yesterday's scores from score_history for change detection
+            prev_scores = {}
+            try:
+                latest_hist = supabase.table("score_history").select("date").order(
+                    "date", desc=True
+                ).limit(1).execute()
+                if latest_hist.data:
+                    prev_date = latest_hist.data[0]["date"]
+                    if prev_date != today_str:
+                        prev_resp = supabase.table("score_history").select(
+                            "ticker,score,quality_pass"
+                        ).eq("date", prev_date).execute()
+                        for row in (prev_resp.data or []):
+                            prev_scores[row["ticker"]] = {
+                                "score": row.get("score"),
+                                "quality_pass": row.get("quality_pass"),
+                            }
+            except Exception as e:
+                print(f"Warning: Could not fetch previous scores: {e}")
+
+            wl_alert_count = 0
+            for wl in wl_items:
+                wl_ticker = wl["ticker"]
+                wl_user_id = wl["user_id"]
+
+                row = universe_df[universe_df["ticker"] == wl_ticker]
+                if row.empty:
+                    continue
+
+                cur_score = int(row["score"].iloc[0]) if pd.notna(row["score"].iloc[0]) else None
+                cur_quality = bool(row["quality_pass"].iloc[0]) if "quality_pass" in row.columns and pd.notna(row["quality_pass"].iloc[0]) else None
+
+                # Determine previous score: prefer yesterday's score_history, fall back to score_when_added
+                prev = prev_scores.get(wl_ticker)
+                if prev and prev.get("score") is not None:
+                    prev_score = prev["score"]
+                    prev_quality = prev.get("quality_pass")
+                else:
+                    prev_score = wl.get("score_when_added")
+                    prev_quality = wl.get("quality_when_added")
+
+                wl_name = wl.get("name") or wl_ticker
+
+                def wl_alert(alert_type, headline, detail, book_key):
+                    passages = []
+                    if book_chunks and book_key:
+                        query = ALERT_BOOK_QUERIES.get(book_key, "")
+                        if query:
+                            results = search_passages(book_chunks, query, n=2)
+                            passages = [{"author": r["author"], "text": r["text"][:400]} for r in results]
+                    return {
+                        "portfolio_id": None,
+                        "user_id": wl_user_id,
+                        "alert_type": alert_type,
+                        "ticker": wl_ticker,
+                        "headline": headline,
+                        "detail": {**detail, "book_passages": passages},
+                        "alert_date": today_str,
+                    }
+
+                # Score up
+                if cur_score is not None and prev_score is not None and cur_score > prev_score:
+                    all_alerts.append(wl_alert(
+                        "watchlist_score_up",
+                        f"👁 {wl_name} score improved {prev_score} → {cur_score}/4",
+                        {"prev_score": prev_score, "current_score": cur_score, "source": "watchlist"},
+                        "watchlist_score_up"
+                    ))
+                    wl_alert_count += 1
+
+                # Score down
+                if cur_score is not None and prev_score is not None and cur_score < prev_score:
+                    all_alerts.append(wl_alert(
+                        "watchlist_score_down",
+                        f"👁 {wl_name} score dropped {prev_score} → {cur_score}/4",
+                        {"prev_score": prev_score, "current_score": cur_score, "source": "watchlist"},
+                        "watchlist_score_down"
+                    ))
+                    wl_alert_count += 1
+
+                # Quality flip
+                if cur_quality is not None and prev_quality is not None and cur_quality != prev_quality:
+                    flip_dir = "PASS" if cur_quality else "FAIL"
+                    all_alerts.append(wl_alert(
+                        "watchlist_quality_flip",
+                        f"👁 {wl_name} quality flipped to {flip_dir}",
+                        {"previous": prev_quality, "current": cur_quality, "source": "watchlist"},
+                        "watchlist_quality_flip"
+                    ))
+                    wl_alert_count += 1
+
+                # Near 52-week low (within 5%)
+                try:
+                    w52_low = float(row["week52_low"].iloc[0]) if pd.notna(row.get("week52_low", pd.Series([None])).iloc[0]) else None
+                    cur_price = price_cache.get(wl_ticker)
+                    if cur_price is None:
+                        try:
+                            cur_price = yf.Ticker(wl_ticker).fast_info.last_price
+                            price_cache[wl_ticker] = cur_price
+                        except Exception:
+                            cur_price = None
+
+                    if w52_low and cur_price and w52_low > 0:
+                        pct_above_low = ((cur_price - w52_low) / w52_low) * 100
+                        if pct_above_low <= 5:
+                            all_alerts.append(wl_alert(
+                                "watchlist_near_low",
+                                f"👁 {wl_name} within {pct_above_low:.1f}% of 52-week low",
+                                {"current_price": round(cur_price, 2), "week52_low": round(w52_low, 2),
+                                 "pct_above_low": round(pct_above_low, 1), "source": "watchlist"},
+                                "watchlist_near_low"
+                            ))
+                            wl_alert_count += 1
+                except Exception:
+                    pass
+
+            print(f"Watchlist monitoring: {len(wl_items)} items, {wl_alert_count} alerts generated.")
 
     # ══════════════════════════════════════
     # 3e. SCORE HISTORY TRACKING
@@ -494,8 +621,16 @@ def run_daily_tracker():
             for h in port_holdings:
                 all_held.add(h["ticker"])
 
+        # Also track watched tickers so score_history covers them even if score drops below 3
+        all_watched = set()
+        try:
+            _wl_all = supabase.table("watchlist").select("ticker").execute()
+            all_watched = {w["ticker"] for w in (_wl_all.data or [])}
+        except Exception:
+            pass
+
         trackable = universe_df[
-            (universe_df["ticker"].isin(all_held)) |
+            (universe_df["ticker"].isin(all_held | all_watched)) |
             (universe_df["score"] >= 3)
         ].copy()
 
