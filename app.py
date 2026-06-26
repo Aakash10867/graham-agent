@@ -1428,10 +1428,9 @@ st.markdown("""
 }
 
 
-/* ── Fix 5: Force All Standard Buttons to Light Theme ── */
+/* ── Fix 5: Force Standard Buttons to Light Theme ── */
 .stButton > button, 
 div[data-testid="stButton"] > button,
-[data-testid="baseButton-secondary"],
 [data-testid="baseButton-primary"] {
     background-color: #FFFFFF !important;
     color: #111827 !important;
@@ -1443,11 +1442,26 @@ div[data-testid="stButton"] > button,
 
 .stButton > button:hover,
 div[data-testid="stButton"] > button:hover,
-[data-testid="baseButton-secondary"]:hover,
 [data-testid="baseButton-primary"]:hover {
     background-color: #F8F9FA !important;
     border-color: #1D4ED8 !important; /* Trust Blue on hover */
     color: #1D4ED8 !important;
+}
+
+/* ── Separate Styling for Secondary (Grey/Inactive) Buttons ── */
+[data-testid="baseButton-secondary"] {
+    background-color: #F3F4F6 !important; /* Light Institutional Grey */
+    color: #6B7280 !important; /* Muted Text */
+    border: 1px solid #E5E7EB !important;
+    box-shadow: none !important;
+    font-weight: 500 !important;
+    transition: all 0.1s ease !important;
+}
+
+[data-testid="baseButton-secondary"]:hover {
+    background-color: #E5E7EB !important;
+    color: #374151 !important;
+    border-color: #D1D5DB !important;
 }
 
 /* Ensure text/markdown inside the button inherits the correct color */
