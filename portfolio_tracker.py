@@ -89,7 +89,6 @@ ALERT_BOOK_QUERIES = {
     "watchlist_quality_flip": "earnings quality change cash flow quality reversal accounting red flags",
     "watchlist_near_low": "buying near 52-week low discount margin of safety patience value opportunity",
 }
-}
 
 # Sector → Nifty sectoral index (yfinance tickers)
 SECTOR_INDEX_MAP = {
