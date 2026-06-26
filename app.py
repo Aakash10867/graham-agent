@@ -3074,13 +3074,27 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
         # Long horizon: can include smaller companies with growth
         pass  # No additional filtering, broader pool is fine
 
-    # ── Sort by composite score (value + quality + growth) ──
+    # ── Weighted composite score (profile-based) ──
     df = df.copy()
+    _w = {"defensive":    (0.35, 0.20, 0.30, 0.15),
+          "balanced":     (0.25, 0.25, 0.25, 0.25),
+          "enterprising": (0.15, 0.25, 0.20, 0.40),
+          }.get(investor_type, (0.25, 0.25, 0.25, 0.25))
+    df["_composite"] = (
+        _w[0] * df["graham_pass"].fillna(False).astype(float) +
+        _w[1] * df["greenblatt_pass"].fillna(False).astype(float) +
+        _w[2] * df["dorsey_pass"].fillna(False).astype(float) +
+        _w[3] * df["trajectory_pass"].fillna(False).astype(float)
+    )
     df["_sort_pe"] = df["pe"].apply(lambda x: x if pd.notna(x) else 9999)
     df["_sort_roe"] = df["roe_pct"].apply(lambda x: -x if pd.notna(x) else 9999)
-    df["_sort_rev"] = df["rev_growth"].apply(lambda x: -x if pd.notna(x) else 9999)
-    df["_sort_score"] = -df["score"]
-    df = df.sort_values(["_sort_score", "_sort_pe", "_sort_roe", "_sort_rev"])
+    df["_sort_growth"] = df["revenue_cagr_3y"].apply(lambda x: -x if pd.notna(x) else 9999)
+    if investor_type == "defensive":
+        df = df.sort_values(["_composite", "_sort_pe", "_sort_roe"], ascending=[False, True, True])
+    elif investor_type == "enterprising":
+        df = df.sort_values(["_composite", "_sort_growth", "_sort_roe"], ascending=[False, True, True])
+    else:
+        df = df.sort_values(["_composite", "_sort_roe", "_sort_pe"], ascending=[False, True, True])
 
     # ── Trim to target count ──
     df = df.head(target_count)
@@ -5596,15 +5610,19 @@ elif st.session_state.sb_view_mode == "portfolios":
                     port_pnl = total_current - total_entry
                     port_ret = (port_pnl / total_entry * 100) if total_entry > 0 else 0
 
-                    m1, m2, m3 = st.columns(3)
+                    m1, m2, m3, m4 = st.columns(4)
                     m1.metric("Invested", f"₹{total_entry:,.0f}")
                     m2.metric("Current Value", f"₹{total_current:,.0f}")
-                    m3.metric("Total Return", f"{port_ret:+.1f}%", delta=f"₹{port_pnl:,.0f}")
+                    m3.metric("P&L", f"₹{port_pnl:,.0f}", delta=f"{port_ret:+.1f}%")
 
-                    # Nifty comparison
-                    if review_rows and review_rows[0].get("_market_note"):
-                        nifty_note = review_rows[0]["_market_note"]
-                        st.caption(f"📊 Market context: {nifty_note}")
+                    # Portfolio-level Nifty alpha
+                    _enriched_data = review_state.get("enriched", [])
+                    _nifty_ret = _enriched_data[0].get("nifty_return") if _enriched_data else None
+                    if _nifty_ret is not None:
+                        _alpha = round(port_ret - _nifty_ret, 1)
+                        m4.metric("vs Nifty", f"{_alpha:+.1f}%", delta=f"Nifty {_nifty_ret:+.1f}%")
+                    else:
+                        m4.metric("vs Nifty", "—")
 
                     display_df = pd.DataFrame(review_rows).drop(columns=[c for c in review_rows[0] if c.startswith("_")])
                     st.dataframe(display_df, hide_index=True, width="stretch")
