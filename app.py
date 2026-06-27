@@ -1,6 +1,4 @@
-# TODO Sprint 4: Stacked absolute (not here, this is just to do place) — read portfolio_history
-# (cumulative_invested, total_value, nifty_shadow_value) into Plotly
-# area chart. XIRR from sip_transactions. See roadmap §6A.
+# TODO Sprint 5: Kite Publisher "Buy on Kite" buttons (watchlist, review, chat, SIP execution).
 """
 Kordent
 ========================
@@ -33,6 +31,7 @@ import requests
 import pandas as pd
 import numpy as np
 import math
+import plotly.graph_objects as go
 
 # ──────────────────────────────────────────────
 # FREE MODEL FALLBACK LIST
@@ -120,6 +119,64 @@ def record_transaction(sb, portfolio_id, user_id, ticker, shares, price, amount_
     except Exception as e:
         print(f"Txn log failed (non-blocking): {e}")
     return nifty_px
+
+
+def compute_portfolio_xirr(sb, portfolio_id, current_value, current_nifty_shadow=None):
+    """Compute XIRR for portfolio and its Nifty shadow.
+    Returns (port_xirr_pct, nifty_xirr_pct) as percentages, or None on failure/short duration."""
+    try:
+        from pyxirr import xirr
+    except ImportError:
+        return None, None
+
+    try:
+        txn_resp = sb.table("sip_transactions").select(
+            "transaction_date, amount_inr, transaction_type"
+        ).eq("portfolio_id", str(portfolio_id)).order("transaction_date").execute()
+        txns = txn_resp.data or []
+    except Exception:
+        return None, None
+
+    if not txns:
+        return None, None
+
+    dates = []
+    amounts = []
+    for t in txns:
+        d = datetime.date.fromisoformat(t["transaction_date"])
+        amt = float(t.get("amount_inr") or 0)
+        if t["transaction_type"] == "buy":
+            amounts.append(-amt)
+        else:
+            amounts.append(amt)
+        dates.append(d)
+
+    # XIRR meaningless under 90 days
+    if (datetime.date.today() - dates[0]).days < 90:
+        return None, None
+
+    today = datetime.date.today()
+    dates.append(today)
+    amounts.append(float(current_value))
+
+    try:
+        port_xirr = xirr(dates, amounts)
+    except Exception:
+        port_xirr = None
+
+    port_xirr_pct = round(port_xirr * 100, 2) if port_xirr is not None else None
+
+    nifty_xirr_pct = None
+    if current_nifty_shadow and current_nifty_shadow > 0:
+        nifty_amounts = amounts[:-1] + [float(current_nifty_shadow)]
+        try:
+            n_xirr = xirr(dates, nifty_amounts)
+            nifty_xirr_pct = round(n_xirr * 100, 2) if n_xirr is not None else None
+        except Exception:
+            pass
+
+    return port_xirr_pct, nifty_xirr_pct
+
 
 def enrich_holdings_live(holdings, cache_key=None):
     """Compute live allocation_pct from current market prices.
@@ -4962,46 +5019,104 @@ elif st.session_state.sb_view_mode == "portfolios":
                 else:
                     st.caption("No holdings found.")
 
-                # ── Portfolio Growth Chart ──
+                # ── Stacked Absolute Chart + XIRR ──
                 try:
                     hist_resp = sb.table("portfolio_history").select(
-                        "date, total_value, daily_return_pct, nifty_value"
+                        "date, total_value, cumulative_invested, nifty_shadow_value"
                     ).eq("portfolio_id", port["id"]).order("date").execute()
                     hist_data = hist_resp.data
 
                     if hist_data and len(hist_data) >= 2:
                         hist_df = pd.DataFrame(hist_data)
                         hist_df["date"] = pd.to_datetime(hist_df["date"])
-                        hist_df = hist_df.set_index("date")
 
-                        # Normalize both to % return from day 1
-                        port_base = hist_df["total_value"].iloc[0]
-                        chart_data = pd.DataFrame(index=hist_df.index)
-                        chart_data["Portfolio"] = ((hist_df["total_value"] / port_base) - 1) * 100 if port_base > 0 else 0
+                        has_invested = "cumulative_invested" in hist_df.columns and hist_df["cumulative_invested"].notna().sum() >= 2
+                        has_shadow = "nifty_shadow_value" in hist_df.columns and hist_df["nifty_shadow_value"].notna().sum() >= 2
 
-                        has_nifty = "nifty_value" in hist_df.columns and hist_df["nifty_value"].notna().sum() >= 2
-                        if has_nifty:
-                            nifty_base = hist_df["nifty_value"].dropna().iloc[0]
-                            chart_data["Nifty 50"] = ((hist_df["nifty_value"] / nifty_base) - 1) * 100 if nifty_base > 0 else 0
+                        fig = go.Figure()
 
-                        st.markdown("**Growth vs Market (%)**")
-                        st.line_chart(chart_data, width="stretch", color=["#1D4ED8", "#9CA3AF"][:len(chart_data.columns)])
+                        # 1. Principal Baseline (shaded area)
+                        if has_invested:
+                            fig.add_trace(go.Scatter(
+                                x=hist_df["date"], y=hist_df["cumulative_invested"],
+                                fill="tozeroy", fillcolor="rgba(29, 78, 216, 0.08)",
+                                line=dict(color="rgba(29, 78, 216, 0.25)", width=1),
+                                name="Invested",
+                                hovertemplate="₹%{y:,.0f}<extra>Invested</extra>",
+                            ))
 
-                        # Summary
-                        first_val = hist_df["total_value"].iloc[0]
-                        last_val = hist_df["total_value"].iloc[-1]
-                        port_growth = ((last_val - first_val) / first_val) * 100 if first_val > 0 else 0
-                        days_tracked = (hist_df.index[-1] - hist_df.index[0]).days
+                        # 2. Shadow Benchmark (dashed)
+                        if has_shadow:
+                            fig.add_trace(go.Scatter(
+                                x=hist_df["date"], y=hist_df["nifty_shadow_value"],
+                                line=dict(color="#9CA3AF", width=1.5, dash="dash"),
+                                name="Nifty Shadow",
+                                hovertemplate="₹%{y:,.0f}<extra>Nifty Shadow</extra>",
+                            ))
 
-                        summary = f"Portfolio: ₹{first_val:,.0f} → ₹{last_val:,.0f} ({port_growth:+.1f}%)"
-                        if has_nifty:
-                            nifty_first = hist_df["nifty_value"].dropna().iloc[0]
-                            nifty_last = hist_df["nifty_value"].dropna().iloc[-1]
-                            nifty_growth = ((nifty_last - nifty_first) / nifty_first) * 100 if nifty_first > 0 else 0
-                            alpha = port_growth - nifty_growth
-                            summary += f" · Nifty: {nifty_growth:+.1f}% · Alpha: {alpha:+.1f}%"
-                        summary += f" · {days_tracked} days"
-                        st.caption(summary)
+                        # 3. Reality Line (bold)
+                        fig.add_trace(go.Scatter(
+                            x=hist_df["date"], y=hist_df["total_value"],
+                            line=dict(color="#1D4ED8", width=2.5),
+                            name="Portfolio",
+                            hovertemplate="₹%{y:,.0f}<extra>Portfolio</extra>",
+                        ))
+
+                        fig.update_layout(
+                            margin=dict(l=0, r=0, t=10, b=0),
+                            height=320,
+                            hovermode="x unified",
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                            yaxis=dict(tickprefix="₹", tickformat=",", gridcolor="rgba(0,0,0,0.05)"),
+                            xaxis=dict(showgrid=False),
+                            plot_bgcolor="rgba(0,0,0,0)",
+                            paper_bgcolor="rgba(0,0,0,0)",
+                        )
+
+                        st.plotly_chart(fig, use_container_width=True)
+
+                        # ── Metrics below chart ──
+                        last_val = float(hist_df["total_value"].iloc[-1])
+                        last_invested = float(hist_df["cumulative_invested"].iloc[-1]) if has_invested else None
+                        last_shadow = float(hist_df["nifty_shadow_value"].iloc[-1]) if has_shadow else None
+                        days_tracked = (hist_df["date"].iloc[-1] - hist_df["date"].iloc[0]).days
+
+                        # Compute XIRR
+                        current_total = sum(h.get("current_value", 0) for h in display_holdings) if holdings else last_val
+                        port_xirr, nifty_xirr = compute_portfolio_xirr(
+                            sb, port["id"], current_total, last_shadow
+                        )
+
+                        if last_invested and last_invested > 0:
+                            profit = last_val - last_invested
+                            simple_ret = (profit / last_invested) * 100
+
+                            m1, m2, m3 = st.columns(3)
+                            m1.metric("Invested", f"₹{last_invested:,.0f}")
+                            m2.metric("Current Value", f"₹{last_val:,.0f}")
+                            m3.metric("P&L", f"₹{profit:,.0f}", delta=f"{simple_ret:+.1f}%")
+
+                            m4, m5 = st.columns(2)
+                            if port_xirr is not None:
+                                m4.metric("XIRR", f"{port_xirr:+.1f}%")
+                            else:
+                                if days_tracked < 90:
+                                    m4.metric("Return", f"{simple_ret:+.1f}%", help="XIRR becomes meaningful after 3+ months")
+                                else:
+                                    m4.metric("Return", f"{simple_ret:+.1f}%")
+
+                            if port_xirr is not None and nifty_xirr is not None:
+                                alpha = round(port_xirr - nifty_xirr, 1)
+                                m5.metric("Alpha vs Nifty", f"{alpha:+.1f}%", delta=f"Nifty XIRR {nifty_xirr:+.1f}%")
+                            elif has_shadow and last_shadow and last_invested > 0:
+                                nifty_simple = ((last_shadow - last_invested) / last_invested) * 100
+                                alpha_simple = simple_ret - nifty_simple
+                                m5.metric("vs Nifty", f"{alpha_simple:+.1f}%", delta=f"Nifty {nifty_simple:+.1f}%")
+                            else:
+                                m5.metric("vs Nifty", "—")
+                        else:
+                            st.caption(f"Portfolio: ₹{last_val:,.0f} · {days_tracked} days tracked")
+
                     elif hist_data and len(hist_data) == 1:
                         st.caption("📈 Growth chart available after 2+ days of tracking.")
                 except Exception:
