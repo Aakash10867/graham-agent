@@ -15,9 +15,9 @@
         <input type="hidden" name="data" id="dt" />
     </form>
     <script>
-        const p = new URLSearchParams(window.location.search);
-        const ak = p.get('api_key');
-        const dt = p.get('data');
+        var p = new URLSearchParams(window.location.search);
+        var ak = p.get('api_key');
+        var dt = p.get('data');
         if (ak && dt) {
             document.getElementById('ak').value = ak;
             document.getElementById('dt').value = dt;
