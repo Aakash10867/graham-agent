@@ -2542,7 +2542,7 @@ with st.sidebar:
             else:
                 st.caption("Get daily portfolio updates, danger alerts, and SIP reminders on Telegram.")
                 if st.session_state.get("_tg_link_code"):
-                    st.markdown(f"**Step 1:** Open @KordentBot on Telegram")
+                    st.markdown(f"**Step 1:** Open @KordentAIBot on Telegram")
                     st.markdown(f"**Step 2:** Send this message:")
                     st.code(f"/start {st.session_state['_tg_link_code']}", language=None)
                     st.markdown("**Step 3:** Come back here and click below:")
