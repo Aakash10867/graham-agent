@@ -2516,8 +2516,63 @@ with st.sidebar:
                 st.session_state.sb_view_mode = "watchlist"
                 st.rerun()
 
+        # ── Telegram Alerts ──
+        if not st.session_state.get("_tg_checked"):
+            try:
+                _tg_prof = sb.table("profiles").select("telegram_chat_id").eq(
+                    "id", st.session_state.sb_user_id).limit(1).execute()
+                st.session_state["_tg_connected"] = bool(
+                    _tg_prof.data and _tg_prof.data[0].get("telegram_chat_id"))
+            except Exception:
+                st.session_state["_tg_connected"] = False
+            st.session_state["_tg_checked"] = True
+ 
+        with st.expander("📱 Telegram Alerts"):
+            if st.session_state.get("_tg_connected"):
+                st.caption("✅ Connected — you'll receive daily updates and alerts on Telegram.")
+                if st.button("Disconnect", key="tg_disconnect"):
+                    try:
+                        sb.table("profiles").update({"telegram_chat_id": None}).eq(
+                            "id", st.session_state.sb_user_id).execute()
+                        st.session_state["_tg_connected"] = False
+                        st.session_state.pop("_tg_link_code", None)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed: {e}")
+            else:
+                st.caption("Get daily portfolio updates, danger alerts, and SIP reminders on Telegram.")
+                if st.session_state.get("_tg_link_code"):
+                    st.markdown(f"**Step 1:** Open @KordentBot on Telegram")
+                    st.markdown(f"**Step 2:** Send this message:")
+                    st.code(f"/start {st.session_state['_tg_link_code']}", language=None)
+                    st.markdown("**Step 3:** Come back here and click below:")
+                    if st.button("✅ I've sent it", key="tg_verify"):
+                        try:
+                            _vr = sb.table("profiles").select("telegram_chat_id").eq(
+                                "id", st.session_state.sb_user_id).limit(1).execute()
+                            if _vr.data and _vr.data[0].get("telegram_chat_id"):
+                                st.session_state["_tg_connected"] = True
+                                st.session_state.pop("_tg_link_code", None)
+                                st.success("Connected!")
+                                st.rerun()
+                            else:
+                                st.warning("Not connected yet. Make sure you sent /start CODE to the bot.")
+                        except Exception:
+                            st.warning("Could not verify. Try again.")
+                else:
+                    if st.button("Connect Telegram", key="tg_connect", use_container_width=True):
+                        import random
+                        code = str(random.randint(100000, 999999))
+                        try:
+                            sb.table("profiles").update({"telegram_link_code": code}).eq(
+                                "id", st.session_state.sb_user_id).execute()
+                            st.session_state["_tg_link_code"] = code
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Failed: {e}")
+ 
         st.divider()
-
+ 
         if st.button("Log Out", width="stretch", key="logout_btn"):
             try:
                 sb = get_supabase()
