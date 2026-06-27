@@ -1,4 +1,4 @@
-# TODO Sprint 4: Stacked absolute chart here — read portfolio_history
+# TODO Sprint 4: Stacked absolute (not here, this is just to do place) — read portfolio_history
 # (cumulative_invested, total_value, nifty_shadow_value) into Plotly
 # area chart. XIRR from sip_transactions. See roadmap §6A.
 """
