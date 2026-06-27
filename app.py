@@ -158,31 +158,33 @@ def record_transaction(sb, portfolio_id, user_id, ticker, shares, price, amount_
     return nifty_px
 
 
+KITE_RELAY_URL = "https://aakash10867.github.io/graham-agent/kite-basket.html"
+
 def kite_buy_url(ticker, quantity=1, order_type="MARKET"):
-    """Single stock Kite Publisher URL."""
+    """Single stock Kite Publisher URL via GitHub Pages relay (POST required by Kite)."""
     import urllib.parse
     symbol = ticker.replace(".NS", "").replace(".BO", "")
     exchange = "NSE" if ".NS" in ticker else "BSE"
-    data = [{"exchange": exchange, "tradingsymbol": symbol,
+    data = json.dumps([{"exchange": exchange, "tradingsymbol": symbol,
              "transaction_type": "BUY", "quantity": int(quantity),
-             "order_type": order_type}]
+             "order_type": order_type}])
     key = st.secrets["KITE_PUBLISHER_KEY"]
-    return f"https://kite.zerodha.com/connect/basket?api_key={key}&data={urllib.parse.quote(json.dumps(data))}"
+    return f"{KITE_RELAY_URL}?api_key={urllib.parse.quote(key)}&data={urllib.parse.quote(data)}"
 
 
 def kite_basket_url(stocks):
-    """Multiple stocks in one Kite session.
-    stocks: list of dicts with 'ticker' and 'quantity' keys."""
+    """Multiple stocks in one Kite session via GitHub Pages relay (POST required by Kite).
+    stocks: list of dicts with 'ticker' and 'quantity' keys. Max 10 per Kite limit."""
     import urllib.parse
     data = []
-    for s in stocks:
+    for s in stocks[:10]:
         symbol = s["ticker"].replace(".NS", "").replace(".BO", "")
         exchange = "NSE" if ".NS" in s["ticker"] else "BSE"
         data.append({"exchange": exchange, "tradingsymbol": symbol,
                      "transaction_type": "BUY", "quantity": int(s.get("quantity", 1)),
                      "order_type": "MARKET"})
     key = st.secrets["KITE_PUBLISHER_KEY"]
-    return f"https://kite.zerodha.com/connect/basket?api_key={key}&data={urllib.parse.quote(json.dumps(data))}"
+    return f"{KITE_RELAY_URL}?api_key={urllib.parse.quote(key)}&data={urllib.parse.quote(json.dumps(data))}"
 
 
 def compute_portfolio_xirr(sb, portfolio_id, current_value, current_nifty_shadow=None):
