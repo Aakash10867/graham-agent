@@ -22,8 +22,24 @@ import pandas as pd
 import yfinance as yf
 from google import genai
 from supabase import create_client, Client
+import requests as _requests
 
 
+def _html_esc(text):
+    """Escape HTML special chars for Telegram."""
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+ 
+def send_telegram(chat_id, text, bot_token):
+    """Send a message via Telegram Bot API (HTML parse mode). Non-blocking."""
+    try:
+        _requests.post(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
+            timeout=10,
+        )
+    except Exception as e:
+        print(f"  Telegram send failed: {e}")
+ 
 APP_URL = "https://kordent.streamlit.app"
 GEMINI_MODELS = [
     "gemini-2.5-flash-lite",
@@ -497,6 +513,18 @@ def run_weekly_mentor():
         # ── Send ──
         if send_email(email, subject, body, smtp_user, smtp_pass):
             sent += 1
+ 
+        # ── Telegram mirror ──
+        _tg_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+        if _tg_token:
+            _tg_chat = profile.get("telegram_chat_id")
+            if _tg_chat:
+                _tg_body = f"<b>{_html_esc(subject)}</b>\n\n{_html_esc(body)}\n\n<a href='{APP_URL}'>Open Kordent</a>"
+                # Telegram max is 4096 chars
+                if len(_tg_body) > 4096:
+                    _tg_body = _tg_body[:4090] + "..."
+                send_telegram(_tg_chat, _tg_body, _tg_token)
+                print(f"  Telegram sent to {name}")
 
     print(f"\n{'=' * 50}")
     print(f"Done. Sent: {sent} | Skipped: {skipped}")
