@@ -10,4 +10,5 @@ pysqlite3-binary
 supabase
 reportlab
 matplotlib 
-pyxirr 
+plotly
+pyxirr
