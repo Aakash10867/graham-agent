@@ -273,6 +273,74 @@ def compute_goal_projection(current_value, sip_monthly, target_amount, target_da
     }
 
 
+def render_score_history_chart(sb, ticker, stock_name=None):
+    """Query score_history for a ticker and render a Plotly score trend chart.
+    Returns True if chart was rendered, False otherwise."""
+    try:
+        resp = sb.table("score_history").select(
+            "date, score, graham_pass, greenblatt_pass, dorsey_pass, trajectory_pass, quality_pass"
+        ).eq("ticker", ticker).order("date").execute()
+        rows = resp.data or []
+    except Exception:
+        return False
+
+    if len(rows) < 2:
+        if len(rows) == 1:
+            st.caption(f"Only 1 data point so far — chart appears after 2+ days of tracking.")
+        return False
+
+    df = pd.DataFrame(rows)
+    df["date"] = pd.to_datetime(df["date"])
+
+    fig = go.Figure()
+
+    # Score line
+    fig.add_trace(go.Scatter(
+        x=df["date"], y=df["score"],
+        line=dict(color="#1D4ED8", width=2),
+        fill="tozeroy", fillcolor="rgba(29, 78, 216, 0.06)",
+        name="Score",
+        hovertemplate="%{y}/4<extra>Score</extra>",
+    ))
+
+    # Quality-fail markers
+    if "quality_pass" in df.columns:
+        q_fail = df[df["quality_pass"] == False]
+        if not q_fail.empty:
+            fig.add_trace(go.Scatter(
+                x=q_fail["date"], y=q_fail["score"],
+                mode="markers",
+                marker=dict(color="#EF4444", size=7, symbol="x"),
+                name="Quality Fail",
+                hovertemplate="%{y}/4 (quality fail)<extra></extra>",
+            ))
+
+    fig.update_layout(
+        margin=dict(l=0, r=0, t=10, b=0),
+        height=200,
+        yaxis=dict(range=[-0.3, 4.5], dtick=1, gridcolor="rgba(0,0,0,0.05)"),
+        xaxis=dict(showgrid=False),
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+    )
+
+    label = stock_name or ticker
+    st.caption(f"**{label}** — Score Trend")
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Framework summary from latest row
+    latest = rows[-1]
+    parts = []
+    for fw, key in [("Graham", "graham_pass"), ("Greenblatt", "greenblatt_pass"),
+                     ("Dorsey", "dorsey_pass"), ("Trajectory", "trajectory_pass")]:
+        parts.append(f"{fw} {'✓' if latest.get(key) else '✗'}")
+    q_tag = " · Quality ✓" if latest.get("quality_pass") else " · Quality ✗"
+    st.caption(f"{' · '.join(parts)}{q_tag}")
+    return True
+
+
 def enrich_holdings_live(holdings, cache_key=None):
     """Compute live allocation_pct from current market prices.
 
@@ -4171,6 +4239,18 @@ if st.session_state.sb_view_mode == "chat":
                     if st.session_state.get("pending_portfolio"):
                         st.rerun()
 
+                    # ── Score History Chart (single-stock analysis) ──
+                    _sh_chat_tickers = set(re.findall(r'\b[A-Z][A-Z0-9&]+\.(?:NS|BO)\b', answer))
+                    _sh_disambig = re.search(r'ticker:\s*([A-Z][A-Z0-9&]+\.(?:NS|BO))', prompt)
+                    _sh_chat_target = None
+                    if _sh_disambig:
+                        _sh_chat_target = _sh_disambig.group(1)
+                    elif len(_sh_chat_tickers) == 1:
+                        _sh_chat_target = list(_sh_chat_tickers)[0]
+                    if _sh_chat_target:
+                        with st.expander("📊 Score Trend"):
+                            render_score_history_chart(get_supabase(), _sh_chat_target)
+
                     # ── Chat → Watchlist bridge: store YES tickers for buttons ──
                     if st.session_state.sb_user_id and "YES" in answer.upper():
                         _resp_tickers = set(re.findall(r'\b[A-Z][A-Z0-9&]+\.(?:NS|BO)\b', answer))
@@ -4386,6 +4466,9 @@ elif st.session_state.sb_view_mode == "watchlist":
                                 _w_sb.table("watchlist").update({"note": _w_new_note}).eq("id", _w["id"]).execute()
                             except Exception:
                                 pass
+
+                        with st.expander("📊 Score Trend"):
+                            render_score_history_chart(_w_sb, _w_ticker, stock_name=_w_name)
 
 
         with _wl_tab_paper:
@@ -5120,6 +5203,20 @@ elif st.session_state.sb_view_mode == "portfolios":
                     st.dataframe(hold_df[list(available.keys())].rename(columns=available), hide_index=True, width="stretch")
                 else:
                     st.caption("No holdings found.")
+
+                # ── Score Trend (per holding) ──
+                if holdings and len(display_holdings) > 0:
+                    with st.expander("📊 Score Trend (select a holding)"):
+                        _sh_opts = [(h.get("name") or h["ticker"], h["ticker"]) for h in display_holdings]
+                        _sh_pick = st.selectbox(
+                            "Stock", options=[t[1] for t in _sh_opts],
+                            format_func=lambda x: next((t[0] for t in _sh_opts if t[1] == x), x),
+                            key=f"sh_port_{port['id']}",
+                            label_visibility="collapsed",
+                        )
+                        if _sh_pick:
+                            render_score_history_chart(sb, _sh_pick,
+                                stock_name=next((t[0] for t in _sh_opts if t[1] == _sh_pick), None))
 
                 # ── Stacked Absolute Chart + XIRR ──
                 try:
