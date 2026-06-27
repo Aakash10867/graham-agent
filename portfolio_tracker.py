@@ -1,4 +1,4 @@
-# TODO Sprint 5: Kite Publisher integration — pre-fill basket orders for SIP execution.
+# TODO Sprint 6: Backtest runner — retrospective score reconstruction on Nifty 200.
 import os
 import re
 import yfinance as yf
