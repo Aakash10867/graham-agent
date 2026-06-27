@@ -12,3 +12,4 @@ reportlab
 matplotlib 
 plotly
 pyxirr
+kaleido
