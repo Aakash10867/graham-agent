@@ -8,6 +8,7 @@ from google import genai
 from supabase import create_client, Client
 from datetime import date, timedelta
 from collections import Counter
+import requests as _requests
 
 
 # ══════════════════════════════════════════════
@@ -105,6 +106,21 @@ SECTOR_INDEX_MAP = {
     "Communication Services": "^CNXMEDIA",
 }
 
+def _html_esc(text):
+    """Escape HTML special chars for Telegram."""
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+ 
+def send_telegram(chat_id, text, bot_token):
+    """Send a message via Telegram Bot API (HTML parse mode). Non-blocking."""
+    try:
+        _requests.post(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
+            timeout=10,
+        )
+    except Exception as e:
+        print(f"  Telegram send failed: {e}")
+ 
 def run_daily_tracker():
     print("Initiating Kordent Daily Portfolio Audit...")
 
@@ -203,6 +219,19 @@ def run_daily_tracker():
     price_cache = {}
     today_str = date.today().isoformat()
     all_alerts = []
+    _port_values = {}  # port_id -> (value, return_pct) for Telegram digest
+ 
+    # ── Pre-load Telegram chat IDs ──
+    _tg_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    _tg_map = {}  # user_id -> chat_id
+    if _tg_token:
+        try:
+            _tg_resp = supabase.table("profiles").select("id, telegram_chat_id").not_.is_("telegram_chat_id", "null").execute()
+            _tg_map = {p["id"]: p["telegram_chat_id"] for p in (_tg_resp.data or []) if p.get("telegram_chat_id")}
+            if _tg_map:
+                print(f"Telegram: {len(_tg_map)} users with linked accounts.")
+        except Exception as e:
+            print(f"Telegram pre-load failed: {e}")
 
     for port in portfolios:
         port_id = port["id"]
@@ -273,6 +302,7 @@ def run_daily_tracker():
         ).execute()
 
         print(f"Updated [{port['name']}]: Value {current_total_value:,.2f} | Return {return_pct:+.2f}%")
+        _port_values[port_id] = (round(current_total_value, 2), round(return_pct, 2))
 
         # ── SIP budget management (30% cap for mid-cycle opportunities) ──
         sip_amount = port.get("sip_amount") or 0
@@ -361,33 +391,39 @@ def run_daily_tracker():
             quality_pass = bool(row["quality_pass"].iloc[0]) if "quality_pass" in row.columns and pd.notna(row["quality_pass"].iloc[0]) else True
 
             if entry_score - current_score >= 2:
+                _dd_headline = f"{holding.get('name', ticker)} score dropped {entry_score} -> {current_score}"
                 all_alerts.append(make_alert(
-                    "danger", ticker,
-                    f"{holding.get('name', ticker)} score dropped {entry_score} -> {current_score}",
+                    "danger", ticker, _dd_headline,
                     {"name": holding.get("name", ticker), "entry_score": entry_score,
                      "current_score": current_score, "reason": "score_drop"},
                     "score_drop"
                 ))
+                if _tg_token and user_id in _tg_map:
+                    send_telegram(_tg_map[user_id], f"⚠️ <b>{_html_esc(_dd_headline)}</b>\n\n<a href='https://kordent.streamlit.app'>Open Kordent</a>", _tg_token)
 
             if not quality_pass:
+                _qf_headline = f"{holding.get('name', ticker)} flagged as potential value trap"
                 all_alerts.append(make_alert(
-                    "danger", ticker,
-                    f"{holding.get('name', ticker)} flagged as potential value trap",
+                    "danger", ticker, _qf_headline,
                     {"name": holding.get("name", ticker), "reason": "quality_fail"},
                     "quality_fail"
                 ))
+                if _tg_token and user_id in _tg_map:
+                    send_telegram(_tg_map[user_id], f"⚠️ <b>{_html_esc(_qf_headline)}</b>\n\n<a href='https://kordent.streamlit.app'>Open Kordent</a>", _tg_token)
 
             if entry_price > 0:
                 stock_return = ((live_price - entry_price) / entry_price) * 100
                 if stock_return < -20:
+                    _pc_headline = f"{holding.get('name', ticker)} down {stock_return:.0f}% from entry"
                     all_alerts.append(make_alert(
-                        "danger", ticker,
-                        f"{holding.get('name', ticker)} down {stock_return:.0f}% from entry",
+                        "danger", ticker, _pc_headline,
                         {"name": holding.get("name", ticker), "reason": "price_crash",
                          "entry_price": entry_price, "current_price": round(live_price, 2),
                          "return_pct": round(stock_return, 1)},
                         "price_crash"
                     ))
+                    if _tg_token and user_id in _tg_map:
+                        send_telegram(_tg_map[user_id], f"⚠️ <b>{_html_esc(_pc_headline)}</b>\n\n<a href='https://kordent.streamlit.app'>Open Kordent</a>", _tg_token)
 
             # ── Overvalued: Graham margin of safety eroding ──
             current_pe = float(row["pe"].iloc[0]) if pd.notna(row["pe"].iloc[0]) else None
@@ -790,6 +826,40 @@ def run_daily_tracker():
 
     print(f"Wrote {written} alerts.")
 
+    # ══════════════════════════════════════
+    # 5. TELEGRAM DAILY DIGEST
+    # ══════════════════════════════════════
+    if _tg_token and _tg_map:
+        _user_ports = {}
+        for port in portfolios:
+            if not port.get("is_paper"):
+                _user_ports.setdefault(port["user_id"], []).append(port)
+ 
+        _tg_sent = 0
+        for uid, chat_id in _tg_map.items():
+            ports = _user_ports.get(uid, [])
+            if not ports:
+                continue
+ 
+            lines = ["<b>📊 Kordent Daily Update</b>\n"]
+            for p in ports:
+                val, ret = _port_values.get(p["id"], (0, 0))
+                lines.append(f"<b>{_html_esc(p.get('name', 'Portfolio'))}</b>\nRs. {val:,.0f} ({ret:+.1f}%)\n")
+ 
+            # SIP reminder on 1st of month
+            if date.today().day == 1:
+                for p in ports:
+                    sip = p.get("sip_amount", 0)
+                    if sip > 0:
+                        lines.append(f"📅 SIP due: Rs. {sip:,.0f} for <b>{_html_esc(p['name'])}</b>")
+ 
+            lines.append(f"\n<a href='https://kordent.streamlit.app'>Open Kordent</a>")
+            send_telegram(chat_id, "\n".join(lines), _tg_token)
+            _tg_sent += 1
+ 
+        if _tg_sent:
+            print(f"Sent {_tg_sent} Telegram daily digests.")
+ 
     print("Kordent Daily Audit Complete.")
 
 if __name__ == "__main__":
