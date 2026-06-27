@@ -1,4 +1,4 @@
-# TODO Sprint 5: Kite Publisher "Buy on Kite" buttons (watchlist, review, chat, SIP execution).
+# TODO Sprint 6: Backtest runner, results CSV, "Does It Work?" UI.
 """
 Kordent
 ========================
