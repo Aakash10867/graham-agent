@@ -98,7 +98,8 @@ def handle_start(supabase, chat_id, text):
             "2. Click 📱 Telegram Alerts in the sidebar\n"
             "3. Click Connect Telegram\n"
             "4. Send the code here: /start CODE\n\n"
-            "Already linked? Try /portfolio or /help")
+            "Already linked? Try /portfolio or /help\n\n"
+            "<i>Commands are processed every hour. Alerts and daily updates are delivered instantly.</i>")
 
 
 def handle_portfolio(supabase, chat_id):
@@ -260,6 +261,7 @@ def handle_help(chat_id):
         "/score TICKER — Score lookup (e.g. /score HDFCBANK)\n"
         "/watchlist — Your watched stocks with scores\n"
         "/help — This message\n\n"
+        "<i>Commands are processed every hour. Daily updates, danger alerts, and SIP reminders are delivered instantly.</i>\n\n"
         f"<a href='{APP_URL}'>Open Kordent</a>")
 
 
