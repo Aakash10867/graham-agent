@@ -178,6 +178,101 @@ def compute_portfolio_xirr(sb, portfolio_id, current_value, current_nifty_shadow
     return port_xirr_pct, nifty_xirr_pct
 
 
+def _add_months(d, months):
+    """Add months to a date, clamping day to valid range."""
+    import calendar
+    m = d.month + months
+    y = d.year + (m - 1) // 12
+    m = (m - 1) % 12 + 1
+    max_day = calendar.monthrange(y, m)[1]
+    return d.replace(year=y, month=m, day=min(d.day, max_day))
+
+
+def compute_goal_projection(current_value, sip_monthly, target_amount, target_date_str, actual_cagr=None):
+    """Compute goal trajectory projection.
+    Returns dict with status, gap, projected_value, chart points, sip_increase suggestion.
+    actual_cagr: decimal (0.12 = 12%). None → use 12% Nifty default."""
+    today = datetime.date.today()
+    try:
+        target_date = datetime.date.fromisoformat(str(target_date_str))
+    except (ValueError, TypeError):
+        return None
+
+    months_remaining = max(0, (target_date.year - today.year) * 12 + (target_date.month - today.month))
+    if months_remaining <= 0:
+        gap = target_amount - current_value
+        return {"status": "achieved" if gap <= 0 else "missed", "gap": gap,
+                "months_remaining": 0, "using_default": actual_cagr is None}
+
+    using_default = actual_cagr is None
+    cagr = actual_cagr if actual_cagr is not None else 0.12
+    actual_monthly = (1 + cagr) ** (1 / 12) - 1
+
+    def fv(pv, r, pmt, n):
+        if r == 0 or n == 0:
+            return pv + pmt * n
+        g = (1 + r) ** n
+        return pv * g + pmt * (g - 1) / r
+
+    projected_value = fv(current_value, actual_monthly, sip_monthly, months_remaining)
+    gap = target_amount - projected_value
+
+    if gap <= 0:
+        status = "ahead"
+    elif abs(gap) <= target_amount * 0.05:
+        status = "on_track"
+    else:
+        status = "behind"
+
+    # Needed monthly rate via bisection
+    needed_monthly = None
+    needed_cagr = None
+    def objective(r):
+        return fv(current_value, r, sip_monthly, months_remaining) - target_amount
+    lo, hi = -0.01, 0.08
+    try:
+        if objective(lo) * objective(hi) < 0:
+            for _ in range(60):
+                mid = (lo + hi) / 2
+                if objective(mid) > 0:
+                    hi = mid
+                else:
+                    lo = mid
+            needed_monthly = (lo + hi) / 2
+            needed_cagr = (1 + needed_monthly) ** 12 - 1
+    except Exception:
+        pass
+
+    # SIP increase suggestion (if behind)
+    sip_increase = None
+    if status == "behind" and actual_monthly > 0 and months_remaining > 0:
+        try:
+            g = (1 + actual_monthly) ** months_remaining
+            if g > 1:
+                needed_pmt = (target_amount - current_value * g) * actual_monthly / (g - 1)
+                sip_increase = max(0, round(needed_pmt - sip_monthly, -2))  # round to nearest 100
+        except Exception:
+            pass
+
+    # Generate projection points (monthly)
+    current_points = []
+    needed_points = []
+    for m in range(months_remaining + 1):
+        pt_date = _add_months(today, m)
+        current_points.append({"date": pt_date, "value": fv(current_value, actual_monthly, sip_monthly, m)})
+        if needed_monthly is not None:
+            needed_points.append({"date": pt_date, "value": fv(current_value, needed_monthly, sip_monthly, m)})
+
+    return {
+        "status": status, "gap": gap, "projected_value": projected_value,
+        "months_remaining": months_remaining,
+        "actual_cagr": cagr, "needed_cagr": needed_cagr,
+        "sip_increase": sip_increase,
+        "current_points": current_points, "needed_points": needed_points,
+        "using_default": using_default,
+    }
+
+
 def enrich_holdings_live(holdings, cache_key=None):
     """Compute live allocation_pct from current market prices.
 
@@ -5128,6 +5223,125 @@ elif st.session_state.sb_view_mode == "portfolios":
                         st.caption("📈 Growth chart available after 2+ days of tracking.")
                 except Exception:
                     pass  # Fail silently if history table doesn't exist yet
+
+                # ── Goal Tracker ──
+                _goal_amt = port.get("target_amount")
+                _goal_date = port.get("target_date")
+                if _goal_amt and _goal_date:
+                    try:
+                        _goal_amt = float(_goal_amt)
+                        _sip = float(port.get("sip_amount") or 0)
+                        _cur_val = float(port.get("current_value") or 0)
+
+                        # Compute actual CAGR from portfolio_history (need 6+ months)
+                        _goal_cagr = None
+                        try:
+                            _gh = sb.table("portfolio_history").select(
+                                "date, total_value"
+                            ).eq("portfolio_id", port["id"]).order("date").execute().data or []
+                            if len(_gh) >= 120:  # ~6 months of weekday entries
+                                _g_first = float(_gh[0]["total_value"])
+                                _g_first_d = datetime.date.fromisoformat(_gh[0]["date"])
+                                _g_days = max(1, (datetime.date.today() - _g_first_d).days)
+                                if _g_first > 0 and _cur_val > 0:
+                                    _goal_cagr = (_cur_val / _g_first) ** (365 / _g_days) - 1
+                        except Exception:
+                            pass
+
+                        _proj = compute_goal_projection(_cur_val, _sip, _goal_amt, _goal_date, _goal_cagr)
+
+                        if _proj and _proj.get("months_remaining", 0) > 0:
+                            with st.container(border=True):
+                                st.markdown("**🎯 Goal Tracker**")
+
+                                # Status cards
+                                _status = _proj["status"]
+                                _gap = _proj["gap"]
+                                _months = _proj["months_remaining"]
+                                _years = _months / 12
+
+                                if _status == "ahead":
+                                    st.success(f"You're ahead of target by ₹{abs(_gap):,.0f}")
+                                elif _status == "on_track":
+                                    st.success(f"On track — within 5% of your ₹{_goal_amt:,.0f} goal")
+                                else:
+                                    st.warning(f"Behind target by ₹{abs(_gap):,.0f}")
+
+                                gc1, gc2, gc3 = st.columns(3)
+                                gc1.metric("Goal", f"₹{_goal_amt:,.0f}")
+                                gc2.metric("Projected", f"₹{_proj['projected_value']:,.0f}")
+                                gc3.metric("Time Left", f"{_years:.1f} yrs" if _years >= 1 else f"{_months} mo")
+
+                                if _proj.get("using_default"):
+                                    st.caption("Projected at 12% historical Nifty CAGR. Your actual trajectory will appear after 6 months of data.")
+                                elif _proj.get("actual_cagr") is not None:
+                                    _ac = _proj["actual_cagr"] * 100
+                                    _nc = _proj["needed_cagr"] * 100 if _proj.get("needed_cagr") is not None else None
+                                    _cagr_note = f"Your trailing CAGR: {_ac:.1f}%"
+                                    if _nc is not None:
+                                        _cagr_note += f" · Needed: {_nc:.1f}%"
+                                    st.caption(_cagr_note)
+
+                                # Projection chart
+                                _cp = _proj.get("current_points", [])
+                                _np = _proj.get("needed_points", [])
+                                if _cp:
+                                    _goal_fig = go.Figure()
+
+                                    # Target line (horizontal)
+                                    _goal_fig.add_trace(go.Scatter(
+                                        x=[_cp[0]["date"], _cp[-1]["date"]],
+                                        y=[_goal_amt, _goal_amt],
+                                        line=dict(color="#10B981", width=1.5, dash="dot"),
+                                        name="Goal",
+                                        hovertemplate="₹%{y:,.0f}<extra>Goal</extra>",
+                                    ))
+
+                                    # Needed trajectory
+                                    if _np:
+                                        _goal_fig.add_trace(go.Scatter(
+                                            x=[p["date"] for p in _np],
+                                            y=[p["value"] for p in _np],
+                                            line=dict(color="#F59E0B", width=1.5, dash="dash"),
+                                            name="Needed",
+                                            hovertemplate="₹%{y:,.0f}<extra>Needed</extra>",
+                                        ))
+
+                                    # Current trajectory
+                                    _goal_fig.add_trace(go.Scatter(
+                                        x=[p["date"] for p in _cp],
+                                        y=[p["value"] for p in _cp],
+                                        line=dict(color="#1D4ED8", width=2),
+                                        name="Projected",
+                                        hovertemplate="₹%{y:,.0f}<extra>Projected</extra>",
+                                    ))
+
+                                    _goal_fig.update_layout(
+                                        margin=dict(l=0, r=0, t=10, b=0),
+                                        height=250,
+                                        hovermode="x unified",
+                                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                                        yaxis=dict(tickprefix="₹", tickformat=",", gridcolor="rgba(0,0,0,0.05)"),
+                                        xaxis=dict(showgrid=False),
+                                        plot_bgcolor="rgba(0,0,0,0)",
+                                        paper_bgcolor="rgba(0,0,0,0)",
+                                    )
+                                    st.plotly_chart(_goal_fig, use_container_width=True)
+
+                                # SIP adjustment suggestion
+                                if _status == "behind" and _proj.get("sip_increase") and _proj["sip_increase"] > 0:
+                                    st.caption(f"💡 Increasing your SIP by ₹{_proj['sip_increase']:,.0f}/mo (to ₹{_sip + _proj['sip_increase']:,.0f}) could close the gap at your current growth rate.")
+
+                        elif _proj and _proj.get("status") == "achieved":
+                            with st.container(border=True):
+                                st.markdown("**🎯 Goal Tracker**")
+                                st.success(f"Goal reached! Your portfolio (₹{_cur_val:,.0f}) exceeds your target of ₹{_goal_amt:,.0f}.")
+                        elif _proj and _proj.get("status") == "missed":
+                            with st.container(border=True):
+                                st.markdown("**🎯 Goal Tracker**")
+                                st.warning(f"Goal deadline passed. Current: ₹{_cur_val:,.0f} vs Target: ₹{_goal_amt:,.0f}. Gap: ₹{abs(_proj['gap']):,.0f}.")
+                    except Exception:
+                        pass
 
                 # ── PDF Export (two-step: generate then download) ──
                 report_key = f"report_ready_{port['id']}"
