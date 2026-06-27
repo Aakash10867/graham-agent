@@ -52,7 +52,7 @@ except Exception:
     KITE_ENABLED = False
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def get_sector_momentum(_sectors_tuple):
+
 def get_sector_momentum(_sectors_tuple):
     """Fetch 1-month returns for Nifty sectoral indices. Cached for 1 hour."""
     results = {}
