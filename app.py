@@ -304,7 +304,7 @@ def compute_goal_projection(current_value, sip_monthly, target_amount, target_da
     }
 
 
-def render_score_history_chart(sb, ticker, stock_name=None):
+def render_score_history_chart(sb, ticker, stock_name=None, chart_key=None):
     """Query score_history for a ticker and render a Plotly score trend chart.
     Returns True if chart was rendered, False otherwise."""
     try:
@@ -359,7 +359,7 @@ def render_score_history_chart(sb, ticker, stock_name=None):
 
     label = stock_name or ticker
     st.caption(f"**{label}** — Score Trend")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=chart_key)
 
     # Framework summary from latest row
     latest = rows[-1]
@@ -4280,7 +4280,8 @@ if st.session_state.sb_view_mode == "chat":
                         _sh_chat_target = list(_sh_chat_tickers)[0]
                     if _sh_chat_target:
                         with st.expander("📊 Score Trend"):
-                            render_score_history_chart(get_supabase(), _sh_chat_target)
+                            render_score_history_chart(get_supabase(), _sh_chat_target,
+                                chart_key=f"sh_chat_{_sh_chat_target}")
 
                     # ── Chat → Watchlist bridge: store YES tickers for buttons ──
                     if st.session_state.sb_user_id and "YES" in answer.upper():
@@ -4499,7 +4500,8 @@ elif st.session_state.sb_view_mode == "watchlist":
                                 pass
 
                         with st.expander("📊 Score Trend"):
-                            render_score_history_chart(_w_sb, _w_ticker, stock_name=_w_name)
+                            render_score_history_chart(_w_sb, _w_ticker, stock_name=_w_name,
+                                chart_key=f"sh_wl_{_w['id']}")
 
 
         with _wl_tab_paper:
@@ -5247,7 +5249,8 @@ elif st.session_state.sb_view_mode == "portfolios":
                         )
                         if _sh_pick:
                             render_score_history_chart(sb, _sh_pick,
-                                stock_name=next((t[0] for t in _sh_opts if t[1] == _sh_pick), None))
+                                stock_name=next((t[0] for t in _sh_opts if t[1] == _sh_pick), None),
+                                chart_key=f"sh_chart_{port['id']}")
 
                 # ── Stacked Absolute Chart + XIRR ──
                 try:
@@ -5303,7 +5306,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                             paper_bgcolor="rgba(0,0,0,0)",
                         )
 
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, use_container_width=True, key=f"stacked_{port['id']}")
 
                         # ── Metrics below chart ──
                         last_val = float(hist_df["total_value"].iloc[-1])
@@ -5475,7 +5478,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                         plot_bgcolor="rgba(0,0,0,0)",
                                         paper_bgcolor="rgba(0,0,0,0)",
                                     )
-                                    st.plotly_chart(_goal_fig, use_container_width=True)
+                                    st.plotly_chart(_goal_fig, use_container_width=True, key=f"goal_{port['id']}")
 
                                 # SIP adjustment suggestion
                                 if _status == "behind" and _proj.get("sip_increase") and _proj["sip_increase"] > 0:
