@@ -46,7 +46,13 @@ SECTOR_INDEX_MAP = {
     "Communication Services": "^CNXMEDIA",
 }
 
+try:
+    KITE_ENABLED = bool(st.secrets.get("KITE_PUBLISHER_KEY", ""))
+except Exception:
+    KITE_ENABLED = False
+
 @st.cache_data(ttl=3600, show_spinner=False)
+def get_sector_momentum(_sectors_tuple):
 def get_sector_momentum(_sectors_tuple):
     """Fetch 1-month returns for Nifty sectoral indices. Cached for 1 hour."""
     results = {}
@@ -150,6 +156,33 @@ def record_transaction(sb, portfolio_id, user_id, ticker, shares, price, amount_
     except Exception as e:
         print(f"Txn log failed (non-blocking): {e}")
     return nifty_px
+
+
+def kite_buy_url(ticker, quantity=1, order_type="MARKET"):
+    """Single stock Kite Publisher URL."""
+    import urllib.parse
+    symbol = ticker.replace(".NS", "").replace(".BO", "")
+    exchange = "NSE" if ".NS" in ticker else "BSE"
+    data = [{"exchange": exchange, "tradingsymbol": symbol,
+             "transaction_type": "BUY", "quantity": int(quantity),
+             "order_type": order_type}]
+    key = st.secrets["KITE_PUBLISHER_KEY"]
+    return f"https://kite.zerodha.com/connect/basket?api_key={key}&data={urllib.parse.quote(json.dumps(data))}"
+
+
+def kite_basket_url(stocks):
+    """Multiple stocks in one Kite session.
+    stocks: list of dicts with 'ticker' and 'quantity' keys."""
+    import urllib.parse
+    data = []
+    for s in stocks:
+        symbol = s["ticker"].replace(".NS", "").replace(".BO", "")
+        exchange = "NSE" if ".NS" in s["ticker"] else "BSE"
+        data.append({"exchange": exchange, "tradingsymbol": symbol,
+                     "transaction_type": "BUY", "quantity": int(s.get("quantity", 1)),
+                     "order_type": "MARKET"})
+    key = st.secrets["KITE_PUBLISHER_KEY"]
+    return f"https://kite.zerodha.com/connect/basket?api_key={key}&data={urllib.parse.quote(json.dumps(data))}"
 
 
 def compute_portfolio_xirr(sb, portfolio_id, current_value, current_nifty_shadow=None):
@@ -4341,11 +4374,23 @@ if st.session_state.sb_view_mode == "chat":
                 _bare = _yt.replace(".NS", "").replace(".BO", "")
                 if _yt in _pw_held:
                     st.caption(f"✅ {_bare} — already in your portfolio")
+                    if KITE_ENABLED:
+                        st.link_button(f"🛒 Buy {_bare} on Kite", kite_buy_url(_yt), use_container_width=True)
                 elif _yt in _pw_watched:
                     st.caption(f"👁 {_bare} — already on your watchlist")
+                    if KITE_ENABLED:
+                        st.link_button(f"🛒 Buy {_bare} on Kite", kite_buy_url(_yt), use_container_width=True)
                 else:
                     _any_actionable = True
-                    if st.button(f"👁 Watch {_bare}", key=f"watch_{_yt}", use_container_width=True):
+                    if KITE_ENABLED:
+                        _yt_c1, _yt_c2 = st.columns(2)
+                        with _yt_c1:
+                            _yt_watch = st.button(f"👁 Watch {_bare}", key=f"watch_{_yt}", use_container_width=True)
+                        with _yt_c2:
+                            st.link_button(f"🛒 Buy on Kite", kite_buy_url(_yt), use_container_width=True)
+                    else:
+                        _yt_watch = st.button(f"👁 Watch {_bare}", key=f"watch_{_yt}", use_container_width=True)
+                    if _yt_watch:
                         _wl_row = universe_df[universe_df["ticker"] == _yt]
                         _wl_data = {
                             "user_id": st.session_state.sb_user_id,
@@ -4458,6 +4503,8 @@ elif st.session_state.sb_view_mode == "watchlist":
                                     st.warning("Quality flipped to FAIL since you added this.")
     
                         with _wh2:
+                            if KITE_ENABLED:
+                                st.link_button("🛒 Buy", kite_buy_url(_w_ticker), use_container_width=True)
                             if st.button("✕ Remove", key=f"wl_rm_{_w['id']}", use_container_width=True):
                                 try:
                                     _w_sb.table("watchlist").delete().eq("id", _w["id"]).execute()
@@ -4583,6 +4630,11 @@ elif st.session_state.sb_view_mode == "watchlist":
                             st.caption("No holdings recorded.")
 
                         # ── Action buttons ──
+                        if KITE_ENABLED and _pp_holdings:
+                            _paper_kite = [{"ticker": h.get("ticker", ""), "quantity": h.get("shares", 1)}
+                                           for h in _pp_holdings if h.get("ticker")]
+                            if _paper_kite:
+                                st.link_button("🛒 Buy All on Kite", kite_basket_url(_paper_kite), use_container_width=True)
                         _pp_c1, _pp_c2 = st.columns(2)
                         with _pp_c1:
                             if st.button("🚀 Make This Real", key=f"make_real_{_pp['id']}", use_container_width=True):
@@ -5060,6 +5112,11 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 else:
                                     st.markdown(f"Price: **₹{live_price:,.2f}**")
 
+                                if KITE_ENABLED and live_price > 0:
+                                    _kite_qty = suggested_qty if suggested_qty > 0 else 1
+                                    st.link_button("🛒 Buy on Kite", kite_buy_url(ticker, quantity=_kite_qty), use_container_width=True)
+                                    st.caption("After buying, confirm what you did:")
+
                                 col_sh, col_px = st.columns(2)
                                 with col_sh:
                                     buy_qty = st.number_input(
@@ -5103,7 +5160,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                         else:
                                             st.warning("Enter shares and price.")
                                 with c2:
-                                    if st.button("✗ Skip", key=f"buy_skip_{a_id}", use_container_width=True):
+                                    if st.button("⏭ Didn't buy", key=f"buy_skip_{a_id}", use_container_width=True):
                                         sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
                                         st.rerun()
 
@@ -5234,6 +5291,10 @@ elif st.session_state.sb_view_mode == "portfolios":
                     }
                     available = {k: v for k, v in display_cols.items() if k in hold_df.columns}
                     st.dataframe(hold_df[list(available.keys())].rename(columns=available), hide_index=True, width="stretch")
+                    if KITE_ENABLED and display_holdings:
+                        _hold_kite = [{"ticker": h["ticker"], "quantity": 1} for h in display_holdings if h.get("ticker")]
+                        if _hold_kite:
+                            st.link_button("🛒 Top Up Portfolio on Kite", kite_basket_url(_hold_kite), use_container_width=True)
                 else:
                     st.caption("No holdings found.")
 
@@ -6303,6 +6364,16 @@ elif st.session_state.sb_view_mode == "portfolios":
                     else:
                         st.caption("Update what you actually did at your broker since last review:")
 
+                    # ── Kite basket for buy-side stocks ──
+                    if KITE_ENABLED and sip_stocks:
+                        _kite_buys = [{"ticker": s["ticker"], "quantity": sip_alloc.get(s["ticker"], 1)}
+                                      for s in sip_stocks if sip_alloc.get(s["ticker"], 0) > 0]
+                        if not _kite_buys:
+                            _kite_buys = [{"ticker": s["ticker"], "quantity": 1} for s in sip_stocks]
+                        if _kite_buys:
+                            st.link_button("🛒 Buy All on Kite", kite_basket_url(_kite_buys), use_container_width=True)
+                            st.caption("After executing on your broker, confirm below:")
+
                     for i, r in enumerate(review_rows):
                         h_id = r["_holding_id"]
                         if "SELL" in r["Action"]:
@@ -6362,8 +6433,13 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 "price": "Price", "score": "Score", "pe": "P/E", "roe_pct": "ROE %"
                             })
                             st.dataframe(cand_display, hide_index=True, width="stretch")
-                            st.caption("Shares pre-filled from total budget. Set to 0 to skip a stock.")
                             per_slot = total_repl_budget / len(candidates) if candidates else 0
+                            if KITE_ENABLED:
+                                _repl_kite = [{"ticker": c["ticker"],
+                                               "quantity": max(1, int(per_slot // c["price"])) if c["price"] > 0 else 1}
+                                              for c in candidates]
+                                st.link_button("🛒 Buy Replacements on Kite", kite_basket_url(_repl_kite), use_container_width=True)
+                            st.caption("Shares pre-filled from total budget. Set to 0 to skip a stock.")
                             for c in candidates:
                                 suggested = max(1, int(per_slot // c["price"])) if c["price"] > 0 else 0
                                 col_name, col_qty, col_px = st.columns([2, 1, 1])
