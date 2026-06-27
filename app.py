@@ -2542,23 +2542,13 @@ with st.sidebar:
             else:
                 st.caption("Get daily portfolio updates, danger alerts, and SIP reminders on Telegram.")
                 if st.session_state.get("_tg_link_code"):
-                    st.markdown(f"**Step 1:** Open @KordentAIBot on Telegram")
-                    st.markdown(f"**Step 2:** Send this message:")
+                    st.markdown("Send this to **@KordentAIBot** on Telegram:")
                     st.code(f"/start {st.session_state['_tg_link_code']}", language=None)
-                    st.markdown("**Step 3:** Come back here and click below:")
-                    if st.button("✅ I've sent it", key="tg_verify"):
-                        try:
-                            _vr = sb.table("profiles").select("telegram_chat_id").eq(
-                                "id", st.session_state.sb_user_id).limit(1).execute()
-                            if _vr.data and _vr.data[0].get("telegram_chat_id"):
-                                st.session_state["_tg_connected"] = True
-                                st.session_state.pop("_tg_link_code", None)
-                                st.success("Connected!")
-                                st.rerun()
-                            else:
-                                st.warning("Not connected yet. Make sure you sent /start CODE to the bot.")
-                        except Exception:
-                            st.warning("Could not verify. Try again.")
+                    st.caption("You'll get a confirmation on Telegram within the hour. Refresh this page to check.")
+                    if st.button("🔄 Check connection", key="tg_recheck", use_container_width=True):
+                        st.session_state.pop("_tg_checked", None)
+                        st.session_state.pop("_tg_link_code", None)
+                        st.rerun()
                 else:
                     if st.button("Connect Telegram", key="tg_connect", use_container_width=True):
                         import random
