@@ -1,6 +1,4 @@
-# TODO Sprint 4: XIRR computation — query sip_transactions dates/amounts,
-# append current_total_value as final cashflow, run pyxirr.xirr().
-# Store result in portfolios.xirr or portfolio_history.
+# TODO Sprint 5: Kite Publisher integration — pre-fill basket orders for SIP execution.
 import os
 import re
 import yfinance as yf
