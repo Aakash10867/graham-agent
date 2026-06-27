@@ -532,7 +532,7 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
     story.append(Paragraph("Executive Summary", heading_style))
  
     sip = portfolio.get("sip_amount", 0)
-    current_val = portfolio.get("current_value", 0)
+    current_val = sum(h.get("current_value", 0) for h in holdings) if holdings else portfolio.get("current_value", 0)
     return_pct = portfolio.get("current_return_pct", 0)
     total_invested = sum(h.get("sip_amount_inr", 0) for h in holdings) if holdings else 0
     pnl = current_val - total_invested if current_val > 0 and total_invested > 0 else 0
