@@ -4737,7 +4737,14 @@ elif st.session_state.sb_view_mode == "portfolios":
     else:
         for port in portfolios:
             with st.container(border=True):
-                st.markdown(f"**{port['name']}**")
+                _pv = port.get("current_value")
+                _pr = port.get("current_return_pct")
+                _header = f"**{port['name']}**"
+                if _pv:
+                    _header += f" · ₹{_pv:,.0f}"
+                if _pr is not None:
+                    _header += f" ({_pr:+.1f}%)"
+                st.markdown(_header)
 
                 # ── Alert Banner ──
                 try:
