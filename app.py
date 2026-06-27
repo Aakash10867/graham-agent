@@ -2587,7 +2587,6 @@ with st.sidebar:
             st.rerun()
 
     st.divider()
-    st.markdown("Multi-framework investment analysis powered by Graham, Greenblatt, Dorsey, and momentum scoring.")
 
     if st.button("🔄 New Chat", width="stretch"):
         st.session_state.messages = []
