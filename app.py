@@ -5248,9 +5248,11 @@ elif st.session_state.sb_view_mode == "portfolios":
                             label_visibility="collapsed",
                         )
                         if _sh_pick:
-                            render_score_history_chart(sb, _sh_pick,
-                                stock_name=next((t[0] for t in _sh_opts if t[1] == _sh_pick), None),
-                                chart_key=f"sh_chart_{port['id']}_{_sh_pick}")
+                            _sh_slot = st.empty()
+                            with _sh_slot.container():
+                                render_score_history_chart(sb, _sh_pick,
+                                    stock_name=next((t[0] for t in _sh_opts if t[1] == _sh_pick), None),
+                                    chart_key=f"sh_chart_{port['id']}_{_sh_pick}")
 
                 # ── Stacked Absolute Chart + XIRR ──
                 try:
