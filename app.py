@@ -2516,6 +2516,12 @@ with st.sidebar:
                 st.session_state.sb_view_mode = "watchlist"
                 st.rerun()
 
+        # ── Does It Work? nav ──
+        if st.session_state.sb_view_mode != "backtest":
+            if st.button("📊 Does It Work?", width="stretch"):
+                st.session_state.sb_view_mode = "backtest"
+                st.rerun()
+
         # ── Telegram Alerts ──
         if not st.session_state.get("_tg_checked"):
             try:
@@ -6904,3 +6910,138 @@ elif st.session_state.sb_view_mode == "portfolios":
                         if st.button("Cancel", key=f"confirm_no_{port['id']}"):
                             st.session_state.pop(f"confirm_delete_{port['id']}", None)
                             st.rerun()
+
+# ──────────────────────────────────────────────
+# DOES IT WORK? VIEW (Sprint 6)
+# ──────────────────────────────────────────────
+elif st.session_state.sb_view_mode == "backtest":
+    st.markdown("### 📊 Does It Work?")
+    st.caption("Retrospective backtest of Kordent's 5-framework scoring system")
+
+    # Try to load backtest results
+    try:
+        bt_df = pd.read_csv("backtest_results.csv")
+        has_results = len(bt_df) >= 2
+    except Exception:
+        bt_df = None
+        has_results = False
+
+    if not has_results:
+        st.info("Backtest results not yet available. The backtest runs via GitHub Actions (manual trigger).")
+        st.markdown("""
+        **What this will show:**
+        - Strategy vs Nifty 50 performance chart
+        - CAGR, alpha, max drawdown statistics
+        - Full methodology with honest disclaimers
+
+        **How it works:**
+        - Universe: Nifty 200 constituents
+        - Strategy: Top 15 stocks by 5-framework composite score
+        - Rebalance: Quarterly (Jan/Apr/Jul/Oct)
+        - Benchmark: Nifty 50 buy-and-hold
+        - Starting capital: ₹10,00,000
+        """)
+    else:
+        bt_df["date"] = pd.to_datetime(bt_df["date"])
+        start_val = bt_df["portfolio_value"].iloc[0]
+        end_val = bt_df["portfolio_value"].iloc[-1]
+        bench_end = bt_df["benchmark_value"].iloc[-1]
+        start_date = bt_df["date"].iloc[0]
+        end_date = bt_df["date"].iloc[-1]
+        years = (end_date - start_date).days / 365.25
+
+        total_return = (end_val / start_val - 1) * 100
+        bench_return = (bench_end / start_val - 1) * 100
+
+        if years > 0:
+            strategy_cagr = ((end_val / start_val) ** (1 / years) - 1) * 100
+            benchmark_cagr = ((bench_end / start_val) ** (1 / years) - 1) * 100
+            alpha = strategy_cagr - benchmark_cagr
+        else:
+            strategy_cagr = benchmark_cagr = alpha = 0.0
+
+        # Max drawdown
+        peak = bt_df["portfolio_value"].expanding().max()
+        drawdown = (bt_df["portfolio_value"] - peak) / peak * 100
+        max_dd = drawdown.min()
+
+        # ── Stats Cards ──
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric("Strategy CAGR", f"{strategy_cagr:.1f}%")
+        with c2:
+            st.metric("Nifty 50 CAGR", f"{benchmark_cagr:.1f}%")
+        with c3:
+            st.metric("Alpha", f"{alpha:+.1f}%")
+        with c4:
+            st.metric("Max Drawdown", f"{max_dd:.1f}%")
+
+        st.divider()
+
+        # ── Performance Chart ──
+        import plotly.graph_objects as go
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=bt_df["date"], y=bt_df["portfolio_value"],
+            mode="lines+markers", name="Kordent Strategy",
+            line=dict(color="#2E86AB", width=2),
+        ))
+        fig.add_trace(go.Scatter(
+            x=bt_df["date"], y=bt_df["benchmark_value"],
+            mode="lines+markers", name="Nifty 50",
+            line=dict(color="#A23B72", width=2, dash="dash"),
+        ))
+        fig.update_layout(
+            title="Strategy vs Nifty 50 (₹10L starting capital)",
+            xaxis_title="Date",
+            yaxis_title="Portfolio Value (₹)",
+            yaxis_tickformat=",.0f",
+            template="plotly_white",
+            height=450,
+            legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
+        )
+        st.plotly_chart(fig, use_container_width=True, key="backtest_chart")
+
+        # ── Return Summary ──
+        st.markdown(f"""
+        **Period:** {start_date.strftime('%b %Y')} → {end_date.strftime('%b %Y')} ({years:.1f} years)
+
+        | | Strategy | Nifty 50 |
+        |---|---|---|
+        | Starting Capital | ₹{start_val:,.0f} | ₹{start_val:,.0f} |
+        | Ending Value | ₹{end_val:,.0f} | ₹{bench_end:,.0f} |
+        | Total Return | {total_return:+.1f}% | {bench_return:+.1f}% |
+        | CAGR | {strategy_cagr:.1f}% | {benchmark_cagr:.1f}% |
+        """)
+
+        # ── Trades History ──
+        try:
+            trades_df = pd.read_csv("backtest_trades.csv")
+            with st.expander("📋 Trade History"):
+                st.dataframe(trades_df, use_container_width=True)
+        except Exception:
+            pass
+
+        # ── Methodology ──
+        with st.expander("📖 Methodology & Disclaimers"):
+            st.markdown("""
+            **Strategy Rules:**
+            - Score stocks using 5 frameworks: Graham, Greenblatt, Dorsey+Buffett, Trajectory, Lynch
+            - Quality gate: accruals ratio < 0.10, manipulation score ≤ 3/10, ECM trend stable
+            - Select top 15 stocks by composite score (0-5)
+            - Equal-weight allocation, quarterly rebalance
+            - 6-month publication lag to prevent look-ahead bias
+
+            **Honest Disclaimers:**
+            - ⚠ **Retrospective reconstruction** — this is NOT a live track record
+            - Uses current Nifty 200 constituent list (survivorship bias present)
+            - Financial data from yfinance (4 years); longer history would improve accuracy
+            - Transaction costs and slippage not modeled
+            - Past performance does not guarantee future results
+
+            **Prospective tracking:**
+            Live score_history has been accumulating since [launch date].
+            Once sufficient data exists, prospective results will be shown separately
+            with clear distinction from retrospective results.
+            """)
