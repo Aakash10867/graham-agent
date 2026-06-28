@@ -2626,7 +2626,7 @@ if st.session_state.sb_view_mode == "chat" and not st.session_state.messages:
         sb = get_supabase()
         # Fetch the top 3 public portfolios by current return
         leaderboard_resp = sb.table("portfolios").select(
-            "name, investor_type, time_horizon, current_return_pct"
+            "name, investor_type, time_horizon, current_return_pct, xirr_pct, nifty_xirr_pct"
         ).order("current_return_pct", desc=True).limit(3).execute()
         
         top_portfolios = leaderboard_resp.data
@@ -2637,9 +2637,11 @@ if st.session_state.sb_view_mode == "chat" and not st.session_state.messages:
             for i, port in enumerate(top_portfolios):
                 with l_cols[i]:
                     with st.container(border=True):
+                        _lb_xirr = port.get("xirr_pct")
+                        _lb_val = f"{_lb_xirr:+.1f}% XIRR" if _lb_xirr is not None else f"{port.get('current_return_pct', 0):+.2f}%"
                         st.metric(
                             label=port["name"], 
-                            value=f"{port.get('current_return_pct', 0):+.2f}%", 
+                            value=_lb_val, 
                             delta=str(port.get("investor_type", "balanced")).title()
                         )
                         st.caption(f"Horizon: {str(port.get('time_horizon', 'medium')).title()}")
@@ -5455,6 +5457,13 @@ elif st.session_state.sb_view_mode == "portfolios":
                 if _pr is not None:
                     _header += f" ({_pr:+.1f}%)"
                 st.markdown(_header)
+                _px = port.get("xirr_pct")
+                if _px is not None:
+                    _nx = port.get("nifty_xirr_pct")
+                    _xirr_parts = [f"XIRR: {_px:+.1f}%"]
+                    if _nx is not None:
+                        _xirr_parts.append(f"Alpha: {round(_px - _nx, 1):+.1f}%")
+                    st.caption(" · ".join(_xirr_parts))
 
                 # ── Alert Banner ──
                 try:
