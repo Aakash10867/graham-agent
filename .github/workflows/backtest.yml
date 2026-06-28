@@ -1,0 +1,48 @@
+name: Run Backtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      top_n:
+        description: 'Number of top stocks to hold'
+        required: false
+        default: '15'
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install yfinance pandas numpy requests
+
+      - name: Run backtest
+        run: |
+          python backtest_runner.py
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: backtest-results
+          path: |
+            backtest_results.csv
+            backtest_trades.csv
+          retention-days: 90
+
+      - name: Commit results to repo
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add backtest_results.csv backtest_trades.csv || true
+          git diff --cached --quiet || git commit -m "Backtest results $(date +%Y-%m-%d)"
+          git push || true
