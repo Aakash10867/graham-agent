@@ -21,6 +21,7 @@ import io
 import sys
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import deep_metrics
 
 # --- ADD THIS GLOBAL SESSION BLOCK HERE ---
 global_session = requests.Session()
@@ -241,7 +242,7 @@ def fetch_fundamentals(ticker, retries=3):
             info = stock.info
             
             if not info or not info.get("regularMarketPrice"):
-                return None
+                return None, None
             # Compute years listed for Graham 7-year guard
             first_trade = info.get("firstTradeDateEpochUtc")
             if first_trade:
@@ -495,7 +496,7 @@ def fetch_fundamentals(ticker, retries=3):
 
             # 2. Be nice to Yahoo: Small delay between successful requests
             time.sleep(0.5) 
-            return data
+            return data, stock
 
         except Exception as e:
             error_str = str(e)
@@ -506,51 +507,10 @@ def fetch_fundamentals(ticker, retries=3):
                 time.sleep(sleep_time)
             else:
                 print(f"[{ticker}] Failed: {e}")
-                return None
+                return None, None
             
     # Failed all retries
-    return None
-
-
-# ──────────────────────────────────────────────
-# FRAMEWORK SCORER
-# ──────────────────────────────────────────────
-def score_frameworks(data):
-    """Score a stock against all 4 frameworks. Returns dict with verdicts."""
-    pe = data.get("pe")
-    pb = data.get("pb")
-    roe = data.get("roe")
-    de = data.get("de")
-    ey = data.get("earnings_yield")
-    rev_g = data.get("rev_growth")
-    ni_g = data.get("ni_growth")
-    debt_g = data.get("debt_growth")
-
-    years_listed = data.get("years_listed")
-    years_of_data = data.get("years_of_data") or 0
-    div_yield = data.get("dividend_yield")  # raw ratio, not pct
-    graham = bool(
-        pe and pb and pe <= 15 and pb <= 1.5
-        and div_yield is not None and div_yield > 0
-        and years_listed is not None and years_listed >= 7
-        and years_of_data >= 5
-    )
-    greenblatt = bool(roe and ey and roe > 0.15 and ey > 5)
-    dorsey = bool(roe and de is not None and roe > 0.15 and de < 50)
-
-    growth_ok = (rev_g is not None and rev_g > 0) or (ni_g is not None and ni_g > 0)
-    debt_ok = (debt_g is not None and debt_g < 0) or (de is not None and de < 50)
-    trajectory = bool(growth_ok and debt_ok)
-
-    score = sum([graham, greenblatt, dorsey, trajectory])
-
-    data["graham_pass"] = graham
-    data["greenblatt_pass"] = greenblatt
-    data["dorsey_pass"] = dorsey
-    data["trajectory_pass"] = trajectory
-    data["score"] = score
-
-    return data
+    return None, None
 
 
 # ──────────────────────────────────────────────
@@ -580,10 +540,14 @@ def process_universe(ticker_list, max_workers=2):
             ticker_info = futures[future]
 
             try:
-                data = future.result()
-                if data:
-                    scored = score_frameworks(data)
-                    results.append(scored)
+                result = future.result()
+                if result and result[0]:
+                    data, stock_obj = result
+                    try:
+                        deep_metrics.compute_all_deep_metrics(data, stock_obj)
+                    except Exception as dm_err:
+                        print(f"  [DEEP] {data.get('ticker', '?')}: {dm_err}")
+                    results.append(data)
                 else:
                     failed += 1
             except Exception:
@@ -598,6 +562,8 @@ def process_universe(ticker_list, max_workers=2):
                     flush=True,
                 )
 
+    # Greenblatt universe-level ranking (requires all stocks)
+    deep_metrics.compute_greenblatt_ranks(results)
     return results
 
 
@@ -650,9 +616,10 @@ def main():
         else:
             r["dividend_yield_pct"] = None
 
-    columns = [
+    # ── Existing columns ──
+    base_columns = [
         "ticker", "name", "sector", "price", "market_cap", "years_listed",
-        "pe", "pb", "roe_pct", "de", "eps", "earnings_yield",
+        "pe", "pb", "roe_pct", "de", "eps",
         "dividend_yield_pct", "profit_margin",
         "current_ratio", "beta",
         "week52_high", "week52_low", "pct_from_high", "pct_from_low",
@@ -667,10 +634,62 @@ def main():
         "equity_y0", "equity_y1", "equity_y2", "equity_y3",
         "roe_y0", "roe_y1", "roe_y2", "roe_y3",
         "de_y0", "de_y1", "de_y2", "de_y3",
-        "cash_conversion", "earnings_spike", "non_op_pct", "quality_pass",
-        "graham_pass", "greenblatt_pass", "dorsey_pass", "trajectory_pass",
-        "score",
+        "earnings_spike", "non_op_pct",
     ]
+    # ── Sprint 6: Deep Framework Columns ──
+    deep_columns = [
+        # Balance Sheet Health
+        "graham_adequate_size", "graham_current_ratio_pass", "graham_ltd_vs_nca",
+        "graham_net_current_assets", "graham_ncav_per_share", "graham_ncav_ratio",
+        "graham_bvps", "graham_price_to_ntav", "graham_net_cash",
+        "lynch_net_cash_per_share", "dorsey_financial_leverage", "dorsey_interest_coverage",
+        "dorsey_quick_ratio", "dorsey_clean_balance_sheet",
+        # Earnings Quality
+        "graham_earnings_stable_4y", "graham_avg_eps_4y", "graham_eps_cv",
+        "graham_eps_growth_pct_4y", "schilit_accruals_ratio", "schilit_cfo_ni_ratio",
+        "schilit_fcf_ni_ratio", "mulford_ecm", "mulford_ecm_trend",
+        "mulford_cash_margin", "mulford_ocf_oi_ratio", "dorsey_consistent_cfo",
+        # Valuation
+        "graham_pe_3y_avg", "graham_pe_pb_composite", "graham_number",
+        "graham_earnings_yield_spread", "graham_intrinsic_value",
+        "graham_margin_of_safety_pct", "greenblatt_earnings_yield",
+        "greenblatt_combined_rank", "lynch_peg", "lynch_peg_adjusted",
+        "lynch_cash_adjusted_pe", "dorsey_cash_return",
+        "buffett_intrinsic_value", "buffett_margin_of_safety_pct",
+        # Growth Trajectory
+        "lynch_growth_flag", "lynch_growth_acceleration",
+        "buffett_value_creating_growth", "greenblatt_ebit_avg_4y",
+        "graham_ent_earnings_growing",
+        # Moat Durability
+        "greenblatt_roic", "greenblatt_roic_trend", "dorsey_roic",
+        "dorsey_fcf_margin", "dorsey_roe_consistent", "dorsey_roa",
+        "dorsey_pb_roe_signal", "buffett_roe_unleveraged",
+        # Dividend Quality
+        "dividend_consecutive_years", "graham_payout_ratio",
+        "graham_ent_has_dividend", "graham_deep_value_flag",
+        # Management Quality
+        "buffett_owner_earnings_ps", "buffett_one_dollar_test",
+        "buffett_rational_allocation", "dorsey_share_dilution_pct",
+        "dorsey_has_operating_profit",
+        # Manipulation Flags
+        "schilit_dso", "schilit_ar_revenue_divergence", "schilit_capex_depr_ratio",
+        "schilit_dsi", "schilit_inventory_revenue_div", "schilit_wc_cffo_pct",
+        "schilit_leverage_trend", "schilit_serial_acquirer", "goodwill_pct",
+        "dorsey_cfo_ni_divergence", "dorsey_ar_growth_flag", "lynch_inventory_flag",
+        "greenblatt_sector_excluded", "greenblatt_low_pe_flag", "mulford_fcf_consistent",
+        # Classification
+        "lynch_category", "lynch_debt_healthy", "mulford_lifecycle_stage",
+        "graham_ent_financial_pass",
+        # Spectrum Scores
+        "graham_defensive_score", "graham_enterprising_score", "greenblatt_score",
+        "dorsey_buffett_score", "dorsey_10min_score", "lynch_score",
+        "schilit_manipulation_score", "mulford_cashflow_quality_score",
+        # Quality Gate & Framework Verdicts
+        "quality_pass",
+        "graham_pass", "greenblatt_pass", "dorsey_pass", "trajectory_pass",
+        "lynch_pass", "score",
+    ]
+    columns = base_columns + deep_columns
 
     df = pd.DataFrame(scored_results)
 
@@ -686,22 +705,29 @@ def main():
 
     # ── Summary ──
     total_scored = len(df)
-    tier4 = len(df[df["score"] == 4])
-    tier3 = len(df[df["score"] == 3])
-    tier2 = len(df[df["score"] == 2])
+    tier5 = len(df[df["score"] == 5]) if "score" in df.columns else 0
+    tier4 = len(df[df["score"] == 4]) if "score" in df.columns else 0
+    tier3 = len(df[df["score"] == 3]) if "score" in df.columns else 0
+    tier2 = len(df[df["score"] == 2]) if "score" in df.columns else 0
     quality_failed = len(df[df["quality_pass"] == False]) if "quality_pass" in df.columns else 0
-    tier4_traps = len(df[(df["score"] == 4) & (df["quality_pass"] == False)]) if "quality_pass" in df.columns else 0
+    tier5_traps = len(df[(df["score"] == 5) & (df["quality_pass"] == False)]) if "quality_pass" in df.columns else 0
 
     print(f"Saved {total_scored} scored stocks to {output_file}")
-    print(f"\n  Score 4/4 (Perfect):  {tier4} stocks")
-    print(f"  Score 3/4 (Strong):   {tier3} stocks")
-    print(f"  Score 2/4 (Moderate): {tier2} stocks")
-    print(f"  Score 0-1/4:          {total_scored - tier4 - tier3 - tier2} stocks")
+    print(f"\n  Score 5/5 (Perfect):  {tier5} stocks")
+    print(f"  Score 4/5 (Strong):   {tier4} stocks")
+    print(f"  Score 3/5 (Moderate): {tier3} stocks")
+    print(f"  Score 2/5 (Watch):    {tier2} stocks")
+    print(f"  Score 0-1/5:          {total_scored - tier5 - tier4 - tier3 - tier2} stocks")
     print(f"\n  Quality check failed: {quality_failed} stocks (value traps stripped)")
-    print(f"  4/4 stocks that are actually traps: {tier4_traps}")
+    print(f"  5/5 stocks that are actually traps: {tier5_traps}")
 
-    if tier4 > 0:
-        print(f"\n  Top 4/4 stocks:")
+    if tier5 > 0:
+        print(f"\n  Top 5/5 stocks:")
+        top5 = df[df["score"] == 5].sort_values("pe").head(10)
+        for _, row in top5.iterrows():
+            print(f"    {row['ticker']:20s} {str(row['name'])[:35]:35s} P/E: {row['pe']}")
+    elif tier4 > 0:
+        print(f"\n  Top 4/5 stocks:")
         top4 = df[df["score"] == 4].sort_values("pe").head(10)
         for _, row in top4.iterrows():
             print(f"    {row['ticker']:20s} {str(row['name'])[:35]:35s} P/E: {row['pe']}")
