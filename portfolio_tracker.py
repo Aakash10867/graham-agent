@@ -121,6 +121,53 @@ def send_telegram(chat_id, text, bot_token):
         )
     except Exception as e:
         print(f"  Telegram send failed: {e}")
+
+def compute_xirr_standalone(supabase, portfolio_id, current_value, nifty_shadow_value=None):
+    """Compute XIRR for a portfolio and its Nifty shadow. Standalone — no Streamlit dependency.
+    Returns (port_xirr_pct, nifty_xirr_pct) as percentages, or (None, None)."""
+    try:
+        from pyxirr import xirr
+    except ImportError:
+        return None, None
+    try:
+        txn_resp = supabase.table("sip_transactions").select(
+            "transaction_date, amount_inr, transaction_type"
+        ).eq("portfolio_id", str(portfolio_id)).order("transaction_date").execute()
+        txns = txn_resp.data or []
+    except Exception:
+        return None, None
+    if not txns:
+        return None, None
+    dates = []
+    amounts = []
+    for t in txns:
+        d = date.fromisoformat(t["transaction_date"])
+        amt = float(t.get("amount_inr") or 0)
+        if t["transaction_type"] == "buy":
+            amounts.append(-amt)
+        else:
+            amounts.append(amt)
+        dates.append(d)
+    # XIRR meaningless under 90 days
+    if (date.today() - dates[0]).days < 90:
+        return None, None
+    today = date.today()
+    dates.append(today)
+    amounts.append(float(current_value))
+    try:
+        port_xirr = xirr(dates, amounts)
+    except Exception:
+        port_xirr = None
+    port_xirr_pct = round(port_xirr * 100, 2) if port_xirr is not None else None
+    nifty_xirr_pct = None
+    if nifty_shadow_value and nifty_shadow_value > 0:
+        nifty_amounts = amounts[:-1] + [float(nifty_shadow_value)]
+        try:
+            n_xirr = xirr(dates, nifty_amounts)
+            nifty_xirr_pct = round(n_xirr * 100, 2) if n_xirr is not None else None
+        except Exception:
+            pass
+    return port_xirr_pct, nifty_xirr_pct
  
 def run_daily_tracker():
     print("Initiating Kordent Daily Portfolio Audit...")
@@ -302,8 +349,22 @@ def run_daily_tracker():
             history_row, on_conflict="portfolio_id,date"
         ).execute()
 
-        print(f"Updated [{port['name']}]: Value {current_total_value:,.2f} | Return {return_pct:+.2f}%")
-        _port_values[port_id] = (round(current_total_value, 2), round(return_pct, 2))
+        # ── Compute & store XIRR ──
+        _p_xirr, _n_xirr = compute_xirr_standalone(supabase, port_id, current_total_value, nifty_shadow)
+        _xirr_update = {}
+        if _p_xirr is not None:
+            _xirr_update["xirr_pct"] = _p_xirr
+        if _n_xirr is not None:
+            _xirr_update["nifty_xirr_pct"] = _n_xirr
+        if _xirr_update:
+            try:
+                supabase.table("portfolios").update(_xirr_update).eq("id", port_id).execute()
+            except Exception as e:
+                print(f"  XIRR store failed (non-blocking): {e}")
+
+        _xirr_str = f" | XIRR {_p_xirr:+.1f}%" if _p_xirr is not None else ""
+        print(f"Updated [{port['name']}]: Value {current_total_value:,.2f} | Return {return_pct:+.2f}%{_xirr_str}")
+        _port_values[port_id] = (round(current_total_value, 2), round(return_pct, 2), _p_xirr, _n_xirr)
 
         # ── SIP budget management (30% cap for mid-cycle opportunities) ──
         sip_amount = port.get("sip_amount") or 0
@@ -856,8 +917,14 @@ def run_daily_tracker():
  
             lines = ["<b>📊 Kordent Daily Update</b>\n"]
             for p in ports:
-                val, ret = _port_values.get(p["id"], (0, 0))
-                lines.append(f"<b>{_html_esc(p.get('name', 'Portfolio'))}</b>\nRs. {val:,.0f} ({ret:+.1f}%)\n")
+                val, ret, p_xirr, n_xirr = _port_values.get(p["id"], (0, 0, None, None))
+                _xirr_line = ""
+                if p_xirr is not None:
+                    _xirr_line = f"\nXIRR: {p_xirr:+.1f}%"
+                    if n_xirr is not None:
+                        _alpha = round(p_xirr - n_xirr, 1)
+                        _xirr_line += f" (Alpha: {_alpha:+.1f}%)"
+                lines.append(f"<b>{_html_esc(p.get('name', 'Portfolio'))}</b>\nRs. {val:,.0f} ({ret:+.1f}%){_xirr_line}\n")
  
             # SIP reminder on 1st of month
             if date.today().day == 1:
