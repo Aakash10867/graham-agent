@@ -1,4 +1,4 @@
-# TODO Sprint 6: Backtest runner — retrospective score reconstruction on Nifty 200.
+# TODO Sprint 7: Tiered verdicts in alerts, verdict_engine integration.
 import os
 import re
 import yfinance as yf
@@ -9,6 +9,7 @@ from supabase import create_client, Client
 from datetime import date, timedelta
 from collections import Counter
 import requests as _requests
+import verdict_engine
 
 
 # ══════════════════════════════════════════════
@@ -448,7 +449,7 @@ def run_daily_tracker():
         investor_type = port.get("investor_type", "balanced")
 
         opps = universe_df[
-            (universe_df["score"] == 4) &
+            (universe_df["score"] >= 4) &
             (universe_df["quality_pass"] == True) &
             (~universe_df["ticker"].isin(held_tickers)) &
             (universe_df["pe"] > 0) &
@@ -476,15 +477,27 @@ def run_daily_tracker():
             suggested_shares = int(sip_budget // stock_price) if can_afford else 0
             suggested_amount = round(suggested_shares * stock_price, 2) if suggested_shares > 0 else 0
 
+            opp_score = int(opp_row["score"]) if pd.notna(opp_row.get("score")) else 0
+            opp_pass_dict = {
+                "graham_pass": bool(opp_row.get("graham_pass")) if pd.notna(opp_row.get("graham_pass")) else False,
+                "greenblatt_pass": bool(opp_row.get("greenblatt_pass")) if pd.notna(opp_row.get("greenblatt_pass")) else False,
+                "dorsey_pass": bool(opp_row.get("dorsey_pass")) if pd.notna(opp_row.get("dorsey_pass")) else False,
+                "trajectory_pass": bool(opp_row.get("trajectory_pass")) if pd.notna(opp_row.get("trajectory_pass")) else False,
+                "lynch_pass": bool(opp_row.get("lynch_pass")) if pd.notna(opp_row.get("lynch_pass")) else False,
+            }
+            opp_verdict = verdict_engine.get_verdict_tier(opp_score, True, opp_pass_dict)
+            opp_emoji = verdict_engine.VERDICT_EMOJI.get(opp_verdict, "")
+
             all_alerts.append(make_alert(
                 "opportunity", opp_row["ticker"],
-                f"{opp_row.get('name', opp_row['ticker'])} hit 4/4 — fits your {investor_type} profile",
+                f"{opp_emoji} {opp_row.get('name', opp_row['ticker'])} — {opp_verdict} ({opp_score}/5) — fits your {investor_type} profile",
                 {"name": str(opp_row.get("name", opp_row["ticker"])),
                  "sector": str(opp_row.get("sector", "N/A")),
                  "price": stock_price,
                  "pe": round(float(opp_row["pe"]), 2) if pd.notna(opp_row.get("pe")) else 0,
                  "roe_pct": round(float(opp_row["roe_pct"]), 2) if pd.notna(opp_row.get("roe_pct")) else 0,
-                 "score": 4,
+                 "score": opp_score,
+                 "verdict": opp_verdict,
                  "act_now": act_now,
                  "suggested_shares": suggested_shares,
                  "suggested_amount": suggested_amount,
@@ -662,7 +675,7 @@ def run_daily_tracker():
                 if cur_score is not None and prev_score is not None and cur_score > prev_score:
                     all_alerts.append(wl_alert(
                         "watchlist_score_up",
-                        f"👁 {wl_name} score improved {prev_score} → {cur_score}/4",
+                        f"👁 {wl_name} score improved {prev_score} → {cur_score}/5",
                         {"prev_score": prev_score, "current_score": cur_score, "source": "watchlist"},
                         "watchlist_score_up"
                     ))
@@ -672,7 +685,7 @@ def run_daily_tracker():
                 if cur_score is not None and prev_score is not None and cur_score < prev_score:
                     all_alerts.append(wl_alert(
                         "watchlist_score_down",
-                        f"👁 {wl_name} score dropped {prev_score} → {cur_score}/4",
+                        f"👁 {wl_name} score dropped {prev_score} → {cur_score}/5",
                         {"prev_score": prev_score, "current_score": cur_score, "source": "watchlist"},
                         "watchlist_score_down"
                     ))
@@ -787,7 +800,7 @@ def run_daily_tracker():
                             "user_id": None,  # broadcast — weekly_mentor sends to all users
                             "alert_type": "new_entry",
                             "ticker": nr["ticker"],
-                            "headline": f"{nr.get('name', nr['ticker'])} new to radar at score {int(nr['score'])}/4",
+                            "headline": f"{nr.get('name', nr['ticker'])} new to radar at score {int(nr['score'])}/5",
                             "detail": {
                                 "name": str(nr.get("name", nr["ticker"])),
                                 "score": int(nr["score"]),
