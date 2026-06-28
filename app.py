@@ -1,5 +1,5 @@
-# TODO Sprint 7: Chat command center, tiered verdicts, RAG books.
-# TODO Sprint 10: Verdict badge on live response + "What can you do?" handler
+# TODO Sprint 8: Polish, completions, Sprint 7 fixes, XIRR everywhere, review reminders, paper auto-SIP, paper→real, Kite CSV.
+# TODO Sprint 10: "What can you do?" fuzzy match fix (needs Gemini web grounding for intent classification)
 """
 Kordent
 ========================
