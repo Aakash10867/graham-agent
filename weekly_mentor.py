@@ -165,6 +165,8 @@ def get_portfolio_summaries(ports, supabase, nifty_weekly_pct):
             "goal_date": p.get("target_date"),
             "link": f"{APP_URL}/?portfolio={pid}",
             "is_paper": p.get("is_paper", False),
+            "xirr_pct": float(p["xirr_pct"]) if p.get("xirr_pct") is not None else None,
+            "nifty_xirr_pct": float(p["nifty_xirr_pct"]) if p.get("nifty_xirr_pct") is not None else None,
         })
 
     return summaries
@@ -190,9 +192,15 @@ def build_gemini_prompt(name, summaries, alerts):
             budget_line = f"\n  Opportunity budget: ₹{used:,.0f} used of ₹{s['budget_total']:,.0f}"
 
         _paper_tag = " 👁 (Paper — not yet invested)" if s.get("is_paper") else ""
+        _xirr_line = ""
+        if s.get("xirr_pct") is not None:
+            _xirr_line = f"\n  XIRR: {s['xirr_pct']:+.1f}%"
+            if s.get("nifty_xirr_pct") is not None:
+                _alpha = round(s["xirr_pct"] - s["nifty_xirr_pct"], 1)
+                _xirr_line += f" | Nifty XIRR: {s['nifty_xirr_pct']:+.1f}% | Alpha: {_alpha:+.1f}%"
         port_block += f"""
 Portfolio: {s['name']}{_paper_tag}
-  Value: ₹{s['value']:,.0f} | Overall return: {s['return_pct']:+.1f}%
+  Value: ₹{s['value']:,.0f} | Overall return: {s['return_pct']:+.1f}%{_xirr_line}
   This week: {weekly} (Nifty: {nifty}){goal_line}{budget_line}
   View: {s['link']}
 """
@@ -298,6 +306,11 @@ def build_plain_fallback(name, summaries, alerts):
         weekly = f"{s['weekly_return_pct']:+.2f}%" if s['weekly_return_pct'] is not None else "no data"
         nifty = f"Nifty {s['nifty_weekly_pct']:+.2f}%" if s['nifty_weekly_pct'] is not None else ""
         lines.append(f"📊 {s['name']}: ₹{s['value']:,.0f} ({weekly} this week, {nifty})")
+        if s.get("xirr_pct") is not None:
+            _xirr_fb = f"   XIRR: {s['xirr_pct']:+.1f}%"
+            if s.get("nifty_xirr_pct") is not None:
+                _xirr_fb += f" | Alpha: {round(s['xirr_pct'] - s['nifty_xirr_pct'], 1):+.1f}%"
+            lines.append(_xirr_fb)
         lines.append(f"   {s['link']}")
 
         if s["sip"] > 0:
