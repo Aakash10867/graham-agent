@@ -4437,17 +4437,40 @@ if "chat_history" not in st.session_state:
 USER_AVATAR = "👤"
 AGENT_AVATAR = "logo.svg"
 
+def _render_verdict_badge(text):
+    """Detect verdict tier in response text and render a colored badge via st.markdown."""
+    _upper = text.upper() if text else ""
+    # Check in order of specificity (STRONG BUY before BUY, CONDITIONAL BUY before BUY)
+    for tier in ["STRONG BUY", "CONDITIONAL BUY", "BUY", "WATCH", "AVOID", "SELL"]:
+        if tier in _upper:
+            colors = verdict_engine.VERDICT_COLORS.get(tier, {})
+            bg = colors.get("bg", "#555")
+            fg = colors.get("text", "#FFF")
+            emoji = verdict_engine.VERDICT_EMOJI.get(tier, "")
+            st.markdown(
+                f'<div style="display:inline-block;background:{bg};color:{fg};'
+                f'padding:6px 18px;border-radius:6px;font-weight:700;font-size:1.1em;'
+                f'margin-bottom:8px;letter-spacing:0.5px;">'
+                f'{emoji} {tier}</div>',
+                unsafe_allow_html=True,
+            )
+            return tier
+    return None
+
+
 if st.session_state.sb_view_mode == "chat":
     chat_area = st.container()
 
-    st.markdown("")
-    st.caption("Market screeners")
-    scr_cols = st.columns(len(SCREENER_PRESETS))
-    for i, (label, template) in enumerate(SCREENER_PRESETS):
-        with scr_cols[i]:
-            if st.button(label, key=f"screener_{i}", width="stretch"):
-                st.session_state.pending_prompt = template
-                st.rerun()
+    # ── Screener presets: hide when chat already has messages (cleaner return experience) ──
+    if not st.session_state.messages:
+        st.markdown("")
+        st.caption("Market screeners")
+        scr_cols = st.columns(len(SCREENER_PRESETS))
+        for i, (label, template) in enumerate(SCREENER_PRESETS):
+            with scr_cols[i]:
+                if st.button(label, key=f"screener_{i}", width="stretch"):
+                    st.session_state.pending_prompt = template
+                    st.rerun()
 
     prompt = st.chat_input("Ask about any stock, or type a question...")
 
@@ -4459,11 +4482,13 @@ if st.session_state.sb_view_mode == "chat":
     with chat_area:
         if not st.session_state.messages:
             st.markdown("")
-            st.info("Type a company name or question below to get started, or use the screeners below.")
+            st.info("Type a company name or question below to get started, or use the screeners above.")
 
         for msg in st.session_state.messages:
             avatar = USER_AVATAR if msg["role"] == "user" else AGENT_AVATAR
             with st.chat_message(msg["role"], avatar=avatar):
+                if msg["role"] == "assistant":
+                    _render_verdict_badge(msg["content"])
                 st.markdown(msg["content"])
                 if msg.get("model"):
                     st.caption(f"⚡ {msg['model']}")
@@ -4577,6 +4602,41 @@ if st.session_state.sb_view_mode == "chat":
                             st.rerun()
 
         if prompt:
+            # ── "What can you do?" handler — intercept meta-questions before LLM ──
+            _meta_patterns = [
+                "what can you do", "what do you do", "how does this work",
+                "help me", "what is kordent", "how to use", "capabilities",
+                "what are your features", "tell me about yourself",
+            ]
+            _prompt_lower = prompt.lower().strip()
+            if any(p in _prompt_lower for p in _meta_patterns) and len(_prompt_lower) < 60:
+                _meta_response = (
+                    "**Welcome to Kordent** — your long-term value investing companion for Indian stocks.\n\n"
+                    "Here's what I can do:\n\n"
+                    "📊 **Analyze any stock** — Just type a company name or ticker. I score it across 5 frameworks "
+                    "(Graham, Greenblatt, Dorsey+Buffett, Trajectory, Lynch) and deliver a tiered verdict: "
+                    "STRONG BUY, BUY, CONDITIONAL BUY, WATCH, AVOID, or SELL.\n\n"
+                    "🔍 **Screen the market** — Ask me to find the best stocks, and I'll scan ~4,500 NSE/BSE stocks "
+                    "using all 5 frameworks plus a quality gate that catches accounting manipulation.\n\n"
+                    "🏗️ **Build a portfolio** — Click the **Build Portfolio** button in the sidebar. "
+                    "I'll ask 10 questions about your goals and risk tolerance, then construct a SIP portfolio "
+                    "tailored to your profile.\n\n"
+                    "👁️ **Watchlist** — Add stocks to your watchlist and I'll monitor them daily for score changes, "
+                    "quality flips, and price opportunities.\n\n"
+                    "📈 **Portfolio health** — I track your holdings, compute XIRR, compare against Nifty, "
+                    "and send weekly email reports with SIP recommendations.\n\n"
+                    "📕 **Investment wisdom** — My reasoning draws from 10 investment books: Graham, Greenblatt, "
+                    "Dorsey, Lynch, Buffett, Schilit, Mulford, Howard Marks, Phil Fisher, and Seth Klarman.\n\n"
+                    "**Try it:** Type any company name below — like *Tata Motors*, *Infosys*, or *Asian Paints*."
+                )
+                st.session_state.messages.append({"role": "user", "content": prompt})
+                with st.chat_message("user", avatar=USER_AVATAR):
+                    st.markdown(prompt)
+                with st.chat_message("assistant", avatar=AGENT_AVATAR):
+                    st.markdown(_meta_response)
+                st.session_state.messages.append({"role": "assistant", "content": _meta_response})
+                st.rerun()
+
             # ── Fuzzy search: disambiguate before LLM call ──
             _is_builder = prompt.startswith("[BUILDER_PROFILE]")
             _is_disambiguated = "(company:" in prompt and "ticker:" in prompt
@@ -4618,6 +4678,7 @@ if st.session_state.sb_view_mode == "chat":
                                 st.session_state.messages.pop()
                             st.session_state.pending_retry = prompt
                 if answer:
+                    _render_verdict_badge(answer)
                     response_placeholder.markdown(answer)
                     st.caption(f"⚡ {model_used}")
                     st.session_state.messages.append({"role": "assistant", "content": answer, "model": model_used})
