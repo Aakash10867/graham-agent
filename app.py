@@ -3804,6 +3804,7 @@ def get_csv_financial_data(ticker: str) -> dict:
         deep_formatted = verdict_engine.format_deep_metrics_for_llm(row)
         pattern_meaning = verdict_engine.get_pattern_meaning(pass_dict) if score == 3 else None
 
+        st.session_state._last_verdict_tier = verdict
         row["_verdict_tier"] = verdict
         row["_verdict_reason"] = verdict_reason
         row["_verdict_emoji"] = verdict_engine.VERDICT_EMOJI.get(verdict, "")
@@ -4438,32 +4439,40 @@ if "chat_history" not in st.session_state:
 USER_AVATAR = "👤"
 AGENT_AVATAR = "logo.svg"
 
-def _render_verdict_badge(text):
-    """Detect verdict tier in response text and render a colored badge via st.markdown."""
-    _upper = text.upper() if text else ""
-    # Check in order of specificity (STRONG BUY before BUY, CONDITIONAL BUY before BUY)
-    for tier in ["STRONG BUY", "CONDITIONAL BUY", "BUY", "WATCH", "AVOID", "SELL"]:
-        if tier in _upper:
-            colors = verdict_engine.VERDICT_COLORS.get(tier, {})
-            bg = colors.get("bg", "#555")
-            fg = colors.get("text", "#FFF")
-            emoji = verdict_engine.VERDICT_EMOJI.get(tier, "")
-            st.markdown(
-                f'<div style="display:inline-block;background:{bg};color:{fg};'
-                f'padding:6px 18px;border-radius:6px;font-weight:700;font-size:1.1em;'
-                f'margin-bottom:8px;letter-spacing:0.5px;">'
-                f'{emoji} {tier}</div>',
-                unsafe_allow_html=True,
-            )
-            return tier
-    return None
+def _render_verdict_badge(text=None, stored_tier=None):
+    """Render a colored verdict badge. Uses stored_tier (from tool call) when available.
+    Falls back to text scanning ONLY if the text also contains a ticker pattern,
+    which prevents false positives on meta-responses like 'I provide STRONG BUY verdicts'."""
+    tier = stored_tier
+    if not tier and text:
+        # Fallback for old messages without stored tier — require a ticker pattern
+        if re.search(r'\b[A-Z]{2,15}\.(?:NS|BO)\b', text):
+            _upper = text.upper()
+            for t in ["STRONG BUY", "CONDITIONAL BUY", "BUY", "WATCH", "AVOID", "SELL"]:
+                if t in _upper:
+                    tier = t
+                    break
+    if not tier:
+        return None
+    colors = verdict_engine.VERDICT_COLORS.get(tier, {})
+    bg = colors.get("bg", "#555")
+    fg = colors.get("text", "#FFF")
+    emoji = verdict_engine.VERDICT_EMOJI.get(tier, "")
+    st.markdown(
+        f'<div style="display:inline-block;background:{bg};color:{fg};'
+        f'padding:6px 18px;border-radius:6px;font-weight:700;font-size:1.1em;'
+        f'margin-bottom:8px;letter-spacing:0.5px;">'
+        f'{emoji} {tier}</div>',
+        unsafe_allow_html=True,
+    )
+    return tier
 
 
 if st.session_state.sb_view_mode == "chat":
     chat_area = st.container()
 
     # ── Screener presets: hide when chat already has messages (cleaner return experience) ──
-    if not st.session_state.messages:
+    if not st.session_state.messages and "pending_prompt" not in st.session_state:
         st.markdown("")
         st.caption("Market screeners")
         scr_cols = st.columns(len(SCREENER_PRESETS))
@@ -4489,7 +4498,7 @@ if st.session_state.sb_view_mode == "chat":
             avatar = USER_AVATAR if msg["role"] == "user" else AGENT_AVATAR
             with st.chat_message(msg["role"], avatar=avatar):
                 if msg["role"] == "assistant":
-                    _render_verdict_badge(msg["content"])
+                    _render_verdict_badge(text=msg["content"], stored_tier=msg.get("verdict_tier"))
                 st.markdown(msg["content"])
                 if msg.get("model"):
                     st.caption(f"⚡ {msg['model']}")
@@ -4644,9 +4653,12 @@ if st.session_state.sb_view_mode == "chat":
                                 st.session_state.messages.pop()
                             st.session_state.pending_retry = prompt
                 if answer:
+                    _vt = st.session_state.pop("_last_verdict_tier", None)
+                    if _vt:
+                        _render_verdict_badge(stored_tier=_vt)
                     response_placeholder.markdown(answer)
                     st.caption(f"⚡ {model_used}")
-                    st.session_state.messages.append({"role": "assistant", "content": answer, "model": model_used})
+                    st.session_state.messages.append({"role": "assistant", "content": answer, "model": model_used, "verdict_tier": _vt})
                     if st.session_state.get("pending_portfolio"):
                         st.rerun()
 
