@@ -1,4 +1,4 @@
-# TODO Sprint 7: Tiered verdicts in alerts, verdict_engine integration.
+# TODO Sprint 8: Polish, XIRR everywhere, review reminders, paper auto-SIP, paper→real, Kite CSV.
 import os
 import re
 import yfinance as yf
