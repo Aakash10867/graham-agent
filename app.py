@@ -1,4 +1,5 @@
 # TODO Sprint 7: Chat command center, tiered verdicts, RAG books.
+# TODO Sprint 10: Verdict badge on live response + "What can you do?" handler
 """
 Kordent
 ========================
