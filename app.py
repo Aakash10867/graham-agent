@@ -4602,41 +4602,6 @@ if st.session_state.sb_view_mode == "chat":
                             st.rerun()
 
         if prompt:
-            # ── "What can you do?" handler — intercept meta-questions before LLM ──
-            _meta_patterns = [
-                "what can you do", "what do you do", "how does this work",
-                "help me", "what is kordent", "how to use", "capabilities",
-                "what are your features", "tell me about yourself",
-            ]
-            _prompt_lower = prompt.lower().strip()
-            if any(p in _prompt_lower for p in _meta_patterns) and len(_prompt_lower) < 60:
-                _meta_response = (
-                    "**Welcome to Kordent** — your long-term value investing companion for Indian stocks.\n\n"
-                    "Here's what I can do:\n\n"
-                    "📊 **Analyze any stock** — Just type a company name or ticker. I score it across 5 frameworks "
-                    "(Graham, Greenblatt, Dorsey+Buffett, Trajectory, Lynch) and deliver a tiered verdict: "
-                    "STRONG BUY, BUY, CONDITIONAL BUY, WATCH, AVOID, or SELL.\n\n"
-                    "🔍 **Screen the market** — Ask me to find the best stocks, and I'll scan ~4,500 NSE/BSE stocks "
-                    "using all 5 frameworks plus a quality gate that catches accounting manipulation.\n\n"
-                    "🏗️ **Build a portfolio** — Click the **Build Portfolio** button in the sidebar. "
-                    "I'll ask 10 questions about your goals and risk tolerance, then construct a SIP portfolio "
-                    "tailored to your profile.\n\n"
-                    "👁️ **Watchlist** — Add stocks to your watchlist and I'll monitor them daily for score changes, "
-                    "quality flips, and price opportunities.\n\n"
-                    "📈 **Portfolio health** — I track your holdings, compute XIRR, compare against Nifty, "
-                    "and send weekly email reports with SIP recommendations.\n\n"
-                    "📕 **Investment wisdom** — My reasoning draws from 10 investment books: Graham, Greenblatt, "
-                    "Dorsey, Lynch, Buffett, Schilit, Mulford, Howard Marks, Phil Fisher, and Seth Klarman.\n\n"
-                    "**Try it:** Type any company name below — like *Tata Motors*, *Infosys*, or *Asian Paints*."
-                )
-                st.session_state.messages.append({"role": "user", "content": prompt})
-                with st.chat_message("user", avatar=USER_AVATAR):
-                    st.markdown(prompt)
-                with st.chat_message("assistant", avatar=AGENT_AVATAR):
-                    st.markdown(_meta_response)
-                st.session_state.messages.append({"role": "assistant", "content": _meta_response})
-                st.rerun()
-
             # ── Fuzzy search: disambiguate before LLM call ──
             _is_builder = prompt.startswith("[BUILDER_PROFILE]")
             _is_disambiguated = "(company:" in prompt and "ticker:" in prompt
@@ -4678,7 +4643,6 @@ if st.session_state.sb_view_mode == "chat":
                                 st.session_state.messages.pop()
                             st.session_state.pending_retry = prompt
                 if answer:
-                    _render_verdict_badge(answer)
                     response_placeholder.markdown(answer)
                     st.caption(f"⚡ {model_used}")
                     st.session_state.messages.append({"role": "assistant", "content": answer, "model": model_used})
