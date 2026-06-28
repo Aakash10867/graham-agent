@@ -1,6 +1,9 @@
 # TODO Sprint 8: Polish, XIRR everywhere, review reminders, paper auto-SIP, paper→real, Kite CSV.
 import os
 import re
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 import yfinance as yf
 import pandas as pd
 import pymupdf
@@ -121,6 +124,21 @@ def send_telegram(chat_id, text, bot_token):
         )
     except Exception as e:
         print(f"  Telegram send failed: {e}")
+
+def send_review_email(recipient, subject, body, smtp_user, smtp_pass):
+    """Send a plain-text review reminder email. Non-blocking."""
+    try:
+        msg = MIMEMultipart()
+        msg["From"] = smtp_user
+        msg["To"] = recipient
+        msg["Subject"] = subject
+        msg.attach(MIMEText(body, "plain"))
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(smtp_user, smtp_pass)
+            server.send_message(msg)
+        print(f"  ✓ Review reminder sent to {recipient}")
+    except Exception as e:
+        print(f"  ✗ Review email failed for {recipient}: {e}")
 
 def compute_xirr_standalone(supabase, portfolio_id, current_value, nifty_shadow_value=None):
     """Compute XIRR for a portfolio and its Nifty shadow. Standalone — no Streamlit dependency.
@@ -269,17 +287,22 @@ def run_daily_tracker():
     all_alerts = []
     _port_values = {}  # port_id -> (value, return_pct) for Telegram digest
  
-    # ── Pre-load Telegram chat IDs ──
+    # ── Pre-load user profiles (Telegram, email, name) ──
     _tg_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    _smtp_user = os.environ.get("ALERT_EMAIL", "")
+    _smtp_pass = os.environ.get("ALERT_EMAIL_PASSWORD", "")
     _tg_map = {}  # user_id -> chat_id
-    if _tg_token:
-        try:
-            _tg_resp = supabase.table("profiles").select("id, telegram_chat_id").not_.is_("telegram_chat_id", "null").execute()
-            _tg_map = {p["id"]: p["telegram_chat_id"] for p in (_tg_resp.data or []) if p.get("telegram_chat_id")}
-            if _tg_map:
-                print(f"Telegram: {len(_tg_map)} users with linked accounts.")
-        except Exception as e:
-            print(f"Telegram pre-load failed: {e}")
+    _user_profiles = {}  # user_id -> {email, full_name}
+    try:
+        _prof_resp = supabase.table("profiles").select("id, email, full_name, telegram_chat_id").execute()
+        for p in (_prof_resp.data or []):
+            _user_profiles[p["id"]] = {"email": p.get("email"), "full_name": p.get("full_name")}
+            if _tg_token and p.get("telegram_chat_id"):
+                _tg_map[p["id"]] = p["telegram_chat_id"]
+        if _tg_map:
+            print(f"Telegram: {len(_tg_map)} users with linked accounts.")
+    except Exception as e:
+        print(f"Profile pre-load failed: {e}")
 
     for port in portfolios:
         port_id = port["id"]
@@ -415,12 +438,35 @@ def run_daily_tracker():
                 "alert_date": today_str,
             }
 
-        # ── 3a. Review due ──
+        # ── 3a. Review due / upcoming reminders ──
         review_date = port.get("next_review_date")
         if review_date:
             try:
                 rd = date.fromisoformat(str(review_date))
-                if rd <= date.today():
+                _tomorrow = date.today() + timedelta(days=1)
+                _prof = _user_profiles.get(user_id, {})
+                _uname = _prof.get("full_name") or (_prof.get("email") or "").split("@")[0].title()
+                _uemail = _prof.get("email")
+                _pname = port.get("name", "Portfolio")
+
+                if rd == _tomorrow:
+                    # Day-before reminder
+                    _msg = f"Tomorrow is your review day for {_pname}. Prepare to assess performance, rebalance, and decide on any changes."
+                    if _tg_token and user_id in _tg_map:
+                        send_telegram(_tg_map[user_id], f"📅 <b>{_html_esc(_uname)}, review tomorrow</b>\n\n{_html_esc(_msg)}\n\n<a href='https://kordent.streamlit.app'>Open Kordent</a>", _tg_token)
+                    if _uemail and _smtp_user and _smtp_pass:
+                        send_review_email(_uemail, f"📅 {_uname}, your {_pname} review is tomorrow", f"{_uname},\n\n{_msg}\n\nOpen Kordent: https://kordent.streamlit.app\n\n— Kordent", _smtp_user, _smtp_pass)
+
+                elif rd == date.today():
+                    # Day-of reminder
+                    _msg = f"Your review for {_pname} is due today. Open Kordent to run your review."
+                    if _tg_token and user_id in _tg_map:
+                        send_telegram(_tg_map[user_id], f"🔔 <b>{_html_esc(_uname)}, review day!</b>\n\n{_html_esc(_msg)}\n\n<a href='https://kordent.streamlit.app'>Open Kordent</a>", _tg_token)
+                    if _uemail and _smtp_user and _smtp_pass:
+                        send_review_email(_uemail, f"🔔 {_uname}, your {_pname} review is today", f"{_uname},\n\n{_msg}\n\nOpen Kordent: https://kordent.streamlit.app\n\n— Kordent", _smtp_user, _smtp_pass)
+
+                elif rd < date.today():
+                    # Overdue — store as alert for weekly mentor
                     all_alerts.append(make_alert(
                         "review_due", "_review",
                         f"Portfolio review overdue — was due {review_date}",
