@@ -5161,7 +5161,51 @@ elif st.session_state.sb_view_mode == "builder":
 
             st.divider()
 
-            # Q7 — Paper portfolio toggle
+            # Q7 — Investment philosophy (Sprint 6)
+            _b_philosophy = st.radio(
+                "🧠 Which investing style sounds most like you?",
+                options=[
+                    "I hunt for bargains — solid businesses at rock-bottom prices",
+                    "I want great businesses that are still growing fast",
+                    "I want companies with unbeatable advantages, even if not cheap",
+                    "I like finding diamonds in the rough — beaten-down, recovering companies",
+                ],
+                index=1,
+                help="This helps us find the 3/5 and 2/5 stocks that are right for YOUR style.",
+            )
+
+            st.divider()
+
+            # Q8 — Selectivity (Sprint 6)
+            _b_selectivity = st.radio(
+                "🎯 How selective should we be?",
+                options=[
+                    "Only the best — 4+ frameworks must agree",
+                    "Quality picks — 3+ frameworks agree",
+                    "Open to opportunities — 2+ with a compelling reason",
+                ],
+                index=1,
+                help="Lower selectivity means more opportunities but each needs stronger individual merit.",
+            )
+
+            st.divider()
+
+            # Q9 — Acceptable trade-off (Sprint 6)
+            _b_tradeoff = st.radio(
+                "⚖️ If a stock fails one test, which trade-off are you most comfortable with?",
+                options=[
+                    "Not the cheapest, but growing fast with strong earnings",
+                    "Not the fastest grower, but deeply undervalued right now",
+                    "Not the widest moat, but priced so low the risk-reward is worth it",
+                    "No preference — I trust the system to decide",
+                ],
+                index=3,
+                help="This tells us which 'imperfect' stocks might actually be perfect for you.",
+            )
+
+            st.divider()
+
+            # Q10 — Paper portfolio toggle
             _b_is_paper = st.checkbox(
                 "👁 Watch only — don't invest yet (paper portfolio)",
                 value=False,
@@ -5209,6 +5253,37 @@ elif st.session_state.sb_view_mode == "builder":
                 else:
                     _b_time = "long"
 
+            # Sprint 6: Map philosophy, selectivity, trade-off
+            _philosophy_map = {
+                "I hunt for bargains — solid businesses at rock-bottom prices": "deep_value",
+                "I want great businesses that are still growing fast": "growth_at_fair_price",
+                "I want companies with unbeatable advantages, even if not cheap": "quality_compounder",
+                "I like finding diamonds in the rough — beaten-down, recovering companies": "contrarian",
+            }
+            _selectivity_map = {
+                "Only the best — 4+ frameworks must agree": 4,
+                "Quality picks — 3+ frameworks agree": 3,
+                "Open to opportunities — 2+ with a compelling reason": 2,
+            }
+            _tradeoff_map = {
+                "Not the cheapest, but growing fast with strong earnings": "ok_fail_graham",
+                "Not the fastest grower, but deeply undervalued right now": "ok_fail_trajectory_lynch",
+                "Not the widest moat, but priced so low the risk-reward is worth it": "ok_fail_dorsey_buffett",
+                "No preference — I trust the system to decide": "any",
+            }
+
+            _b_philosophy_val = _philosophy_map.get(_b_philosophy, "growth_at_fair_price")
+            _b_min_score = _selectivity_map.get(_b_selectivity, 3)
+            _b_tradeoff_val = _tradeoff_map.get(_b_tradeoff, "any")
+
+            # Sprint 6: Framework weights based on philosophy
+            _framework_weights = {
+                "deep_value":           {"graham": 35, "greenblatt": 25, "dorsey_buffett": 15, "trajectory": 10, "lynch": 15},
+                "growth_at_fair_price": {"graham": 10, "greenblatt": 15, "dorsey_buffett": 20, "trajectory": 25, "lynch": 30},
+                "quality_compounder":   {"graham": 15, "greenblatt": 15, "dorsey_buffett": 35, "trajectory": 15, "lynch": 20},
+                "contrarian":           {"graham": 25, "greenblatt": 30, "dorsey_buffett": 10, "trajectory": 20, "lynch": 15},
+            }
+
             _b_profile = {
                 "sip_amount": _b_sip,
                 "target_amount": _b_target_amt if _b_target_amt > 0 else None,
@@ -5221,6 +5296,11 @@ elif st.session_state.sb_view_mode == "builder":
                 "review_freq": _b_rev_freq,
                 "review_days": _b_rev_days,
                 "is_paper": _b_is_paper,
+                # Sprint 6 additions
+                "philosophy": _b_philosophy_val,
+                "min_acceptable_score": _b_min_score,
+                "acceptable_tradeoff": _b_tradeoff_val,
+                "framework_weights": _framework_weights.get(_b_philosophy_val, {}),
             }
             st.session_state.builder_profile = _b_profile
 
@@ -5237,6 +5317,10 @@ elif st.session_state.sb_view_mode == "builder":
                 f"- Investor type: {_b_inv_type}\n"
                 f"- Risk tolerance: {_b_risk}\n"
                 f"- Preference: {_b_pref}\n"
+                f"- Philosophy: {_b_philosophy_val}\n"
+                f"- Minimum score: {_b_min_score}/5\n"
+                f"- Acceptable trade-off: {_b_tradeoff_val}\n"
+                f"- Framework weights: {_framework_weights.get(_b_philosophy_val, {})}\n"
                 f"- Review: every {_b_rev_days} days ({_b_rev_freq})"
                 f"{_goal_line}{_avoid_line}{_paper_line}"
             )
