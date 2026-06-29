@@ -226,8 +226,10 @@ def run_daily_tracker():
         nifty = yf.Ticker("^NSEI")
         hist = nifty.history(period="5d")
         if not hist.empty:
-            nifty_close = round(float(hist["Close"].iloc[-1]), 2)
-            print(f"Nifty 50 close: {nifty_close:,.2f}")
+            val = float(hist["Close"].iloc[-1])
+            if pd.notna(val):
+                nifty_close = round(val, 2)
+                print(f"Nifty 50 close: {nifty_close:,.2f}")
     except Exception as e:
         print(f"Warning: Could not fetch Nifty 50: {e}")
 
@@ -237,8 +239,10 @@ def run_daily_tracker():
         _bees = yf.Ticker("NIFTYBEES.NS")
         _bees_hist = _bees.history(period="5d")
         if not _bees_hist.empty:
-            nifty_bees_price = round(float(_bees_hist["Close"].iloc[-1]), 2)
-            print(f"Nifty BeES close: {nifty_bees_price:,.2f}")
+            val = float(_bees_hist["Close"].iloc[-1])
+            if pd.notna(val):
+                nifty_bees_price = round(val, 2)
+                print(f"Nifty BeES close: {nifty_bees_price:,.2f}")
     except Exception as e:
         print(f"Warning: Could not fetch Nifty BeES: {e}")
 
