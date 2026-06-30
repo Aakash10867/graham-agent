@@ -948,6 +948,92 @@ def run_daily_tracker():
 
     print(f"Wrote {written} alerts.")
 
+
+    # ══════════════════════════════════════
+    # 4a. PAPER PORTFOLIO AUTO-SIP (1st of month)
+    # ══════════════════════════════════════
+    if date.today().day == 1:
+        _paper_ports = [p for p in portfolios if p.get("is_paper") and (p.get("sip_amount") or 0) > 0]
+        if _paper_ports:
+            print(f"\n── Paper Auto-SIP: {len(_paper_ports)} paper portfolio(s) with active SIP ──")
+            for pp in _paper_ports:
+                pp_id = pp["id"]
+                pp_user = pp["user_id"]
+                pp_sip = float(pp["sip_amount"])
+                pp_holdings = [h for h in holdings if h["portfolio_id"] == pp_id]
+                if not pp_holdings:
+                    print(f"  [{pp.get('name')}] No holdings — skipping auto-SIP")
+                    continue
+                # Guard: check if auto-SIP already ran this month
+                _month_start = date.today().replace(day=1).isoformat()
+                try:
+                    _dup_check = supabase.table("sip_transactions").select("id").eq(
+                        "portfolio_id", pp_id
+                    ).eq("transaction_type", "paper_sip").gte(
+                        "transaction_date", _month_start
+                    ).limit(1).execute()
+                    if _dup_check.data:
+                        print(f"  [{pp.get('name')}] Auto-SIP already ran this month — skipping")
+                        continue
+                except Exception:
+                    pass  # Proceed if check fails
+
+                # Compute allocation per holding
+                _total_alloc = sum(float(h.get("allocation_pct") or 0) for h in pp_holdings)
+                _sip_spent = 0
+                _sip_log = []
+                for h in pp_holdings:
+                    _alloc_pct = float(h.get("allocation_pct") or 0)
+                    if _total_alloc > 0:
+                        _h_budget = pp_sip * (_alloc_pct / _total_alloc)
+                    else:
+                        _h_budget = pp_sip / len(pp_holdings)
+                    _ticker = h["ticker"]
+                    _cur_price = price_cache.get(_ticker)
+                    if not _cur_price or _cur_price <= 0:
+                        continue
+                    _new_shares = int(_h_budget / _cur_price)
+                    if _new_shares <= 0:
+                        continue
+                    _new_amt = round(_new_shares * _cur_price, 2)
+                    _nifty_u = round(_new_amt / nifty_bees_price, 6) if nifty_bees_price and nifty_bees_price > 0 else None
+                    # Record transaction
+                    try:
+                        supabase.table("sip_transactions").insert({
+                            "portfolio_id": pp_id,
+                            "user_id": pp_user,
+                            "ticker": _ticker,
+                            "shares": _new_shares,
+                            "price": round(_cur_price, 2),
+                            "amount_inr": _new_amt,
+                            "transaction_type": "paper_sip",
+                            "transaction_date": today_str,
+                            "nifty_price": nifty_bees_price,
+                            "nifty_units": _nifty_u,
+                        }).execute()
+                    except Exception as e:
+                        print(f"  Paper SIP txn failed for {_ticker}: {e}")
+                        continue
+                    # Update holding
+                    _old_shares = float(h.get("shares") or 0)
+                    _old_invested = float(h.get("sip_amount_inr") or 0)
+                    try:
+                        supabase.table("holdings").update({
+                            "shares": _old_shares + _new_shares,
+                            "sip_amount_inr": round(_old_invested + _new_amt, 2),
+                        }).eq("id", h["id"]).execute()
+                    except Exception as e:
+                        print(f"  Holding update failed for {_ticker}: {e}")
+                    _sip_spent += _new_amt
+                    _sip_log.append(f"{_ticker}×{_new_shares}")
+
+                if _sip_log:
+                    print(f"  [{pp.get('name')}] Auto-SIP ₹{_sip_spent:,.0f}: {', '.join(_sip_log)}")
+                else:
+                    print(f"  [{pp.get('name')}] No shares affordable at current prices")
+        else:
+            print("\nPaper Auto-SIP: No paper portfolios with active SIP.")
+
     # ══════════════════════════════════════
     # 5. TELEGRAM DAILY DIGEST
     # ══════════════════════════════════════
