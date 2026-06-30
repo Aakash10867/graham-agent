@@ -5010,11 +5010,18 @@ elif st.session_state.sb_view_mode == "watchlist":
 
                         # ── Make This Real confirmation ──
                         if st.session_state.get(f"confirm_real_{_pp['id']}"):
-                            st.warning("This converts to a real portfolio at **current market prices** (not original paper prices). Tracking restarts from today.")
+                            st.warning("This converts to a real portfolio at **current market prices** (not original paper prices). XIRR and tracking restart from today.")
+                            if KITE_ENABLED and _pp_holdings:
+                                _conv_kite = [{"ticker": h.get("ticker", ""), "quantity": h.get("shares", 1)} for h in _pp_holdings if h.get("ticker")]
+                                if _conv_kite:
+                                    st.link_button("🛒 Step 1: Buy on Kite first", kite_basket_url(_conv_kite), use_container_width=True)
                             _rc1, _rc2 = st.columns(2)
                             with _rc1:
-                                if st.button("Yes, make it real", key=f"real_yes_{_pp['id']}", use_container_width=True):
+                                _confirm_label = "Step 2: Confirm conversion" if KITE_ENABLED else "Yes, make it real"
+                                if st.button(f"✅ {_confirm_label}", key=f"real_yes_{_pp['id']}", use_container_width=True):
                                     try:
+                                        _conv_today = date.today().isoformat()
+                                        # Reset holdings to current market prices
                                         for _rh in _pp_holdings:
                                             try:
                                                 _rh_price = yf.Ticker(_rh.get("ticker", "")).fast_info.last_price or _rh.get("price_at_entry", 0)
@@ -5023,14 +5030,42 @@ elif st.session_state.sb_view_mode == "watchlist":
                                             _pp_sb.table("holdings").update({
                                                 "price_at_entry": round(_rh_price, 2),
                                                 "sip_amount_inr": round(_rh.get("shares", 0) * _rh_price, 2),
+                                                "entry_date": _conv_today,
                                             }).eq("id", _rh["id"]).execute()
-                                        _pp_sb.table("portfolios").update({"is_paper": False}).eq("id", _pp["id"]).execute()
+                                        # Delete old paper transactions — XIRR restarts from today
+                                        try:
+                                            _pp_sb.table("sip_transactions").delete().eq("portfolio_id", _pp["id"]).execute()
+                                        except Exception:
+                                            pass
+                                        # Create fresh buy transactions at current prices
+                                        _nifty_c = None
+                                        for _rh in _pp_holdings:
+                                            _rh_shares = float(_rh.get("shares") or 0)
+                                            _rh_price_new = float(_rh.get("price_at_entry") or 0)
+                                            # Use the just-updated price if available
+                                            try:
+                                                _rh_price_new = yf.Ticker(_rh.get("ticker", "")).fast_info.last_price or _rh_price_new
+                                            except Exception:
+                                                pass
+                                            _rh_amt = round(_rh_shares * _rh_price_new, 2)
+                                            if _rh_amt > 0:
+                                                _nifty_c = record_transaction(
+                                                    _pp_sb, _pp["id"], st.session_state.sb_user_id,
+                                                    _rh.get("ticker", ""), _rh_shares, _rh_price_new, _rh_amt,
+                                                    "buy", _nifty_c
+                                                )
+                                        # Mark portfolio as real with conversion date
+                                        _pp_sb.table("portfolios").update({
+                                            "is_paper": False,
+                                            "paper_converted_at": _conv_today,
+                                        }).eq("id", _pp["id"]).execute()
+                                        # Clear portfolio history (clean start)
                                         try:
                                             _pp_sb.table("portfolio_history").delete().eq("portfolio_id", _pp["id"]).execute()
                                         except Exception:
                                             pass
                                         st.session_state.pop(f"confirm_real_{_pp['id']}", None)
-                                        st.success("Portfolio is now real! Find it in My Portfolios.")
+                                        st.success("Portfolio is now real! Fresh transactions recorded — XIRR starts from today. Find it in My Portfolios.")
                                         st.rerun()
                                     except Exception as _re:
                                         st.error(f"Failed: {_re}")
@@ -5464,6 +5499,8 @@ elif st.session_state.sb_view_mode == "portfolios":
                     if _nx is not None:
                         _xirr_parts.append(f"Alpha: {round(_px - _nx, 1):+.1f}%")
                     st.caption(" · ".join(_xirr_parts))
+                if port.get("paper_converted_at"):
+                    st.caption(f"📋 Converted from paper on {str(port['paper_converted_at'])[:10]}")
 
                 # ── Alert Banner ──
                 try:
