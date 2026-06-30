@@ -262,7 +262,6 @@ ticker,name,exchange
 508961.BO,Shricon Industries Ltd.,BSE
 508969.BO,Sulabh Engineers & Services Limited,BSE
 508980.BO,Frontier Capital Limited,BSE
-508993.BO,Kedia Construction Co. Ltd.,BSE
 509003.BO,Transoceanic Properties Ltd.,BSE
 509015.BO,Thakral Services (India) Limited,BSE
 509024.BO,Golden Legand Leasing & Finance Ltd,BSE
@@ -728,7 +727,6 @@ ticker,name,exchange
 523309.BO,Shri Gang Industries & Allied Products Limited,BSE
 523315.BO,Purity Flex Pack Ltd,BSE
 523343.BO,Microse India Limited,BSE
-523351.BO,Standard Shoe Sole and Mould (India) Ltd,BSE
 523373.BO,Mini Diamonds (India) Ltd.,BSE
 523387.BO,HOMRE LIMITED,BSE
 523411.BO,ADC India Communications Limited,BSE
@@ -1141,6 +1139,7 @@ ticker,name,exchange
 531176.BO,Mefcom Capital Markets Ltd.,BSE
 531178.BO,Hemang Resources Limited,BSE
 531190.BO,EFORU ENTERTAINMENT LIMITED,BSE
+531191.BO,Filtron Engineers Ltd.,BSE
 531199.BO,Glance Finance Ltd.,BSE
 531203.BO,TRADEWELL HOLDINGS LIMITED,BSE
 531205.BO,SPRIGHT AGRO LIMITED,BSE
@@ -1261,7 +1260,6 @@ ticker,name,exchange
 531609.BO,KG Petrochem Ltd.,BSE
 531610.BO,UFM Industries Ltd,BSE
 531613.BO,Meyer Apparel Limited,BSE
-531616.BO,Starcom Information Technology Ltd,BSE
 531626.BO,Orosil Smiths India Limited,BSE
 531628.BO,TEJASSVI AAHARAM LIMITED,BSE
 531635.BO,Silver Oak (India) Ltd.,BSE
@@ -1301,6 +1299,7 @@ ticker,name,exchange
 531779.BO,Padmanabh Alloys & Polymers Ltd.,BSE
 531780.BO,Kaiser Corporation Limited,BSE
 531784.BO,KCL Infra Projects Limited,BSE
+531794.BO,Seshachal Technologies Ltd,BSE
 531797.BO,Scan Projects Ltd,BSE
 531802.BO,Prerna Infrabuild Limited,BSE
 531810.BO,Metal Coatings (India) Ltd.,BSE
@@ -1583,6 +1582,7 @@ ticker,name,exchange
 538772.BO,Niyogin Fintech Limited,BSE
 538777.BO,ASIA CAPITAL LIMITED,BSE
 538778.BO,Kalyan Capitals Limited,BSE
+538786.BO,Citizen Infoline Ltd.,BSE
 538787.BO,Goenka Business & Finance Limited,BSE
 538788.BO,Gilada Finance & Investments Ltd.,BSE
 538794.BO,JET SOLAR LIMITED,BSE
@@ -2140,7 +2140,6 @@ ticker,name,exchange
 543578.BO,Olatech Solutions Limited,BSE
 543594.BO,DIPNA PHARMACHEM LIMITED,BSE
 543595.BO,EP BIOCOMPOSITES LIMITED,BSE
-543597.BO,Virtuoso Optoelectronics Limited,BSE
 543598.BO,SHANTIDOOT INFRA SERVICES LIMITED,BSE
 543605.BO,HDFC Mutual Fund,BSE
 543606.BO,CONTAINE TECHNOLOGIES LIMITED,BSE
@@ -2618,6 +2617,7 @@ ticker,name,exchange
 544796.BO,LIOTECH INDUSTRIES LIMITED,BSE
 544797.BO,LEAPFROG ENGINEERING SERVICES LIMITED,BSE
 544798.BO,DIKSHA POLYMERS LIMITED,BSE
+544800.BO,ANUBHAV PLAST LIMITED,BSE
 555555.BO,ICICI Prudential Mutual Fund,BSE
 590103.BO,Reliance Mutual Fund-Permitted,BSE
 590104.BO,Reliance Mutual Fund-Permitted,BSE
@@ -2646,6 +2646,8 @@ ticker,name,exchange
 590160.BO,Tata Mutual Fund - Permitted,BSE
 5PAISA.NS,5Paisa Capital Limited,NSE
 63MOONS.NS,63 moons technologies limited,NSE
+751124.BO,MARG TECHNO PROJECTS LIMITED,BSE
+751125.BO,Oasis Securities Limited,BSE
 780014.BO,Has Lifestyle Limited,BSE
 780016.BO,Web Element Solutions Limited,BSE
 780018.BO,Adhiraj Distributors Limited,BSE
@@ -4830,6 +4832,7 @@ TTKHLTCARE.NS,TTK Healthcare Limited,NSE
 TTKPRESTIG.NS,TTK Prestige Limited,NSE
 TTL.NS,T T Limited,NSE
 TTML.NS,Tata Teleservices (Maharashtra) Limited,NSE
+TURTLEMINT.NS,Turtlemint Fintech Solutions Limited,NSE
 TVSELECT.NS,TVS Electronics Limited,NSE
 TVSHLTD.NS,TVS Holdings Limited,NSE
 TVSMOTOR.NS,TVS Motor Company Limited,NSE
@@ -4945,6 +4948,7 @@ VLSFINANCE.NS,VLS Finance Limited,NSE
 VMART.NS,V-Mart Retail Limited,NSE
 VMM.NS,Vishal Mega Mart Limited,NSE
 VMSTMT.NS,VMS TMT Limited,NSE
+VOEPL.NS,Virtuoso Optoelectronics Limited,NSE
 VOGL.NS,Vedanta Oil and Gas Limited,NSE
 VOLTAMP.NS,Voltamp Transformers Limited,NSE
 VOLTAS.NS,Voltas Limited,NSE
