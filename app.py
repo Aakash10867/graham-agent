@@ -368,7 +368,7 @@ def render_score_history_chart(sb, ticker, stock_name=None, chart_key=None):
         line=dict(color="#1D4ED8", width=2),
         fill="tozeroy", fillcolor="rgba(29, 78, 216, 0.06)",
         name="Score",
-        hovertemplate="%{y}/4<extra>Score</extra>",
+        hovertemplate="%{y}/5<extra>Score</extra>",
     ))
 
     # Quality-fail markers
@@ -970,7 +970,7 @@ def generate_portfolio_narrative(portfolio, holdings, collection):
     for s in stock_contexts:
         stocks_block += f"""
 --- {s['name']} ({s['ticker']}) ---
-Sector: {s['sector']} | Entry: Rs.{s['entry_price']} | Shares: {s['shares']} | Allocation: {s['allocation_pct']}% | Score: {s['score']}/4
+Sector: {s['sector']} | Entry: Rs.{s['entry_price']} | Shares: {s['shares']} | Allocation: {s['allocation_pct']}% | Score: {s['score']}/5
 Relevant book passages:
 {s['book_passages'][:800]}
 """
@@ -1139,7 +1139,7 @@ def generate_health_check(portfolio, holdings, universe_df, collection):
     holdings_summary = "\n".join(
         f"  {e['name']} ({e['ticker']}) — Sector: {e['sector']}, Alloc: {e['alloc']}%, "
         f"Beta: {e['beta'] or 'N/A'}, PE vs Avg: {e['pe_vs_avg'] or 'N/A'}%, "
-        f"From 52w High: {e['pct_from_high'] or 'N/A'}%, Score: {e['score']}/4"
+        f"From 52w High: {e['pct_from_high'] or 'N/A'}%, Score: {e['score']}/5"
         for e in enriched
     )
     # ── Find complementary stocks from universe ──
@@ -1215,7 +1215,7 @@ Write a diagnostic with these sections:
 Be direct and specific. Reference actual holdings by name. Under 300 words total.
 
 COMPLEMENTARY CANDIDATES (stocks not in portfolio that could improve diversification):
-{chr(10).join(f"  {c['ticker']} — {c['name']} | Sector: {c['sector']} | Score: {c['score']}/4 | PE: {c['pe']} | ROE: {c['roe_pct']}%" for c in complement_candidates) if complement_candidates else "None available"}
+{chr(10).join(f"  {c['ticker']} — {c['name']} | Sector: {c['sector']} | Score: {c['score']}/5 | PE: {c['pe']} | ROE: {c['roe_pct']}%" for c in complement_candidates) if complement_candidates else "None available"}
 If the portfolio needs more holdings or sector diversity, recommend specific stocks from the candidates above in your ACTION ITEMS.
 
 After the narrative, on a new line, output a JSON block starting with ACTIONS_JSON: followed by a JSON array.
@@ -3501,7 +3501,7 @@ def find_investments(market: str) -> dict:
                 "rev_growth_pct": round(row["rev_growth"], 2) if pd.notna(row.get("rev_growth")) else "N/A",
                 "ni_growth_pct": round(row["ni_growth"], 2) if pd.notna(row.get("ni_growth")) else "N/A",
                 "debt_growth_pct": round(row["debt_growth"], 2) if pd.notna(row.get("debt_growth")) else "N/A",
-                "score": f"{int(row['score'])}/4",
+                "score": f"{int(row['score'])}/5",
                 "passed": [f for f in ["Graham", "Greenblatt", "Dorsey", "Trajectory"]
                            if pd.notna(row.get(f"{f.lower()}_pass")) and row.get(f"{f.lower()}_pass")],
                 "failed": [f for f in ["Graham", "Greenblatt", "Dorsey", "Trajectory"]
@@ -4036,7 +4036,7 @@ You have 11 tools available. Pick the right combination for each question — yo
 9. get_ownership_info — Get major shareholders, institutional holders, and insider transactions.
 10. get_dividend_history — Get complete dividend payment history, annual totals, growth rate, and yield.
 11. calculate_graham_value — Compute Grahams intrinsic value formula (V = EPS x (8.5 + 2g) x 4.4/Y) and margin of safety.
-12. find_investments — Screen ~4500 Indian stocks (NSE + BSE) from a pre-scored universe against ALL 4 frameworks. Returns three tiers: Perfect Consensus (4/4 pass), Strong Consensus (3/4 pass), and Moderate Consensus (2/4 pass), top 10 each. Use when the user asks to find, discover, or recommend stocks, or wants investment ideas. Call with market='india' or 'all'.
+12. find_investments — Screen ~4500 Indian stocks (NSE + BSE) from a pre-scored universe against ALL 5 frameworks. Returns three tiers: Perfect Consensus (5/5 pass), Strong Consensus (4/5 pass), and Moderate Consensus (3/5 pass), top 10 each. Use when the user asks to find, discover, or recommend stocks, or wants investment ideas. Call with market='india' or 'all'.
 13. show_stock_chart — Renders a visual 13-month line chart of a stock's closing price directly in the UI. Use this whenever the user asks for a chart, graph, or visual trajectory.
 14. get_csv_financial_data — Reads the pre-scored universe database for a specific ticker to get proprietary framework scores (Graham, Greenblatt, Dorsey, Trajectory pass/fail flags).
 15. get_macro_context — Gets the sector and 5-day performance of the broader market (Nifty 50) to gauge macro momentum versus asset momentum.
@@ -4858,7 +4858,7 @@ elif st.session_state.sb_view_mode == "watchlist":
                                 elif _w_diff < 0:
                                     _w_delta_str = f"  ↓{abs(_w_diff)} since added"
                             st.markdown(f"**{_w_name}** ({_w_bare})")
-                            st.caption(f"Score: {_w_cur_score}/4{_w_delta_str} · {_w_sector} · PE {_w_pe} · PB {_w_pb} · Watching {_w_days}d")
+                            st.caption(f"Score: {_w_cur_score}/5{_w_delta_str} · {_w_sector} · PE {_w_pe} · PB {_w_pb} · Watching {_w_days}d")
     
                             # Quality flip warning
                             if _w_added_quality is not None and _w_cur_quality is not None and _w_added_quality != _w_cur_quality:
@@ -5081,6 +5081,9 @@ elif st.session_state.sb_view_mode == "watchlist":
                             with _dc1:
                                 if st.button("Yes, delete", key=f"del_yes_{_pp['id']}", use_container_width=True):
                                     try:
+                                        _pp_sb.table("sip_transactions").delete().eq("portfolio_id", _pp["id"]).execute()
+                                        _pp_sb.table("portfolio_alerts").delete().eq("portfolio_id", _pp["id"]).execute()
+                                        _pp_sb.table("portfolio_history").delete().eq("portfolio_id", _pp["id"]).execute()
                                         _pp_sb.table("holdings").delete().eq("portfolio_id", _pp["id"]).execute()
                                         _pp_sb.table("portfolios").delete().eq("id", _pp["id"]).execute()
                                         st.session_state.pop(f"confirm_del_paper_{_pp['id']}", None)
@@ -5767,7 +5770,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 ne_sector = detail.get("sector", "N/A")
                                 ne_pe = detail.get("pe")
                                 pe_str = f" · PE {ne_pe:.1f}" if ne_pe else ""
-                                st.markdown(f"**{ne_name}** just appeared on our radar with a score of {ne_score}/4. Sector: {ne_sector}{pe_str}. Worth a closer look if it fits your portfolio.")
+                                st.markdown(f"**{ne_name}** just appeared on our radar with a score of {ne_score}/5. Sector: {ne_sector}{pe_str}. Worth a closer look if it fits your portfolio.")
                                 if st.button("✗ Dismiss", key=f"newentry_dismiss_{a_id}", use_container_width=True):
                                     sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
                                     st.rerun()
@@ -6355,7 +6358,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                             _suggested_qty = max(1, int(_budget / _live_price)) if _live_price > 0 else 1
 
                                             st.caption(
-                                                f"Sector: {act_sector} · Score: {act_score}/4 · "
+                                                f"Sector: {act_sector} · Score: {act_score}/5 · "
                                                 f"PE: {act.get('pe', 'N/A')} · Price: ₹{_live_price:,.2f} · "
                                                 f"Budget ({suggested_pct}% of ₹{_sip:,}): ₹{_budget:,.0f}"
                                             )
@@ -6721,7 +6724,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                         action = f"🔴 SELL ALL ({h['shares']})"
                                         sell_qty = h["shares"]
                                         reasoning = (
-                                            f"Score is 0/4 — all frameworks fail. "
+                                            f"Score is 0/5 — all frameworks fail. "
                                             f"No investment thesis exists. Redeploy capital."
                                         )
                                         confidence = "high"
@@ -6737,7 +6740,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                             action = f"🔴 SELL ALL ({h['shares']})"
                                             sell_qty = h["shares"]
                                             reasoning = (
-                                                f"Score dropped to 1/4 without Graham pass — "
+                                                f"Score dropped to 1/5 without Graham pass — "
                                                 f"below the 2/4 buy threshold and no deep value "
                                                 f"exception applies. Thesis has eroded."
                                             )
@@ -7191,6 +7194,9 @@ elif st.session_state.sb_view_mode == "portfolios":
                     with c1:
                         if st.button("Yes, delete", key=f"confirm_yes_{port['id']}"):
                             try:
+                                sb.table("sip_transactions").delete().eq("portfolio_id", port["id"]).execute()
+                                sb.table("portfolio_alerts").delete().eq("portfolio_id", port["id"]).execute()
+                                sb.table("portfolio_history").delete().eq("portfolio_id", port["id"]).execute()
                                 sb.table("holdings").delete().eq("portfolio_id", port["id"]).execute()
                                 sb.table("portfolios").delete().eq("id", port["id"]).execute()
                                 st.session_state.pop(f"confirm_delete_{port['id']}", None)
