@@ -5111,12 +5111,71 @@ elif st.session_state.sb_view_mode == "import":
                 inv_type = st.selectbox("Investment Goal Profile", ["defensive", "balanced", "enterprising"], index=1)
                 horizon = st.selectbox("Time Horizon", ["short", "medium", "long"], index=1)
         
-        # 2. Dynamic Asset Adder (Searchable Dropdown)
+        # 2a. Kite CSV Import (one-click)
         if "import_holding_pool" not in st.session_state:
             st.session_state.import_holding_pool = []
 
         with st.container(border=True):
-            st.markdown("#### 📊 Add Your Stock Holdings")
+            st.markdown("#### 📤 Import from Kite")
+            st.caption("Go to Kite Console → Holdings → Download CSV, then upload it here.")
+            _kite_csv = st.file_uploader("Upload Kite Holdings CSV", type=["csv"], key="kite_csv_upload")
+            if _kite_csv is not None:
+                try:
+                    _kdf = pd.read_csv(_kite_csv)
+                    # Normalize column names (strip whitespace, lowercase for matching)
+                    _kdf.columns = [c.strip() for c in _kdf.columns]
+                    _instr_col = next((c for c in _kdf.columns if c.lower() == "instrument"), None)
+                    _qty_col = next((c for c in _kdf.columns if c.lower().startswith("qty")), None)
+                    _avg_col = next((c for c in _kdf.columns if "avg" in c.lower() and "cost" in c.lower()), None)
+                    if not _instr_col or not _qty_col or not _avg_col:
+                        st.error(f"Could not find required columns. Found: {list(_kdf.columns)}. Expected: Instrument, Qty., Avg. cost")
+                    else:
+                        _matched = []
+                        _unmatched = []
+                        _universe_tickers = set(universe_df["ticker"].tolist()) if universe_df is not None else set()
+                        for _, _kr in _kdf.iterrows():
+                            _sym = str(_kr[_instr_col]).strip().upper()
+                            _qty = int(float(_kr[_qty_col])) if pd.notna(_kr[_qty_col]) else 0
+                            _avg = float(_kr[_avg_col]) if pd.notna(_kr[_avg_col]) else 0.0
+                            if _qty <= 0 or _avg <= 0:
+                                continue
+                            # Try NSE first, then BSE
+                            _resolved = None
+                            for _suffix in [".NS", ".BO"]:
+                                if f"{_sym}{_suffix}" in _universe_tickers:
+                                    _resolved = f"{_sym}{_suffix}"
+                                    break
+                            if _resolved:
+                                _urow = universe_df[universe_df["ticker"] == _resolved].iloc[0]
+                                _matched.append({
+                                    "ticker": _resolved,
+                                    "name": _urow.get("name", _sym),
+                                    "shares": _qty,
+                                    "price": _avg,
+                                })
+                            else:
+                                _unmatched.append(_sym)
+                        if _matched:
+                            st.success(f"Matched {len(_matched)} of {len(_matched) + len(_unmatched)} instruments to Kordent universe.")
+                            _preview_df = pd.DataFrame(_matched)
+                            st.dataframe(_preview_df[["name", "ticker", "shares", "price"]], hide_index=True, use_container_width=True)
+                            if _unmatched:
+                                st.warning(f"Could not match: {', '.join(_unmatched)}. These will be skipped.")
+                            if st.button("✅ Use these holdings", use_container_width=True, key="kite_csv_accept"):
+                                st.session_state.import_holding_pool = _matched
+                                st.rerun()
+                        else:
+                            st.error("No instruments matched the Kordent universe. Check the CSV format.")
+                            if _unmatched:
+                                st.caption(f"Unmatched: {', '.join(_unmatched)}")
+                except Exception as _csv_err:
+                    st.error(f"Failed to parse CSV: {_csv_err}")
+
+        st.markdown("---")
+
+        # 2b. Manual Asset Adder (Searchable Dropdown)
+        with st.container(border=True):
+            st.markdown("#### 📊 Add Holdings Manually")
             
             # Create a list of "Company Name (TICKER)" from your existing universe_df
             stock_options = [
