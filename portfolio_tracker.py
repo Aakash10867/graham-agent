@@ -248,23 +248,26 @@ def run_daily_tracker():
 
     # ── Bootstrap: create genesis transactions for portfolios with holdings but no transactions ──
     _txn_port_ids = set(t["portfolio_id"] for t in all_txns)
-    holdings_resp_all = supabase.table("holdings").select("portfolio_id, ticker, shares, price_at_entry, created_at").execute()
+    holdings_resp_all = supabase.table("holdings").select("portfolio_id, ticker, shares, price_at_entry, entry_date").execute()
     _all_h = holdings_resp_all.data or []
     _ports_needing_bootstrap = set()
     for h in _all_h:
         if h["portfolio_id"] not in _txn_port_ids:
             _ports_needing_bootstrap.add(h["portfolio_id"])
     if _ports_needing_bootstrap:
+        _bootstrap_today = date.today().isoformat()
         print(f"Bootstrapping {len(_ports_needing_bootstrap)} portfolios with genesis transactions...")
         for h in _all_h:
             if h["portfolio_id"] in _ports_needing_bootstrap:
                 _h_shares = float(h.get("shares") or 0)
                 _h_price = float(h.get("price_at_entry") or 0)
+                if _h_shares <= 0 or _h_price <= 0:
+                    continue
                 _h_amt = round(_h_shares * _h_price, 2)
-                _h_date = (h.get("created_at") or today_str)[:10]
+                _h_date = (h.get("entry_date") or _bootstrap_today)[:10]
                 _nifty_u = round(_h_amt / nifty_bees_price, 6) if nifty_bees_price and _h_amt > 0 else None
                 _port_user = next((p["user_id"] for p in portfolios if p["id"] == h["portfolio_id"]), None)
-                if _port_user and _h_amt > 0:
+                if _port_user:
                     supabase.table("sip_transactions").insert({
                         "portfolio_id": h["portfolio_id"],
                         "user_id": _port_user,
