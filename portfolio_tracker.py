@@ -931,7 +931,6 @@ def run_daily_tracker():
     # 4. WRITE ALERTS TO SUPABASE
     # ══════════════════════════════════════
     try:
-        from datetime import timedelta
         cutoff = (date.today() - timedelta(days=7)).isoformat()
         supabase.table("portfolio_alerts").delete().lt("alert_date", cutoff).eq("is_read", False).execute()
     except Exception as e:
