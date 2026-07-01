@@ -572,6 +572,7 @@ ticker,name,exchange
 517170.BO,Edvenswa Enterprises Limited,BSE
 517172.BO,Pervasive Commodities Limited,BSE
 517201.BO,Switching Technologies Gunther Ltd.,BSE
+517230.BO,AURIQUE LIMITED,BSE
 517236.BO,Calcom Vision Ltd.,BSE
 517238.BO,Dynavision Limited,BSE
 517246.BO,BCC Fuba India Ltd.,BSE
@@ -667,6 +668,7 @@ ticker,name,exchange
 521149.BO,Prime Urban Development India Ltd,BSE
 521151.BO,Dhanlaxmi Fabrics Ltd.,BSE
 521161.BO,Sri Lakshmi Saraswathi Textiles (Ar,BSE
+521167.BO,MAXGROW INDIA LIMITED,BSE
 521178.BO,Sri Ramakrishna Mills (Coimbatore) Ltd.,BSE
 521206.BO,Samtex Fashions Ltd.,BSE
 521210.BO,Cityman Limited,BSE
@@ -1247,6 +1249,7 @@ ticker,name,exchange
 531568.BO,Ashutosh Paper Mills Ltd.,BSE
 531569.BO,Sanjivani Paranteral Ltd.,BSE
 531572.BO,Ranjit Securities Ltd.,BSE
+531574.BO,Vas Infrastructure  Ltd.,BSE
 531578.BO,KMF Builders & Developers Ltd.,BSE
 531582.BO,Beryl Securities Ltd,BSE
 531583.BO,RAP CORP LIMITED,BSE
@@ -1509,7 +1512,9 @@ ticker,name,exchange
 537008.BO,ICICI Prudential Mutual Fund,BSE
 537069.BO,Arnold Holdings Ltd,BSE
 537253.BO,Sunil Healthcare Limited,BSE
+537254.BO,JTL DEFENCE LIMITED,BSE
 537326.BO,CHEMTECH INDUSTRIAL VALVES LIMITED,BSE
+537392.BO,Keto Motors Limited,BSE
 537483.BO,Nippon India Mutual Fund,BSE
 537536.BO,Denis Chem Lab Limited,BSE
 537573.BO,Polymac Thermoformers Limited,BSE
@@ -1542,7 +1547,7 @@ ticker,name,exchange
 538496.BO,Tarini International Limited,BSE
 538521.BO,YAAN ENTERPRISES LIMITED,BSE
 538539.BO,ANNVRRIDHHI VENTURES LIMITED,BSE
-538540.BO,Ramchandra Leasing & Finance Limited,BSE
+538540.BO,RAAMA FINANCE LIMITED,BSE
 538546.BO,Bansal Roofing Products Limited,BSE
 538556.BO,Arman Holdings Limited,BSE
 538563.BO,SMT ENGINEERING LIMITED,BSE
@@ -2618,6 +2623,8 @@ ticker,name,exchange
 544797.BO,LEAPFROG ENGINEERING SERVICES LIMITED,BSE
 544798.BO,DIKSHA POLYMERS LIMITED,BSE
 544800.BO,ANUBHAV PLAST LIMITED,BSE
+544804.BO,Riyaasat Lifestyle Limited,BSE
+544805.BO,Jivial Industries Limited,BSE
 555555.BO,ICICI Prudential Mutual Fund,BSE
 590103.BO,Reliance Mutual Fund-Permitted,BSE
 590104.BO,Reliance Mutual Fund-Permitted,BSE
@@ -2672,6 +2679,7 @@ AARTIPHARM.NS,Aarti Pharmalabs Limited,NSE
 AARTISURF.NS,Aarti Surfactants Limited,NSE
 AARVI.NS,Aarvi Encon Limited,NSE
 AAVAS.NS,Aavas Financiers Limited,NSE
+ABAN.NS,Aban Offshore Limited,NSE
 ABANSENT.NS,Abans Enterprises Limited,NSE
 ABB.NS,ABB India Limited,NSE
 ABBOTINDIA.NS,Abbott India Limited,NSE
@@ -3111,6 +3119,7 @@ CONFIPET.NS,Confidence Petroleum India Limited,NSE
 CONSOFINVT.NS,Consolidated Finvest & Holdings Limited,NSE
 CONTROLPR.NS,Control Print Limited,NSE
 CORALFINAC.NS,Coral India Finance & Housing Limited,NSE
+CORDELIA.NS,Waterways Leisure Tourism Limited,NSE
 CORDSCABLE.NS,Cords Cable Industries Limited,NSE
 COROMANDEL.NS,Coromandel International Limited,NSE
 CORONA.NS,CORONA Remedies Limited,NSE
@@ -3469,7 +3478,7 @@ GTPL.NS,GTPL Hathway Limited,NSE
 GUFICBIO.NS,Gufic Biosciences Limited,NSE
 GUJALKALI.NS,Gujarat Alkalies and Chemicals Limited,NSE
 GUJAPOLLO.NS,Gujarat Apollo Industries Limited,NSE
-GUJGASLTD.NS,Gujarat Gas Limited,NSE
+GUJENERGY.NS,GUJARAT ENERGY LIMITED,NSE
 GUJRAFFIA.NS,Gujarat Raffia Industries Limited,NSE
 GUJTHEM.NS,Gujarat Themis Biosyn Limited,NSE
 GULFOILLUB.NS,Gulf Oil Lubricants India Limited,NSE
@@ -4088,6 +4097,7 @@ NESCO.NS,Nesco Limited,NSE
 NESTLEIND.NS,Nestle India Limited,NSE
 NETWEB.NS,Netweb Technologies India Limited,NSE
 NETWORK18.NS,Network18 Media & Investments Limited,NSE
+NEUEON.NS,Neueon Corporation Limited,NSE
 NEULANDLAB.NS,Neuland Laboratories Limited,NSE
 NEWGEN.NS,Newgen Software Technologies Limited,NSE
 NEXTMEDIA.NS,Next Mediaworks Limited,NSE
@@ -4271,6 +4281,7 @@ PPAP.NS,PPAP Automotive Limited,NSE
 PPL.NS,Prakash Pipes Limited,NSE
 PPLPHARMA.NS,Piramal Pharma Limited,NSE
 PRABHA.NS,Prabha Energy Limited,NSE
+PRABHAPP1.NS,Prabha Energy Limited,NSE
 PRADPME.NS,Pradeep Metals Limited,NSE
 PRAENG.NS,Prajay Engineers Syndicate Limited,NSE
 PRAJIND.NS,Praj Industries Limited,NSE
@@ -4340,6 +4351,7 @@ RALLIS.NS,Rallis India Limited,NSE
 RAMANEWS.NS,Shree Rama Newsprint Limited,NSE
 RAMAPHO.NS,Rama Phosphates Limited,NSE
 RAMASTEEL.NS,Rama Steel Tubes Limited,NSE
+RAMBHAJO.NS,Advit Jewels Limited,NSE
 RAMCOCEM.NS,The Ramco Cements Limited,NSE
 RAMCOIND.NS,Ramco Industries Limited,NSE
 RAMCOSYS.NS,Ramco Systems Limited,NSE
@@ -4559,13 +4571,14 @@ SHRENIK.NS,Shrenik Limited,NSE
 SHREYANIND.NS,Shreyans Industries Limited,NSE
 SHRIKRISH.NS,Shri Krishna Devcon Limited,NSE
 SHRINGARMS.NS,Shringar House of Mangalsutra Limited,NSE
-SHRIPISTON.NS,Shriram Pistons & Rings Limited,NSE
+SHRIPISTON.NS,SPR Auto Technologies Limited,NSE
 SHRIRAMFIN.NS,Shriram Finance Limited,NSE
 SHRIRAMPPS.NS,Shriram Properties Limited,NSE
 SHYAMCENT.NS,Shyam Century Ferrous Limited,NSE
 SHYAMMETL.NS,Shyam Metalics and Energy Limited,NSE
 SHYAMTEL.NS,Shyam Telecom Limited,NSE
 SICAGEN.NS,Sicagen India Limited,NSE
+SICALLOG.NS,Sical Logistics Limited,NSE
 SIEMENS.NS,Siemens Limited,NSE
 SIGACHI.NS,Sigachi Industries Limited,NSE
 SIGIND.NS,Signet Industries Limited,NSE
