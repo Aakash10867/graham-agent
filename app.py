@@ -2093,21 +2093,33 @@ div[data-testid="stAlert"] > div {
     background-color: #F8F9FA !important; /* Concrete Off-White */
 }
 
+/* Apply base color globally, but DO NOT force font-family here */
 .stApp, .stApp * {
-    font-family: 'Inter', sans-serif !important;
     color: #374151 !important; /* Dark Slate */
 }
 
-/* Exclude icons and code blocks from the universal font override */
-.stApp *:not(code):not(.material-symbols-rounded):not(i):not(svg) {
+/* Carefully apply Inter font ONLY to non-icon elements */
+.stApp *:not(code):not(.stIconMaterial):not(.material-symbols-rounded):not(i):not(svg):not(svg *) {
     font-family: 'Inter', sans-serif !important;
 }
 
-/* Explicitly protect the expander toggle icons */
+/* ── Fix 12: Expander & Icon Restoration ── */
+/* Streamlit uses the stIconMaterial class and "Material Symbols Rounded" for ligatures like arrow_right. 
+   We must protect them from the Inter font override so they render as icons, not text. */
+.stIconMaterial, 
+.material-symbols-rounded, 
+[data-testid="stIconMaterial"], 
 [data-testid="stExpanderToggleIcon"], 
-.material-symbols-rounded {
+[data-testid="stExpanderToggleIcon"] * {
     font-family: "Material Symbols Rounded" !important;
-    color: #6B7280 !important;
+    color: #6B7280 !important; /* Standard icon gray */
+    font-size: 24px !important; /* Restore normal icon size */
+    font-feature-settings: 'liga' !important; /* Ensure ligatures are enabled */
+    -webkit-font-feature-settings: 'liga' !important;
+    letter-spacing: normal !important;
+    text-transform: none !important;
+    white-space: nowrap !important;
+    word-wrap: normal !important;
 }
 
 [data-testid="stAppViewContainer"] {
