@@ -3568,9 +3568,11 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
     df = df[df["years_of_data"] >= 2]
     df = df[pd.notna(df["pe"]) & pd.notna(df["roe_pct"]) & pd.notna(df["de"])]
     df = df[df["pe"] > 0]  # Exclude negative P/E (loss-making)
-    # ── Affordability filter: no stock should consume >50% of one SIP installment ──
+    # ── Affordability filter: every stock must be buyable (≥1 share) at equal weight ──
     if "price" in df.columns:
-        _max_price = sip_amount * 0.5
+        _max_stocks = min(20, sip_amount // 750)
+        _min_stocks = max(5, _max_stocks // 3)
+        _max_price = sip_amount / _min_stocks
         _affordable = df[df["price"] <= _max_price]
         if len(_affordable) >= 10:
             df = _affordable
