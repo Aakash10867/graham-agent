@@ -126,7 +126,7 @@ def build_mentor_prompt(name, stocks, alerts_for_user):
     # Stock summary block
     stock_block = ""
     for s in stocks:
-        score_line = f"{s['current_score']}/4" if s['current_score'] is not None else "?"
+        score_line = f"{s['current_score']}/5" if s['current_score'] is not None else "?"
         score_delta = ""
         if s['added_score'] is not None and s['current_score'] is not None:
             diff = s['current_score'] - s['added_score']
@@ -232,7 +232,7 @@ def build_plain_fallback(name, stocks, alerts):
     lines = [f"{name}, here's your daily watchlist update.\n"]
 
     for s in stocks:
-        score_str = f"{s['current_score']}/4" if s['current_score'] is not None else "?"
+        score_str = f"{s['current_score']}/5" if s['current_score'] is not None else "?"
         price_str = f"₹{s['current_price']:,.2f}" if s['current_price'] else "price unavailable"
 
         delta = ""
