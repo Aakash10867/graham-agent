@@ -3567,7 +3567,12 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
     df = df[df["years_of_data"] >= 2]
     df = df[pd.notna(df["pe"]) & pd.notna(df["roe_pct"]) & pd.notna(df["de"])]
     df = df[df["pe"] > 0]  # Exclude negative P/E (loss-making)
-
+    # ── Affordability filter: no stock should consume >50% of one SIP installment ──
+    if "price" in df.columns:
+        _max_price = sip_amount * 0.5
+        _affordable = df[df["price"] <= _max_price]
+        if len(_affordable) >= 10:
+            df = _affordable
     # ── Sector exclusions from builder profile ──
     try:
         _excluded = json.loads(avoid_sectors) if isinstance(avoid_sectors, str) else avoid_sectors
