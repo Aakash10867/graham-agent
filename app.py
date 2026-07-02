@@ -2060,9 +2060,31 @@ div[data-testid="stAlert"] > div {
     border-radius: 6px !important;
 }
 
-/* Ensure the header row doesn't break the top-right curve */
 [data-testid="stDataFrame"] [data-baseweb="table"] {
     border-radius: 6px !important;
+}
+
+/* ── Fix 11: File Uploader Emoji Replacement (Nukes the Overlap) ── */
+[data-testid="stFileUploaderDropzone"] button {
+    position: relative !important;
+    min-height: 38px !important;
+    min-width: 120px !important;
+}
+[data-testid="stFileUploaderDropzone"] button * {
+    font-size: 0 !important; /* Eliminates the overlapping broken text & icons */
+    color: transparent !important;
+}
+[data-testid="stFileUploaderDropzone"] button::after {
+    content: "📁 Upload";
+    color: #111827 !important;
+    font-size: 14px !important; /* Restores normal text size for our replacement */
+    font-weight: 600 !important;
+    position: absolute !important;
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) !important;
+    pointer-events: none !important;
+    white-space: nowrap !important;
 }
 
 
