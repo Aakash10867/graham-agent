@@ -5846,10 +5846,6 @@ elif st.session_state.sb_view_mode == "portfolios":
                     }
                     available = {k: v for k, v in display_cols.items() if k in hold_df.columns}
                     st.dataframe(hold_df[list(available.keys())].rename(columns=available), hide_index=True, width="stretch")
-                    if KITE_ENABLED and display_holdings:
-                        _hold_kite = [{"ticker": h["ticker"], "quantity": 1} for h in display_holdings if h.get("ticker")]
-                        if _hold_kite:
-                            st.link_button("🛒 Top Up Portfolio on Kite", kite_basket_url(_hold_kite), use_container_width=True)
                 else:
                     st.caption("No holdings found.")
 
@@ -6596,7 +6592,15 @@ elif st.session_state.sb_view_mode == "portfolios":
                                             st.warning(f"⚠️ You have exceeded your deployment amount by ₹{abs(live_unallocated):,.0f}.")
                                         else:
                                             st.success("✅ Perfect allocation! Zero unallocated cash.")
-                                        
+                                        if KITE_ENABLED:
+                                            _deploy_kite = []
+                                            for a in allocated:
+                                                _q = st.session_state.get(f"sip_q_{port['id']}_{a['ticker']}", a["shares"])
+                                                if _q > 0:
+                                                    _deploy_kite.append({"ticker": a["ticker"], "quantity": _q})
+                                            if _deploy_kite:
+                                                st.link_button("🛒 Buy on Kite", kite_basket_url(_deploy_kite), use_container_width=True)
+                                                st.caption("After buying on Kite, confirm below:")
                                         bc1, bc2 = st.columns(2)
                                         with bc1:
                                             if st.button("✅ Confirm Purchase", key=f"conf_sip_{port['id']}", width="stretch"):
