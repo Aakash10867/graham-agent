@@ -2060,6 +2060,7 @@ div[data-testid="stAlert"] > div {
     border-radius: 6px !important;
 }
 
+/* Ensure the header row doesn't break the top-right curve */
 [data-testid="stDataFrame"] [data-baseweb="table"] {
     border-radius: 6px !important;
 }
