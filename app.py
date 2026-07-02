@@ -5087,18 +5087,34 @@ elif st.session_state.sb_view_mode == "watchlist":
                                                     _rh.get("ticker", ""), _rh_shares, _rh_price_new, _rh_amt,
                                                     "buy", _nifty_c
                                                 )
-                                        # Mark portfolio as real with conversion date
-                                        _pp_sb.table("portfolios").update({
+                                        # Adjust goal date: paper period doesn't count
+                                        _conv_update = {
                                             "is_paper": False,
                                             "paper_converted_at": _conv_today,
-                                        }).eq("id", _pp["id"]).execute()
+                                        }
+                                        _old_goal = _pp.get("target_date")
+                                        _pp_created = str(_pp.get("created_at", ""))[:10]
+                                        if _old_goal and _pp_created:
+                                            try:
+                                                _goal_dt = datetime.date.fromisoformat(str(_old_goal)[:10])
+                                                _created_dt = datetime.date.fromisoformat(_pp_created)
+                                                _conv_dt = datetime.date.fromisoformat(_conv_today)
+                                                _paper_days = (_conv_dt - _created_dt).days
+                                                _new_goal = (_goal_dt + datetime.timedelta(days=_paper_days)).isoformat()
+                                                _conv_update["target_date"] = _new_goal
+                                            except (ValueError, TypeError):
+                                                pass
+                                        _pp_sb.table("portfolios").update(_conv_update).eq("id", _pp["id"]).execute()
                                         # Clear portfolio history (clean start)
                                         try:
                                             _pp_sb.table("portfolio_history").delete().eq("portfolio_id", _pp["id"]).execute()
                                         except Exception:
                                             pass
                                         st.session_state.pop(f"confirm_real_{_pp['id']}", None)
-                                        st.success("Portfolio is now real! Fresh transactions recorded — XIRR starts from today. Find it in My Portfolios.")
+                                        _conv_msg = "Portfolio is now real! Fresh transactions recorded — XIRR starts from today. Find it in My Portfolios."
+                                        if _conv_update.get("target_date") and _old_goal:
+                                            _conv_msg += f"\n\n📅 Goal date adjusted from {str(_old_goal)[:10]} to {_conv_update['target_date']} — the portfolio spent {_paper_days} days in paper mode."
+                                        st.success(_conv_msg)
                                         st.rerun()
                                     except Exception as _re:
                                         st.error(f"Failed: {_re}")
