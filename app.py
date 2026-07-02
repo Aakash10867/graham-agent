@@ -2060,9 +2060,28 @@ div[data-testid="stAlert"] > div {
     border-radius: 6px !important;
 }
 
-/* Ensure the header row doesn't break the top-right curve */
 [data-testid="stDataFrame"] [data-baseweb="table"] {
     border-radius: 6px !important;
+}
+
+/* ── Fix 11: File Uploader Emoji Replacement (Fixes Overlap) ── */
+[data-testid="stFileUploader"] [data-testid="baseButton-secondary"] {
+    color: transparent !important;
+    position: relative;
+}
+[data-testid="stFileUploader"] [data-testid="baseButton-secondary"] * {
+    color: transparent !important;
+    fill: transparent !important;
+}
+[data-testid="stFileUploader"] [data-testid="baseButton-secondary"]::after {
+    content: "📁 Upload";
+    color: #111827 !important;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-weight: 600 !important;
+    pointer-events: none;
 }
 
 
