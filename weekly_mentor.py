@@ -282,21 +282,38 @@ def get_portfolio_summaries(ports, supabase, nifty_weekly_pct):
         current_val = float(p.get("current_value") or 0)
         ret_pct = float(p.get("current_return_pct") or 0)
         sip = float(p.get("sip_amount") or 0)
-        budget = float(p.get("sip_budget_remaining") or 0)
-        opp_budget_total = sip * 0.3
 
-        # Weekly return from portfolio_history
+        # Detect first-week portfolios
+        created_str = str(p.get("created_at", ""))[:10]
+        is_first_week = created_str >= cutoff
+
+        # Weekly return from portfolio_history (adjusted for inflows)
         weekly_ret = None
-        try:
-            hist = supabase.table("portfolio_history").select("total_value").eq(
-                "portfolio_id", pid
-            ).gte("date", cutoff).order("date").limit(1).execute()
-            if hist.data:
-                week_start_val = float(hist.data[0]["total_value"])
-                if week_start_val > 0:
-                    weekly_ret = round((current_val / week_start_val - 1) * 100, 2)
-        except Exception:
-            pass
+        if not is_first_week:
+            try:
+                hist = supabase.table("portfolio_history").select("total_value").eq(
+                    "portfolio_id", pid
+                ).gte("date", cutoff).order("date").limit(1).execute()
+                if hist.data:
+                    week_start_val = float(hist.data[0]["total_value"])
+                    if week_start_val > 0:
+                        # Subtract inflows so SIP deposits don't appear as gains
+                        inflows = 0
+                        try:
+                            txn_resp = supabase.table("sip_transactions").select(
+                                "amount_inr"
+                            ).eq("portfolio_id", pid).eq(
+                                "transaction_type", "buy"
+                            ).gte("transaction_date", cutoff).execute()
+                            for t in (txn_resp.data or []):
+                                inflows += float(t.get("amount_inr") or 0)
+                        except Exception:
+                            pass
+                        weekly_ret = round(
+                            (current_val - week_start_val - inflows) / week_start_val * 100, 2
+                        )
+            except Exception:
+                pass
 
         summaries.append({
             "name": p.get("name", "Unnamed"),
@@ -306,8 +323,7 @@ def get_portfolio_summaries(ports, supabase, nifty_weekly_pct):
             "weekly_return_pct": weekly_ret,
             "nifty_weekly_pct": nifty_weekly_pct,
             "sip": sip,
-            "budget_remaining": budget,
-            "budget_total": opp_budget_total,
+            "is_first_week": is_first_week,
             "goal_amount": p.get("target_amount"),
             "goal_date": p.get("target_date"),
             "link": f"{APP_URL}/?portfolio={pid}",
@@ -327,16 +343,16 @@ def build_gemini_prompt(name, summaries, alerts, recommendations=None):
     # Portfolio summary block
     port_block = ""
     for s in summaries:
-        weekly = f"{s['weekly_return_pct']:+.2f}%" if s['weekly_return_pct'] is not None else "N/A"
+        if s.get("is_first_week"):
+            weekly = "First week — no comparison yet"
+        elif s['weekly_return_pct'] is not None:
+            weekly = f"{s['weekly_return_pct']:+.2f}%"
+        else:
+            weekly = "N/A"
         nifty = f"{s['nifty_weekly_pct']:+.2f}%" if s['nifty_weekly_pct'] is not None else "N/A"
         goal_line = ""
         if s["goal_amount"]:
             goal_line = f"\n  Goal: ₹{float(s['goal_amount']):,.0f} by {s['goal_date']}"
-
-        budget_line = ""
-        if s["sip"] > 0:
-            used = s["budget_total"] - s["budget_remaining"]
-            budget_line = f"\n  Opportunity budget: ₹{used:,.0f} used of ₹{s['budget_total']:,.0f}"
 
         _paper_tag = " 👁 (Paper — not yet invested)" if s.get("is_paper") else ""
         _xirr_line = ""
@@ -348,7 +364,7 @@ def build_gemini_prompt(name, summaries, alerts, recommendations=None):
         port_block += f"""
 Portfolio: {s['name']}{_paper_tag}
   Value: ₹{s['value']:,.0f} | Overall return: {s['return_pct']:+.1f}%{_xirr_line}
-  This week: {weekly} (Nifty: {nifty}){goal_line}{budget_line}
+  This week: {weekly} (Nifty: {nifty}){goal_line}
   View: {s['link']}
 """
 
@@ -423,7 +439,7 @@ THIS WEEK'S PICKS:
 Write a warm, personal weekly email. Rules:
 
 1. Address {name} by name. First line should be a one-sentence summary of their week — not a greeting.
-2. Portfolio summary: mention each portfolio's value and weekly change vs Nifty. Be honest — if they underperformed, say so plainly.
+2. Give each portfolio its own paragraph with a clear header. Mention value and weekly change vs Nifty. Be honest — if they underperformed, say so plainly. For first-week portfolios, welcome them and set expectations.
 3. For each alert, explain WHY it matters using the book context provided. Reference Graham, Greenblatt, or Dorsey naturally — "Graham would say..." not "According to Benjamin Graham's The Intelligent Investor..."
 4. If there are weekly picks, present them as a curated buy list — mention each stock briefly with why it fits their profile. These expire in 24 hours so convey gentle urgency.
 5. If a goal is set, give a one-line status: on track, behind, or ahead.
@@ -462,7 +478,12 @@ def build_plain_fallback(name, summaries, alerts, recommendations=None):
     lines = [f"{name}, here's your week at a glance.\n"]
 
     for s in summaries:
-        weekly = f"{s['weekly_return_pct']:+.2f}%" if s['weekly_return_pct'] is not None else "no data"
+        if s.get("is_first_week"):
+            weekly = "first week"
+        elif s['weekly_return_pct'] is not None:
+            weekly = f"{s['weekly_return_pct']:+.2f}%"
+        else:
+            weekly = "no data"
         nifty = f"Nifty {s['nifty_weekly_pct']:+.2f}%" if s['nifty_weekly_pct'] is not None else ""
         lines.append(f"📊 {s['name']}: ₹{s['value']:,.0f} ({weekly} this week, {nifty})")
         if s.get("xirr_pct") is not None:
