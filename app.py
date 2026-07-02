@@ -410,11 +410,12 @@ def render_score_history_chart(sb, ticker, stock_name=None, chart_key=None):
 
 
 def enrich_holdings_live(holdings, cache_key=None):
-    """Compute live allocation_pct from current market prices.
+    """Add live market data to holdings.
 
-    Overwrites the stored allocation_pct with:
+    Computes actual_allocation_pct from current market prices:
         (shares × current_price) / total_portfolio_value × 100
-    Adds 'current_price' and 'current_value' to each holding dict.
+    Preserves the stored allocation_pct (target allocation) from the database.
+    Adds 'current_price', 'current_value', and 'actual_allocation_pct' to each holding dict.
     Caches prices in session state for 5 min to avoid re-fetching on Streamlit reruns.
     """
     import time as _time
@@ -447,7 +448,7 @@ def enrich_holdings_live(holdings, cache_key=None):
 
     total_val = sum(h["current_value"] for h in enriched)
     for h in enriched:
-        h["allocation_pct"] = round(h["current_value"] / total_val * 100, 1) if total_val > 0 else 0
+        h["actual_allocation_pct"] = round(h["current_value"] / total_val * 100, 1) if total_val > 0 else 0
 
     return enriched
 
@@ -624,7 +625,7 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
                 f"Rs. {invested:,.0f}",
                 f"Rs. {value:,.0f}",
                 pnl_para,
-                f"{h.get('allocation_pct', 0)}%",
+                f"{h.get('actual_allocation_pct', h.get('allocation_pct', 0))}%",
             ])
  
         _tot_pnl_text = f"Rs. {_tot_pnl:+,.0f}"
@@ -1044,7 +1045,7 @@ def generate_health_check(portfolio, holdings, universe_df, collection):
 
     for h in holdings:
         ticker = h.get("ticker", "")
-        alloc = h.get("allocation_pct", 0)
+        alloc = h.get("actual_allocation_pct", h.get("allocation_pct", 0))
         row = universe_df[universe_df["ticker"] == ticker]
 
         sector = h.get("sector", "Unknown")
@@ -5847,7 +5848,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                         "name": "Stock", "ticker": "Ticker", "sector": "Sector", "shares": "Shares",
                         "price_at_entry": "Entry ₹", "current_price": "CMP ₹",
                         "sip_amount_inr": "Invested", "current_value": "Value",
-                        "allocation_pct": "Alloc %", "score_at_entry": "Score",
+                        "allocation_pct": "Target %", "actual_allocation_pct": "Actual %", "score_at_entry": "Score",
                     }
                     available = {k: v for k, v in display_cols.items() if k in hold_df.columns}
                     st.dataframe(hold_df[list(available.keys())].rename(columns=available), hide_index=True, width="stretch")
@@ -6552,17 +6553,38 @@ elif st.session_state.sb_view_mode == "portfolios":
 
                                 if exec_amount > 0:
                                     sip_stocks = []
+                                    total_current_value = sum(h.get("current_value", 0) for h in display_holdings)
+                                    total_after_sip = total_current_value + exec_amount
+
                                     for h in display_holdings:
-                                        if h.get("allocation_pct", 0) > 0:
-                                            sip_stocks.append({
-                                                "ticker": h["ticker"],
-                                                "name": h.get("name", h["ticker"]),
-                                                "allocation_pct": h["allocation_pct"],
-                                                "price": h.get("current_price", h.get("price_at_entry", 1)),
-                                                "id": h["id"],
-                                                "old_shares": h["shares"],
-                                                "old_entry": h.get("price_at_entry", 1)
-                                            })
+                                        target_pct = h.get("allocation_pct", 0)
+                                        if target_pct <= 0:
+                                            continue
+                                        target_value = total_after_sip * target_pct / 100
+                                        current_value = h.get("current_value", 0)
+                                        deficit = max(0, target_value - current_value)
+                                        sip_stocks.append({
+                                            "ticker": h["ticker"],
+                                            "name": h.get("name", h["ticker"]),
+                                            "allocation_pct": 0,
+                                            "price": h.get("current_price", h.get("price_at_entry", 1)),
+                                            "id": h["id"],
+                                            "old_shares": h["shares"],
+                                            "old_entry": h.get("price_at_entry", 1),
+                                            "_deficit": deficit,
+                                        })
+
+                                    # Rebalancing weights: underweight stocks get more, overweight get less
+                                    total_deficit = sum(s["_deficit"] for s in sip_stocks)
+                                    if total_deficit > 0:
+                                        sip_stocks = [s for s in sip_stocks if s["_deficit"] > 0]
+                                        for s in sip_stocks:
+                                            s["allocation_pct"] = round(s["_deficit"] / total_deficit * 100, 1)
+                                    elif sip_stocks:
+                                        # All at or above target — equal weight so SIP still deploys
+                                        equal_pct = round(100 / len(sip_stocks), 1)
+                                        for s in sip_stocks:
+                                            s["allocation_pct"] = equal_pct
                                     
                                     if sip_stocks:
                                         allocated, _ = allocate_shares(sip_stocks, exec_amount)
