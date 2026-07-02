@@ -17,7 +17,6 @@ ticker,name,exchange
 500143.BO,P.H. Capital Ltd.,BSE
 500166.BO,Goodricke Group Ltd.,BSE
 500170.BO,GTN Industries Limited,BSE
-500178.BO,Harig Crankshafts Ltd.,BSE
 500192.BO,Prag Bosimi Synthetics Ltd.,BSE
 500202.BO,India Lease Devl. Ltd.,BSE
 500206.BO,Margo Finance Limited,BSE
@@ -1086,7 +1085,6 @@ ticker,name,exchange
 530855.BO,GDL Leasing & Finance ltd.,BSE
 530881.BO,Arunjyoti Bio Ventures Limited,BSE
 530883.BO,Super Crop Safe Ltd.,BSE
-530889.BO,AUDROC Limited,BSE
 530897.BO,N.G.Industries Ltd.,BSE
 530899.BO,Asia Pack Ltd.,BSE
 530907.BO,S.I.Capital And Financial Services,BSE
@@ -2655,6 +2653,7 @@ ticker,name,exchange
 63MOONS.NS,63 moons technologies limited,NSE
 751124.BO,MARG TECHNO PROJECTS LIMITED,BSE
 751125.BO,Oasis Securities Limited,BSE
+751126.BO,Consecutive Commodities Limited,BSE
 780014.BO,Has Lifestyle Limited,BSE
 780016.BO,Web Element Solutions Limited,BSE
 780018.BO,Adhiraj Distributors Limited,BSE
@@ -3139,6 +3138,7 @@ CROMPTON.NS,Crompton Greaves Consumer Electricals Limited,NSE
 CROWN.NS,Crown Lifters Limited,NSE
 CSBBANK.NS,CSB Bank Limited,NSE
 CSLFINANCE.NS,CSL Finance Limited,NSE
+CSM.NS,CSM Technologies Limited,NSE
 CTE.NS,Cambridge Technology Enterprises Limited,NSE
 CUB.NS,City Union Bank Limited,NSE
 CUBEXTUB.NS,Cubex Tubings Limited,NSE
@@ -4281,7 +4281,6 @@ PPAP.NS,PPAP Automotive Limited,NSE
 PPL.NS,Prakash Pipes Limited,NSE
 PPLPHARMA.NS,Piramal Pharma Limited,NSE
 PRABHA.NS,Prabha Energy Limited,NSE
-PRABHAPP1.NS,Prabha Energy Limited,NSE
 PRADPME.NS,Pradeep Metals Limited,NSE
 PRAENG.NS,Prajay Engineers Syndicate Limited,NSE
 PRAJIND.NS,Praj Industries Limited,NSE
