@@ -205,7 +205,7 @@ def handle_score(supabase, chat_id, text, universe_df):
 
     msg = (
         f"<b>{_html_esc(name)}</b> ({_html_esc(ticker)})\n\n"
-        f"Score: <b>{score}/4</b>\n"
+        f"Score: <b>{score}/5</b>\n"
         f"Sector: {_html_esc(sector)}\n"
         f"PE: {_html_esc(pe)}\n\n"
         f"<b>Frameworks:</b>\n" + "\n".join(fw_lines)
@@ -247,7 +247,7 @@ def handle_watchlist(supabase, chat_id, universe_df):
             if not row.empty:
                 score = int(row["score"].iloc[0]) if pd.notna(row["score"].iloc[0]) else "?"
         note_text = f" — {_html_esc(w['note'][:40])}" if w.get("note") else ""
-        lines.append(f"<b>{_html_esc(bare)}</b>  {score}/4{note_text}")
+        lines.append(f"<b>{_html_esc(bare)}</b>  {score}/5{note_text}")
 
     lines.append(f"\n<a href='{APP_URL}'>Open Kordent</a>")
     send_message(chat_id, "\n".join(lines))
