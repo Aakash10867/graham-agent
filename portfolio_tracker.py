@@ -939,6 +939,9 @@ def run_daily_tracker():
     written = 0
     for alert in all_alerts:
         try:
+            # Opportunity/new_entry collected silently — weekly_mentor activates the best ones Monday
+            if alert.get("alert_type") in ("opportunity", "new_entry"):
+                alert["is_read"] = True
             supabase.table("portfolio_alerts").upsert(
                 alert, on_conflict="portfolio_id,ticker,alert_type,alert_date"
             ).execute()
