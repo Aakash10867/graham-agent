@@ -4789,7 +4789,80 @@ elif st.session_state.sb_view_mode == "watchlist":
     if st.session_state.sb_user_id is None:
         st.warning("Please log in to view your watchlist.")
     else:
-        _wl_tab_stocks, _wl_tab_paper = st.tabs(["📊 Stocks", "📁 Paper Portfolios"])
+        _wl_tab_recs, _wl_tab_stocks, _wl_tab_paper = st.tabs(["📋 This Week's Picks", "📊 Stocks", "📁 Paper Portfolios"])
+
+        with _wl_tab_recs:
+            _rec_sb = get_supabase()
+            try:
+                _rec_resp = _rec_sb.table("weekly_recommendations").select("*").eq(
+                    "user_id", st.session_state.sb_user_id
+                ).gt("expires_at", datetime.datetime.utcnow().isoformat()).eq("acted_on", False).execute()
+                _rec_items = _rec_resp.data or []
+            except Exception:
+                _rec_items = []
+
+            if not _rec_items:
+                st.info("No recommendations right now. Check back Monday morning — Kordent curates a personalized buy list every week.")
+            else:
+                for _rec in _rec_items:
+                    _rec_horizon = _rec.get("time_horizon", "medium").title()
+                    _rec_type = _rec.get("investor_type", "balanced")
+                    _rec_budget = float(_rec.get("budget_inr") or 0)
+                    _rec_stocks = _rec.get("stocks", [])
+                    if isinstance(_rec_stocks, str):
+                        import json as _rjson
+                        try:
+                            _rec_stocks = _rjson.loads(_rec_stocks)
+                        except Exception:
+                            _rec_stocks = []
+
+                    if not _rec_stocks:
+                        continue
+
+                    # Expiry countdown
+                    try:
+                        _exp = datetime.datetime.fromisoformat(_rec["expires_at"].replace("Z", "+00:00"))
+                        _now = datetime.datetime.now(datetime.timezone.utc)
+                        _hours_left = max(0, int((_exp - _now).total_seconds() / 3600))
+                    except Exception:
+                        _hours_left = None
+
+                    with st.container(border=True):
+                        _exp_tag = f" · ⏳ {_hours_left}h left" if _hours_left is not None else ""
+                        st.markdown(f"**📋 {_rec_horizon} Horizon Picks**{_exp_tag}")
+                        st.caption(f"Based on your {_rec_type} profile · Budget: ₹{_rec_budget:,.0f}")
+
+                        _rec_rows = []
+                        _rec_total = 0
+                        for _rs in _rec_stocks:
+                            _rec_rows.append({
+                                "Stock": _rs["name"],
+                                "Ticker": _rs["ticker"],
+                                "Score": f"{_rs['score']}/5",
+                                "Verdict": _rs["verdict"],
+                                "Price": f"₹{_rs['price']:,.0f}",
+                                "Shares": _rs["shares"],
+                                "Amount": f"₹{_rs['amount']:,.0f}",
+                            })
+                            _rec_total += _rs["amount"]
+                        st.dataframe(pd.DataFrame(_rec_rows), hide_index=True, use_container_width=True)
+                        st.caption(f"Total: ₹{_rec_total:,.0f} of ₹{_rec_budget:,.0f} budget")
+
+                        _rc1, _rc2 = st.columns(2)
+                        with _rc1:
+                            if KITE_ENABLED:
+                                _rec_kite = [{"ticker": s["ticker"], "quantity": s["shares"]} for s in _rec_stocks if s["shares"] > 0]
+                                if _rec_kite:
+                                    st.link_button("🛒 Buy All on Kite", kite_basket_url(_rec_kite), use_container_width=True)
+                        with _rc2:
+                            if st.button("⏭ Skip This Week", key=f"skip_rec_{_rec['id']}", use_container_width=True):
+                                try:
+                                    _rec_sb.table("weekly_recommendations").update(
+                                        {"acted_on": True}
+                                    ).eq("id", _rec["id"]).execute()
+                                    st.rerun()
+                                except Exception as _re:
+                                    st.error(f"Failed: {_re}")
 
         with _wl_tab_stocks:
             _w_sb = get_supabase()
@@ -5579,24 +5652,15 @@ elif st.session_state.sb_view_mode == "portfolios":
                     ).eq("is_read", False).order("created_at", desc=True).execute()
                     port_alerts = alerts_resp.data
 
-                    # Also fetch broadcast alerts (new_entry — no portfolio_id)
-                    try:
-                        broadcast_resp = sb.table("portfolio_alerts").select("*").is_(
-                            "portfolio_id", "null"
-                        ).eq("is_read", False).order("created_at", desc=True).limit(5).execute()
-                        if broadcast_resp.data:
-                            seen_tickers = {a["ticker"] for a in port_alerts}
-                            for ba in broadcast_resp.data:
-                                if ba["ticker"] not in seen_tickers:
-                                    port_alerts.append(ba)
-                    except Exception:
-                        pass
+                    # Broadcast alerts (new_entry) now handled by weekly recommendations tab
                 except Exception:
                     port_alerts = []
 
                 if port_alerts:
                     for alert in port_alerts:
                         a_type = alert["alert_type"]
+                        if a_type in ("opportunity", "new_entry"):
+                            continue
                         a_id = alert["id"]
                         detail = alert.get("detail") or {}
                         if isinstance(detail, str):
