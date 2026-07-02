@@ -2099,37 +2099,16 @@ div[data-testid="stAlert"] > div {
 }
 
 /* Exclude icons and code blocks from the universal font override */
-    .stApp *:not(code):not(.material-symbols-rounded):not(i):not(svg) {
-        font-family: 'Inter', sans-serif !important;
-    }
+.stApp *:not(code):not(.material-symbols-rounded):not(i):not(svg) {
+    font-family: 'Inter', sans-serif !important;
+}
 
-    /* ── Fix 12: Expander Toggle Icon Overlap (Nukes broken ligatures) ── */
-    .material-symbols-rounded {
-        color: #6B7280 !important;
-    }
-    
-    [data-testid="stExpanderToggleIcon"] {
-        position: relative !important;
-        min-width: 24px !important;
-        color: transparent !important;
-    }
-    [data-testid="stExpanderToggleIcon"] * {
-        color: transparent !important;
-        fill: transparent !important;
-        font-size: 0 !important; /* Eliminates the overlapping broken text */
-    }
-    [data-testid="stExpanderToggleIcon"]::after {
-        content: "▼" !important;
-        color: #6B7280 !important;
-        font-size: 12px !important;
-        font-family: sans-serif !important;
-        position: absolute !important;
-        top: 50% !important;
-        left: 50% !important;
-        transform: translate(-50%, -50%) !important;
-        pointer-events: none !important;
-    }
-
+/* Explicitly protect the expander toggle icons */
+[data-testid="stExpanderToggleIcon"], 
+.material-symbols-rounded {
+    font-family: "Material Symbols Rounded" !important;
+    color: #6B7280 !important;
+}
 
 [data-testid="stAppViewContainer"] {
     background: transparent !important;
