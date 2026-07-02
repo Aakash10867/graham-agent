@@ -15,7 +15,9 @@ import os
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+import json
+import verdict_engine
 from collections import defaultdict
 
 import pandas as pd
@@ -104,6 +106,151 @@ def validate_alerts(alerts, universe_df):
         print(f"  Validation dropped {dropped} stale alerts.")
     return valid
 
+def build_weekly_recommendations(user_id, user_ports, universe_df, supabase):
+    """
+    Build personalized weekly stock recommendations per time_horizon.
+    Writes to weekly_recommendations table. Returns list of rec dicts for email.
+    """
+    if universe_df is None or not user_ports:
+        return []
+
+    # Collect ALL held tickers across all user's portfolios
+    held_tickers = set()
+    for p in user_ports:
+        try:
+            h_resp = supabase.table("holdings").select("ticker").eq("portfolio_id", p["id"]).execute()
+            for h in (h_resp.data or []):
+                held_tickers.add(h["ticker"])
+        except Exception:
+            pass
+
+    # Group portfolios by time_horizon
+    horizon_groups = defaultdict(list)
+    for p in user_ports:
+        if p.get("is_paper"):
+            continue
+        horizon = p.get("time_horizon", "medium")
+        horizon_groups[horizon].append(p)
+
+    recommendations = []
+    expires_at = (datetime.utcnow() + timedelta(hours=24)).isoformat()
+
+    for horizon, ports in horizon_groups.items():
+        # Dominant profile = largest SIP of this horizon
+        dominant = max(ports, key=lambda p: float(p.get("sip_amount") or 0))
+        investor_type = dominant.get("investor_type", "balanced")
+        max_sip = max(float(p.get("sip_amount") or 0) for p in ports)
+        budget = round(max_sip * 0.3)
+
+        if budget <= 0:
+            continue
+
+        # Filter universe
+        df = universe_df.copy()
+        df = df[df["score"] >= 3]
+        if "quality_pass" in df.columns:
+            df = df[df["quality_pass"] != False]
+        df = df[~df["ticker"].isin(held_tickers)]
+        df = df[pd.notna(df["pe"]) & (df["pe"] > 0)]
+        df = df[pd.notna(df["price"]) & (df["price"] > 0)]
+
+        # Profile-specific framework filtering
+        if investor_type == "defensive":
+            if len(df[df["graham_pass"] == True]) >= 3:
+                df = df[df["graham_pass"] == True]
+        elif investor_type == "enterprising":
+            if len(df[df["trajectory_pass"] == True]) >= 3:
+                df = df[df["trajectory_pass"] == True]
+        else:
+            quality = df[(df["greenblatt_pass"] == True) | (df["dorsey_pass"] == True)]
+            if len(quality) >= 3:
+                df = quality
+
+        # Horizon filtering
+        if horizon == "short":
+            large = df[pd.notna(df.get("market_cap")) & (df["market_cap"] > 1e10)]
+            if len(large) >= 3:
+                df = large
+
+        # Affordability filter
+        _max_n = max(1, min(10, int(budget // 750)))
+        _min_n = max(2, _max_n // 3)
+        _max_price = budget / _min_n
+        affordable = df[df["price"] <= _max_price]
+        if len(affordable) >= 3:
+            df = affordable
+
+        # Rank: score desc, PE asc
+        df = df.sort_values(["score", "pe"], ascending=[False, True])
+
+        # Pick top N
+        n_stocks = max(2, min(5, int(budget // 750)))
+        df = df.head(n_stocks)
+
+        if df.empty:
+            continue
+
+        # Build stock list with share counts
+        stocks = []
+        per_stock_budget = budget / len(df)
+        total_amount = 0
+
+        for _, row in df.iterrows():
+            price = round(float(row["price"]), 2)
+            shares = int(per_stock_budget / price) if price > 0 else 0
+            if shares <= 0:
+                continue
+            amount = round(shares * price, 2)
+            total_amount += amount
+
+            score = int(row["score"])
+            pass_dict = {
+                "graham_pass": bool(row.get("graham_pass")) if pd.notna(row.get("graham_pass")) else False,
+                "greenblatt_pass": bool(row.get("greenblatt_pass")) if pd.notna(row.get("greenblatt_pass")) else False,
+                "dorsey_pass": bool(row.get("dorsey_pass")) if pd.notna(row.get("dorsey_pass")) else False,
+                "trajectory_pass": bool(row.get("trajectory_pass")) if pd.notna(row.get("trajectory_pass")) else False,
+                "lynch_pass": bool(row.get("lynch_pass")) if pd.notna(row.get("lynch_pass")) else False,
+            }
+            v = verdict_engine.get_verdict_tier(score, True, pass_dict)
+
+            stocks.append({
+                "ticker": row["ticker"],
+                "name": str(row.get("name", row["ticker"])),
+                "sector": str(row.get("sector", "N/A")),
+                "score": score,
+                "verdict": v,
+                "price": price,
+                "shares": shares,
+                "amount": amount,
+            })
+
+        if not stocks:
+            continue
+
+        try:
+            supabase.table("weekly_recommendations").upsert({
+                "user_id": user_id,
+                "time_horizon": horizon,
+                "investor_type": investor_type,
+                "expires_at": expires_at,
+                "budget_inr": budget,
+                "stocks": json.dumps(stocks),
+                "acted_on": False,
+            }, on_conflict="user_id,time_horizon").execute()
+        except Exception as e:
+            print(f"  Weekly rec upsert failed for {horizon}: {e}")
+            continue
+
+        recommendations.append({
+            "horizon": horizon,
+            "investor_type": investor_type,
+            "budget": budget,
+            "stocks": stocks,
+            "total_amount": total_amount,
+        })
+
+    return recommendations
+
 
 def deduplicate_alerts(alerts):
     """
@@ -172,7 +319,7 @@ def get_portfolio_summaries(ports, supabase, nifty_weekly_pct):
     return summaries
 
 
-def build_gemini_prompt(name, summaries, alerts):
+def build_gemini_prompt(name, summaries, alerts, recommendations=None):
     """
     Build the LLM prompt for the weekly email.
     Book passages come from the alerts themselves — no book loading needed.
@@ -251,6 +398,16 @@ Portfolio: {s['name']}{_paper_tag}
     if not alerts_block.strip():
         alerts_block = "No significant alerts this week. Quiet weeks are good weeks.\n"
 
+    recs_block = ""
+    if recommendations:
+        for rec in recommendations:
+            recs_block += f"\n{rec['horizon'].upper()} HORIZON ({rec['investor_type']} profile, ₹{rec['budget']:,} budget):\n"
+            for s in rec["stocks"]:
+                recs_block += f"  {s['name']} ({s['ticker']}) — {s['score']}/5 {s['verdict']} — {s['shares']} shares @ ₹{s['price']:,.0f} = ₹{s['amount']:,.0f}\n"
+            recs_block += f"  Total deployed: ₹{rec['total_amount']:,.0f}\n"
+    if not recs_block:
+        recs_block = "No new recommendations this week.\n"
+
     prompt = f"""You are Kordent's Chief Investment Officer writing a weekly email to {name}.
 
 TODAY: {date.today().strftime('%A, %B %d, %Y')}
@@ -260,13 +417,15 @@ PORTFOLIO DATA:
 
 THIS WEEK'S ALERTS:
 {alerts_block}
+THIS WEEK'S PICKS:
+{recs_block}
 
 Write a warm, personal weekly email. Rules:
 
 1. Address {name} by name. First line should be a one-sentence summary of their week — not a greeting.
 2. Portfolio summary: mention each portfolio's value and weekly change vs Nifty. Be honest — if they underperformed, say so plainly.
 3. For each alert, explain WHY it matters using the book context provided. Reference Graham, Greenblatt, or Dorsey naturally — "Graham would say..." not "According to Benjamin Graham's The Intelligent Investor..."
-4. If there are opportunities with budget remaining, mention the suggested amount. If budget is used up, say so matter-of-factly.
+4. If there are weekly picks, present them as a curated buy list — mention each stock briefly with why it fits their profile. These expire in 24 hours so convey gentle urgency.
 5. If a goal is set, give a one-line status: on track, behind, or ahead.
 6. If a portfolio is marked "Paper", note it's a watchlist portfolio — tracking performance without real money. Be encouraging about what they're learning from the simulation.
 7. End with a patience reminder — one sentence, not preachy. Vary it each week.
@@ -298,7 +457,7 @@ def call_gemini(prompt, gemini_key):
     return None
 
 
-def build_plain_fallback(name, summaries, alerts):
+def build_plain_fallback(name, summaries, alerts, recommendations=None):
     """Decent plain-text email when Gemini is unavailable."""
     lines = [f"{name}, here's your week at a glance.\n"]
 
@@ -313,13 +472,9 @@ def build_plain_fallback(name, summaries, alerts):
             lines.append(_xirr_fb)
         lines.append(f"   {s['link']}")
 
-        if s["sip"] > 0:
-            used = s["budget_total"] - s["budget_remaining"]
-            lines.append(f"   Opportunity budget: ₹{s['budget_remaining']:,.0f} remaining of ₹{s['budget_total']:,.0f}")
         lines.append("")
 
     dangers = [a for a in alerts if a.get("alert_type") in ("danger", "overvalued", "goal_drift")]
-    opps = [a for a in alerts if a.get("alert_type") in ("opportunity", "new_entry")]
     others = [a for a in alerts if a.get("alert_type") not in ("danger", "overvalued", "goal_drift", "opportunity", "new_entry")]
 
     if dangers:
@@ -328,10 +483,13 @@ def build_plain_fallback(name, summaries, alerts):
             lines.append(f"  {a['headline']}")
         lines.append("")
 
-    if opps:
-        lines.append("⚡ Opportunities:")
-        for a in opps:
-            lines.append(f"  {a['headline']}")
+    if recommendations:
+        lines.append("📋 This Week's Picks (24h only):")
+        for rec in recommendations:
+            lines.append(f"  {rec['horizon'].title()} horizon ({rec['investor_type']}, ₹{rec['budget']:,} budget):")
+            for s in rec["stocks"]:
+                lines.append(f"    {s['name']} — {s['score']}/5 {s['verdict']} — {s['shares']}× ₹{s['price']:,.0f}")
+            lines.append(f"    Total: ₹{rec['total_amount']:,.0f}")
         lines.append("")
 
     if others:
@@ -374,7 +532,7 @@ def build_subject(name, summaries, alerts):
                 return f"🔴 {name}, tough week {pct} — here's the bigger picture"
 
     danger_count = sum(1 for a in alerts if a.get("alert_type") in ("danger", "overvalued", "goal_drift"))
-    opp_count = sum(1 for a in alerts if a.get("alert_type") in ("opportunity", "new_entry"))
+    opp_count = 0  # Opportunities now handled by weekly recommendations
 
     if danger_count and opp_count:
         return f"📊 {name}, a few things to look at this week"
@@ -493,17 +651,17 @@ def run_weekly_mentor():
 
         print(f"[{name}] {len(ports)} portfolios, {len(raw)} raw alerts")
 
-        # ── Pipeline: validate → deduplicate → cap ──
+        # ── Pipeline: validate → deduplicate ──
         validated = validate_alerts(raw, universe_df)
         deduped = deduplicate_alerts(validated)
 
-        # Cap opportunities at 3 total (across all portfolios, post-dedup)
-        opps = [a for a in deduped if a.get("alert_type") in ("opportunity", "new_entry")]
-        non_opps = [a for a in deduped if a.get("alert_type") not in ("opportunity", "new_entry")]
-        opps = opps[:3]
-        final_alerts = non_opps + opps
+        # Opportunities now handled by weekly recommendations — exclude from email alerts
+        final_alerts = [a for a in deduped if a.get("alert_type") not in ("opportunity", "new_entry")]
 
-        print(f"  After pipeline: {len(final_alerts)} alerts ({len(validated)} valid, {len(deduped)} deduped)")
+        # Build weekly recommendations (writes to weekly_recommendations table)
+        user_recs = build_weekly_recommendations(uid, ports, universe_df, supabase)
+
+        print(f"  After pipeline: {len(final_alerts)} alerts, {len(user_recs)} recommendation sets")
 
         # ── Portfolio summaries ──
         summaries = get_portfolio_summaries(ports, supabase, nifty_weekly)
@@ -513,7 +671,7 @@ def run_weekly_mentor():
 
         body = None
         if gemini_key:
-            prompt = build_gemini_prompt(name, summaries, final_alerts)
+            prompt = build_gemini_prompt(name, summaries, final_alerts, user_recs)
             body = call_gemini(prompt, gemini_key)
             if body:
                 print(f"  LLM narrative generated ({len(body)} chars)")
@@ -521,7 +679,7 @@ def run_weekly_mentor():
                 print(f"  LLM failed — using fallback")
 
         if not body:
-            body = build_plain_fallback(name, summaries, final_alerts)
+            body = build_plain_fallback(name, summaries, final_alerts, user_recs)
 
         # ── Send ──
         if send_email(email, subject, body, smtp_user, smtp_pass):
