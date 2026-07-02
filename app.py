@@ -2471,6 +2471,17 @@ with st.sidebar:
                     except Exception as e:
                         st.error(f"Failed: {e}")
         
+        # ── New Chat (top) ──
+        if st.button("🔄 New Chat", width="stretch"):
+            st.session_state.messages = []
+            st.session_state.chat_history = []
+            st.session_state.sb_view_mode = "chat"
+            if "pending_portfolio" in st.session_state:
+                st.session_state.pending_portfolio = None
+                st.session_state.pop("pending_watch_tickers", None)
+            st.rerun()
+
+        # ── Navigation ──
         if st.session_state.sb_view_mode != "builder":
             if st.button("🏗️ Build Portfolio", width="stretch"):
                 st.session_state.sb_view_mode = "builder"
@@ -2480,7 +2491,7 @@ with st.sidebar:
             if st.button("📥 Import Existing Portfolio", width="stretch"):
                 st.session_state.sb_view_mode = "import"
                 st.rerun()
-                
+
         if st.session_state.sb_view_mode != "portfolios":
             try:
                 _all_ports = sb.table("portfolios").select("id, is_paper").eq(
@@ -2489,19 +2500,11 @@ with st.sidebar:
                 _port_count = len([p for p in _all_ports if not p.get("is_paper")])
             except Exception:
                 _port_count = 0
-            
             _port_label = f"📁 My Portfolios ({_port_count})" if _port_count else "📁 My Portfolios"
-            
             if st.button(_port_label, width="stretch"):
                 st.session_state.sb_view_mode = "portfolios"
                 st.rerun()
-                
-        if st.session_state.sb_view_mode != "chat":
-            if st.button("← Back to Chat", width="stretch"):
-                st.session_state.sb_view_mode = "chat"
-                st.rerun()
 
-        # ── My Watchlist nav ──
         if st.session_state.sb_view_mode != "watchlist":
             try:
                 _wl_stocks = len((sb.table("watchlist").select("id").eq(
@@ -2519,83 +2522,32 @@ with st.sidebar:
                 st.session_state.sb_view_mode = "watchlist"
                 st.rerun()
 
-        # ── Does It Work? nav ──
         if st.session_state.sb_view_mode != "backtest":
             if st.button("📊 Does It Work?", width="stretch"):
                 st.session_state.sb_view_mode = "backtest"
                 st.rerun()
 
-        # ── Telegram Alerts ──
-        if not st.session_state.get("_tg_checked"):
-            try:
-                _tg_prof = sb.table("profiles").select("telegram_chat_id").eq(
-                    "id", st.session_state.sb_user_id).limit(1).execute()
-                st.session_state["_tg_connected"] = bool(
-                    _tg_prof.data and _tg_prof.data[0].get("telegram_chat_id"))
-            except Exception:
-                st.session_state["_tg_connected"] = False
-            st.session_state["_tg_checked"] = True
- 
-        with st.expander("📱 Telegram Alerts"):
-            if st.session_state.get("_tg_connected"):
-                st.caption("✅ Connected — you'll receive daily updates and alerts on Telegram.")
-                if st.button("Disconnect", key="tg_disconnect"):
-                    try:
-                        sb.table("profiles").update({"telegram_chat_id": None}).eq(
-                            "id", st.session_state.sb_user_id).execute()
-                        st.session_state["_tg_connected"] = False
-                        st.session_state.pop("_tg_link_code", None)
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Failed: {e}")
-            else:
-                st.caption("Get daily portfolio updates, danger alerts, and SIP reminders on Telegram.")
-                if st.session_state.get("_tg_link_code"):
-                    st.markdown("Send this to **@KordentAIBot** on Telegram:")
-                    st.code(f"/start {st.session_state['_tg_link_code']}", language=None)
-                    st.caption("You'll get a confirmation on Telegram within the hour. Refresh this page to check.")
-                    if st.button("🔄 Check connection", key="tg_recheck", use_container_width=True):
-                        st.session_state.pop("_tg_checked", None)
-                        st.session_state.pop("_tg_link_code", None)
-                        st.rerun()
-                else:
-                    if st.button("Connect Telegram", key="tg_connect", use_container_width=True):
-                        import random
-                        code = str(random.randint(100000, 999999))
-                        try:
-                            sb.table("profiles").update({"telegram_link_code": code}).eq(
-                                "id", st.session_state.sb_user_id).execute()
-                            st.session_state["_tg_link_code"] = code
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Failed: {e}")
- 
         st.divider()
- 
-        if st.button("Log Out", width="stretch", key="logout_btn"):
-            try:
-                sb = get_supabase()
-                sb.auth.sign_out()
-            except Exception:
-                pass
-            st.session_state.sb_access_token = None
-            st.session_state.sb_refresh_token = None
-            st.session_state.sb_user_email = None
-            st.session_state.sb_user_id = None
-            st.session_state.sb_view_mode = "chat" # Resets view on logout
-            st.rerun()
 
-    st.divider()
-
-    if st.button("🔄 New Chat", width="stretch"):
-        st.session_state.messages = []
-        st.session_state.chat_history = []
-        st.session_state.sb_view_mode = "chat" 
-        if "pending_portfolio" in st.session_state:
-            st.session_state.pending_portfolio = None
-            st.session_state.pop("pending_watch_tickers", None)
-        st.rerun()
-
+        # ── Settings + Logout (icon buttons, bottom) ──
+        _sb_c1, _sb_c2 = st.columns(2)
+        with _sb_c1:
+            if st.button("⚙️", key="settings_btn", use_container_width=True, help="Settings"):
+                st.session_state.sb_view_mode = "settings"
+                st.rerun()
+        with _sb_c2:
+            if st.button("🚪", key="logout_btn", use_container_width=True, help="Log Out"):
+                try:
+                    sb = get_supabase()
+                    sb.auth.sign_out()
+                except Exception:
+                    pass
+                st.session_state.sb_access_token = None
+                st.session_state.sb_refresh_token = None
+                st.session_state.sb_user_email = None
+                st.session_state.sb_user_id = None
+                st.session_state.sb_view_mode = "chat"
+                st.rerun()
 
     st.markdown("---")
     st.markdown(
@@ -7305,6 +7257,89 @@ elif st.session_state.sb_view_mode == "portfolios":
                         if st.button("Cancel", key=f"confirm_no_{port['id']}"):
                             st.session_state.pop(f"confirm_delete_{port['id']}", None)
                             st.rerun()
+
+# ──────────────────────────────────────────────
+# SETTINGS VIEW (Sprint 9)
+# ──────────────────────────────────────────────
+elif st.session_state.sb_view_mode == "settings":
+    st.markdown("### ⚙️ Settings")
+
+    if st.session_state.sb_user_id is None:
+        st.warning("Please log in to access settings.")
+    else:
+        _set_sb = get_supabase()
+
+        # ── Profile ──
+        with st.container(border=True):
+            st.markdown("**Profile**")
+            st.caption(f"Email: {st.session_state.sb_user_email}")
+
+            _set_name = st.text_input(
+                "Full Name",
+                value=st.session_state.get("_profile_name", ""),
+                key="settings_name_input"
+            )
+            if st.button("Save Name", key="settings_save_name"):
+                if _set_name and _set_name.strip():
+                    try:
+                        _set_sb.table("profiles").upsert({
+                            "id": st.session_state.sb_user_id,
+                            "full_name": _set_name.strip()
+                        }, on_conflict="id").execute()
+                        st.session_state["_profile_name"] = _set_name.strip()
+                        st.success("Name updated!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed: {e}")
+                else:
+                    st.warning("Enter a name.")
+
+        # ── Telegram ──
+        with st.container(border=True):
+            st.markdown("**Telegram Alerts**")
+
+            if not st.session_state.get("_tg_checked"):
+                try:
+                    _tg_prof = _set_sb.table("profiles").select("telegram_chat_id").eq(
+                        "id", st.session_state.sb_user_id).limit(1).execute()
+                    st.session_state["_tg_connected"] = bool(
+                        _tg_prof.data and _tg_prof.data[0].get("telegram_chat_id"))
+                except Exception:
+                    st.session_state["_tg_connected"] = False
+                st.session_state["_tg_checked"] = True
+
+            if st.session_state.get("_tg_connected"):
+                st.caption("✅ Connected — you receive daily updates and alerts on Telegram.")
+                if st.button("Disconnect Telegram", key="tg_disconnect_settings"):
+                    try:
+                        _set_sb.table("profiles").update({"telegram_chat_id": None}).eq(
+                            "id", st.session_state.sb_user_id).execute()
+                        st.session_state["_tg_connected"] = False
+                        st.session_state.pop("_tg_link_code", None)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed: {e}")
+            else:
+                st.caption("Get daily portfolio updates, danger alerts, and SIP reminders on Telegram.")
+                if st.session_state.get("_tg_link_code"):
+                    st.markdown("Send this to **@KordentAIBot** on Telegram:")
+                    st.code(f"/start {st.session_state['_tg_link_code']}", language=None)
+                    st.caption("You'll get a confirmation within the hour. Refresh this page to check.")
+                    if st.button("🔄 Check connection", key="tg_recheck_settings", use_container_width=True):
+                        st.session_state.pop("_tg_checked", None)
+                        st.session_state.pop("_tg_link_code", None)
+                        st.rerun()
+                else:
+                    if st.button("Connect Telegram", key="tg_connect_settings", use_container_width=True):
+                        import random
+                        code = str(random.randint(100000, 999999))
+                        try:
+                            _set_sb.table("profiles").update({"telegram_link_code": code}).eq(
+                                "id", st.session_state.sb_user_id).execute()
+                            st.session_state["_tg_link_code"] = code
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Failed: {e}")
 
 # ──────────────────────────────────────────────
 # DOES IT WORK? VIEW (Sprint 6)
