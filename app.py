@@ -2498,6 +2498,8 @@ with st.sidebar:
             st.session_state.messages = []
             st.session_state.chat_history = []
             st.session_state.sb_view_mode = "chat"
+            st.session_state.pending_disambiguation = None
+            st.session_state.pop("_pending_navigate", None)
             if "pending_portfolio" in st.session_state:
                 st.session_state.pending_portfolio = None
                 st.session_state.pop("pending_watch_tickers", None)
