@@ -4050,6 +4050,29 @@ Rules:
 
     return {"query": query, "error": "All models exhausted — web search unavailable this turn."}
 
+TOOL_STATUS_MESSAGES = {
+    "resolve_stock": "🔍 Resolving company name...",
+    "get_stock_data": "📊 Fetching live market data...",
+    "get_csv_financial_data": "📋 Reading framework scores...",
+    "get_historical_trends": "📈 Analyzing growth trends...",
+    "get_financial_statements": "📑 Pulling financial statements...",
+    "get_price_history": "📉 Checking price history...",
+    "get_analyst_recommendations": "🎯 Checking analyst consensus...",
+    "get_stock_news": "📰 Scanning recent headlines...",
+    "get_ownership_info": "👥 Checking ownership structure...",
+    "get_dividend_history": "💰 Reviewing dividend history...",
+    "calculate_graham_value": "🧮 Computing intrinsic value...",
+    "find_investments": "🔎 Screening 4,500+ stocks...",
+    "show_stock_chart": "📊 Rendering price chart...",
+    "get_macro_context": "🌍 Checking macro environment...",
+    "get_sip_candidates": "🏗️ Building candidate pool...",
+    "register_portfolio": "💾 Registering portfolio...",
+    "navigate_to": "🧭 Opening feature...",
+    "search_book": "📚 Consulting investment principles...",
+    "get_web_context": "🌐 Searching the web for recent context...",
+    "calculator": "🧮 Crunching numbers...",
+}
+
 
 # ──────────────────────────────────────────────
 # TOOLS REGISTRY
@@ -4467,7 +4490,14 @@ def sanitize_history(history):
     return clean
 
 
-def agent_turn(user_message):
+def agent_turn(user_message, status_container=None):
+    def _update_status(label):
+        if status_container:
+            try:
+                status_container.update(label=label, state="running")
+            except Exception:
+                pass
+
     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
     # Inject client context into system instruction
@@ -4486,6 +4516,7 @@ def agent_turn(user_message):
         models_to_try = FREE_MODELS
     for model_name in models_to_try:
         try:
+            _update_status("🧠 Analyst preparing thesis...")
             # --- PHASE 1: ANALYST DRAFTS THESIS ---
             analyst_chat = client.chats.create(
                 model=model_name,
@@ -4519,6 +4550,7 @@ def agent_turn(user_message):
                     
                 function_responses = []
                 for fc in analyst_response.function_calls:
+                    _update_status(TOOL_STATUS_MESSAGES.get(fc.name, f"⚙️ Running {fc.name}..."))
                     if fc.name in tool_functions:
                         # Execute the tool function, then immediately sanitize the dictionary output
                         raw_tool_output = tool_functions[fc.name](**fc.args)
@@ -4547,6 +4579,8 @@ def agent_turn(user_message):
                 )
                 recovery_response = analyst_chat.send_message(recovery_prompt)
                 draft_text = _extract_text(recovery_response).strip()
+
+            _update_status("🔒 Risk officer reviewing draft...")
 
             # --- PHASE 2: AUDITOR REVIEWS DRAFT (with independent data) -----
             NOISE_WORDS = {"PASS", "FAIL", "YES", "NO", "ROE", "EPS", "SIP",
@@ -4584,6 +4618,7 @@ def agent_turn(user_message):
             # --- PHASE 3: RESOLUTION ---
             if audit_result.startswith("[REJECT]"):
                 # Force the Analyst to read the Auditor's rejection and rewrite
+                _update_status("⚖️ Revising thesis per auditor feedback...")
                 correction_prompt = f"The Chief Risk Officer REJECTED your draft with the following feedback:\n\n{audit_result}\n\nRewrite your entire analysis to comply with this feedback. CRITICAL: If you are building a portfolio, you MUST call the register_portfolio tool AGAIN with your updated stock list to overwrite the rejected database entry."
                 final_response = analyst_chat.send_message(correction_prompt)
                 
@@ -4596,6 +4631,7 @@ def agent_turn(user_message):
                         
                     function_responses = []
                     for fc in final_response.function_calls:
+                        _update_status(TOOL_STATUS_MESSAGES.get(fc.name, f"⚙️ Running {fc.name}..."))
                         if fc.name in tool_functions:
                             raw_tool_output = tool_functions[fc.name](**fc.args)
                             result = _sanitize_for_json(raw_tool_output)
@@ -4838,10 +4874,12 @@ if st.session_state.sb_view_mode == "chat":
                 response_placeholder = st.empty()
                 answer = None
                 model_used = None
-                with st.spinner("Routing & Analyzing..."):
+                with st.status("🧠 Preparing analysis...", expanded=False) as status:
                     try:
-                        answer, model_used = agent_turn(prompt)
+                        answer, model_used = agent_turn(prompt, status_container=status)
+                        status.update(label="✅ Analysis complete", state="complete")
                     except Exception as e:
+                        status.update(label="⚠️ Error encountered", state="error")
                         error_msg = str(e)
                         error_upper = error_msg.upper()
                         if any(err in error_upper for err in ["429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "ALL MODELS RATE-LIMITED"]):
