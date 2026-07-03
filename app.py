@@ -4000,7 +4000,7 @@ def get_web_context(query: str) -> dict:
     """
     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
-    search_prompt = f """Search the web and provide a concise summary of the most recent and material information for this query:
+    search_prompt = f'''Search the web and provide a concise summary of the most recent and material information for this query:
 
 "{query}"
 
@@ -4014,7 +4014,7 @@ Rules:
 - Include dates where possible
 - If nothing material is found, say "No material recent developments found" — do NOT fabricate
 - Keep the summary to 5-8 bullet points maximum
-- Cite source names (e.g. "per Economic Times", "per SEBI filing") where possible"""
+- Cite source names (e.g. "per Economic Times", "per SEBI filing") where possible'''
 
     last_good = st.session_state.get("last_working_model")
     if last_good and last_good in FREE_MODELS:
