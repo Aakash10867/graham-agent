@@ -513,9 +513,9 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
     s_cover_date = ParagraphStyle("RCoverDate", fontName="Helvetica", fontSize=10,
                                    textColor=MUTED, alignment=TA_CENTER)
     s_heading = ParagraphStyle("RHeading", fontName="Helvetica-Bold", fontSize=13,
-                                textColor=NAVY, spaceBefore=12, spaceAfter=6)
+                                textColor=ACCENT, spaceBefore=12, spaceAfter=6)
     s_body = ParagraphStyle("RBody", fontName="Helvetica", fontSize=10,
-                             textColor=DARK, leading=14, spaceAfter=4)
+                             textColor=DARK, leading=14, spaceAfter=4, alignment=TA_JUSTIFY)
     s_small = ParagraphStyle("RSmall", fontName="Helvetica", fontSize=8,
                               textColor=MUTED, leading=10)
     s_cell = ParagraphStyle("RCell", fontName="Helvetica", fontSize=8,
@@ -557,9 +557,9 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
     # ══════════════════════════════════════
     story.append(Spacer(1, 55*mm))
     story.append(Paragraph("KORDENT", s_title))
-    story.append(Spacer(1, 3*mm))
+    story.append(Spacer(1, 8*mm))
     story.append(HRFlowable(width="25%", thickness=2, color=ACCENT,
-                            spaceAfter=6, spaceBefore=2, hAlign="CENTER"))
+                            spaceAfter=8, spaceBefore=0, hAlign="CENTER"))
     story.append(Paragraph("Alpha Report", s_subtitle))
     story.append(Spacer(1, 25*mm))
     story.append(Paragraph(portfolio.get("name", "Portfolio"), s_cover_name))
@@ -831,10 +831,10 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
                                 spaceAfter=8, spaceBefore=2))
  
         s_stock_head = ParagraphStyle("RStockHead", fontName="Helvetica-Bold", fontSize=10,
-                                       textColor=NAVY, spaceBefore=10, spaceAfter=3)
+                                       textColor=ACCENT, spaceBefore=10, spaceAfter=3)
         s_narrative = ParagraphStyle("RNarrative", fontName="Helvetica", fontSize=9.5,
                                       textColor=DARK, leading=13.5, spaceAfter=6,
-                                      leftIndent=0, rightIndent=0)
+                                      leftIndent=0, rightIndent=0, alignment=TA_JUSTIFY)
         s_section_head = ParagraphStyle("RSectionHead", fontName="Helvetica-Bold", fontSize=11,
                                          textColor=NAVY, spaceBefore=14, spaceAfter=6)
  
@@ -6573,29 +6573,18 @@ elif st.session_state.sb_view_mode == "portfolios":
                 report_key = f"report_ready_{port['id']}"
 
                 if st.session_state.get(report_key):
-                    _dl_col, _share_col = st.columns(2)
-                    with _dl_col:
-                        st.download_button(
-                            label="⬇️ Download Report",
-                            data=st.session_state[report_key],
-                            file_name=f"Kordent_{re.sub(r'[^a-zA-Z0-9]', '_', port.get('name', 'portfolio'))}_{datetime.date.today().isoformat()}.pdf",
-                            mime="application/pdf",
-                            key=f"pdf_download_{port['id']}",
-                            use_container_width=True,
-                        )
+                    _share_col, _dl_col = st.columns(2)
                     with _share_col:
                         _share_key = f"share_url_{port['id']}"
                         if st.session_state.get(_share_key):
                             st.code(st.session_state[_share_key], language=None)
                             st.caption("Link expires in 24 hours")
                         else:
-                            _redact = st.checkbox("Hide stock names in shared report",
-                                                   value=True, key=f"redact_{port['id']}")
                             if st.button("🔗 Share Report", key=f"share_btn_{port['id']}",
                                          use_container_width=True):
+                                _redact = st.session_state.get(f"redact_{port['id']}", True)
                                 with st.spinner("Generating share link..."):
                                     if _redact:
-                                        # Re-generate PDF with redacted holdings
                                         _share_pdf = generate_portfolio_pdf(
                                             port,
                                             st.session_state.get(f"_pdf_holdings_{port['id']}", []),
@@ -6611,6 +6600,17 @@ elif st.session_state.sb_view_mode == "portfolios":
                                         st.rerun()
                                     else:
                                         st.error(result.get("error", "Upload failed"))
+                            st.checkbox("Hide stock names in shared report",
+                                        value=True, key=f"redact_{port['id']}")
+                    with _dl_col:
+                        st.download_button(
+                            label="⬇️ Download Report",
+                            data=st.session_state[report_key],
+                            file_name=f"Kordent_{re.sub(r'[^a-zA-Z0-9]', '_', port.get('name', 'portfolio'))}_{datetime.date.today().isoformat()}.pdf",
+                            mime="application/pdf",
+                            key=f"pdf_download_{port['id']}",
+                            use_container_width=True,
+                        )
                     if st.button("✕ Clear", key=f"pdf_clear_{port['id']}"):
                         del st.session_state[report_key]
                         st.session_state.pop(f"share_url_{port['id']}", None)
