@@ -1915,9 +1915,9 @@ STOCK_PRESETS = [
 
 SCREENER_PRESETS = [
     ("🔎 Screen Indian Stocks",
-     "Find the best Indian stocks to invest in right now. Show me which stocks pass all 4 frameworks and which pass 3 out of 4 and which pass 2 out of 4, with upto top 10 from each tier. Explain why each tier is a good investment using the book philosophies."),
+     "Find the best Indian stocks to invest in right now. Show me which stocks pass all 5 frameworks and which pass 3 out of 5 and which pass 4 out of 5, with upto top 10 from each tier. Explain why each tier is a good investment using the book philosophies."),
     ("💎 Find Hidden Gems",
-     "Find hidden gem stocks — small and mid cap Indian companies outside the Nifty 50 that pass at least 3 out of 4 frameworks. Show top 10 with key metrics. Explain why each is a good investment using book philosophies."),
+     "Find hidden gem stocks — small and mid cap Indian companies outside the Nifty 50 that pass at least 4 out of 5 frameworks. Show top 10 with key metrics. Explain why each is a good investment using book philosophies."),
 ]
 
 # ══════════════════════════════════════════════
