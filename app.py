@@ -5234,7 +5234,6 @@ if st.session_state.sb_view_mode == "chat":
                         error_msg = str(e)
                         error_upper = error_msg.upper()
                         if any(err in error_upper for err in ["429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "ALL MODELS RATE-LIMITED"]):
-                            # Retry once after a short wait before falling back
                             import time
                             st.warning("API busy — retrying in 3 seconds...")
                             time.sleep(3)
@@ -5242,7 +5241,6 @@ if st.session_state.sb_view_mode == "chat":
                                 answer, model_used = agent_turn(prompt, status_container=status)
                                 status.update(label="✅ Analysis complete (retry)", state="complete")
                             except Exception:
-                                # Retry also failed — offer manual retry button instead of stale fallback
                                 st.warning("Still busy. Click below to try again.")
                                 st.session_state.pending_retry = prompt
                                 if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
