@@ -1581,6 +1581,95 @@ def generate_review_recommendations(enriched_holdings, investor_type, time_horiz
             break
     return None
 
+def validate_portfolio_ips(stocks: list, ips_policy: dict) -> dict:
+    """Deterministic IPS guardrail check. Runs on every portfolio mutation.
+    Returns pass/fail with specific violations. Book is the standard."""
+    if not ips_policy:
+        return {"valid": True, "violations": [], "warnings": []}
+
+    alloc = ips_policy.get("allocation_policy", {})
+    sizing = ips_policy.get("portfolio_sizing", {})
+    violations = []
+    warnings = []
+
+    if not stocks:
+        return {"valid": False, "violations": ["No stocks in portfolio"], "warnings": []}
+
+    # Normalize allocation_pct
+    total_alloc = sum(s.get("allocation_pct", 0) for s in stocks)
+    if total_alloc <= 0:
+        total_alloc = 100.0  # assume equal weight if not set
+
+    # ── 1. Single stock concentration ──
+    max_stock_pct = alloc.get("max_single_stock_pct", 10.0)
+    for s in stocks:
+        pct = (s.get("allocation_pct", 0) / total_alloc) * 100 if total_alloc else 0
+        if pct > max_stock_pct:
+            violations.append(
+                f"{s.get('name', s.get('ticker', '?'))} is {pct:.1f}% — exceeds {max_stock_pct}% max per stock (SEBI/Reilly & Brown)")
+
+    # ── 2. Sector concentration ──
+    max_sector_pct = alloc.get("max_sector_pct", 25.0)
+    max_same_sector = alloc.get("max_same_sector", 2)
+    min_sectors = alloc.get("min_sectors", 3)
+
+    sector_weights = {}
+    sector_counts = {}
+    for s in stocks:
+        sec = s.get("sector", "Unknown")
+        pct = (s.get("allocation_pct", 0) / total_alloc) * 100 if total_alloc else 0
+        sector_weights[sec] = sector_weights.get(sec, 0) + pct
+        sector_counts[sec] = sector_counts.get(sec, 0) + 1
+
+    for sec, weight in sector_weights.items():
+        if weight > max_sector_pct:
+            violations.append(f"Sector '{sec}' is {weight:.1f}% — exceeds {max_sector_pct}% max")
+
+    for sec, count in sector_counts.items():
+        if count > max_same_sector:
+            violations.append(f"Sector '{sec}' has {count} stocks — exceeds {max_same_sector} max same-sector")
+
+    distinct_sectors = len([s for s in sector_counts if s != "Unknown"])
+    if distinct_sectors < min_sectors:
+        violations.append(f"Only {distinct_sectors} sectors — need at least {min_sectors} (Reilly & Brown Ch 6)")
+
+    # ── 3. Cap distribution (needs risk_tier from universe CSV) ──
+    large_min = alloc.get("large_cap_min_pct", 0)
+    small_max = alloc.get("small_cap_max_pct", 100)
+    try:
+        large_weight = 0
+        small_weight = 0
+        for s in stocks:
+            ticker = s.get("ticker", "")
+            pct = (s.get("allocation_pct", 0) / total_alloc) * 100 if total_alloc else 0
+            row = universe_df[universe_df["ticker"] == ticker]
+            if not row.empty:
+                tier = row.iloc[0].get("risk_tier", "Unknown")
+                if tier == "Large":
+                    large_weight += pct
+                elif tier == "Small":
+                    small_weight += pct
+
+        if large_min > 0 and large_weight < large_min:
+            violations.append(f"Large-cap is {large_weight:.1f}% — below {large_min}% minimum")
+        if small_weight > small_max:
+            violations.append(f"Small-cap is {small_weight:.1f}% — exceeds {small_max}% maximum")
+    except Exception:
+        pass  # universe_df not available in all contexts
+
+    # ── 4. Holdings count vs book standard ──
+    book_min = sizing.get("book_minimum", 12)
+    if len(stocks) < book_min:
+        warnings.append(
+            f"Portfolio has {len(stocks)} stocks — below book minimum of {book_min}. "
+            f"Carrying meaningful unsystematic risk (Reilly & Brown Ch 6).")
+
+    return {
+        "valid": len(violations) == 0,
+        "violations": violations,
+        "warnings": warnings,
+    }
+
 
 
 def generate_ips(profile: dict, age: int = 30) -> dict:
@@ -1752,6 +1841,18 @@ def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int,
     final_target = _profile.get("target_amount") or (target_amount if target_amount > 0 else None)
     final_date = _profile.get("target_date") or (target_date if target_date else None)
 
+    # Validate against IPS before allowing save
+    _ips = _profile.get("ips_policy", {})
+    if _ips and stocks:
+        _validation = validate_portfolio_ips(stocks, _ips)
+        if not _validation["valid"]:
+            return {
+                "error": "Portfolio violates IPS allocation policy",
+                "violations": _validation["violations"],
+                "warnings": _validation.get("warnings", []),
+                "instruction": "Revise your stock selection to fix these violations, then call register_portfolio again."
+            }
+
     st.session_state.pending_portfolio = {
         "name": portfolio_name,
         "investor_type": investor_type,
@@ -1764,7 +1865,14 @@ def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int,
         "target_date": final_date,
         "is_paper": _profile.get("is_paper", False),
     }
-    return {"status": f"Portfolio '{portfolio_name}' registered with {len(stocks)} stocks. Review every {review_days} days. The user can now save it."}
+    # Include IPS warnings (under-diversified etc) in status
+    _ips = _profile.get("ips_policy", {})
+    _warnings = []
+    if _ips and stocks:
+        _val = validate_portfolio_ips(stocks, _ips)
+        _warnings = _val.get("warnings", [])
+    _warn_str = (" ⚠️ " + " | ".join(_warnings)) if _warnings else ""
+    return {"status": f"Portfolio '{portfolio_name}' registered with {len(stocks)} stocks. Review every {review_days} days.{_warn_str}"}
 
 
 # ──────────────────────────────────────────────
