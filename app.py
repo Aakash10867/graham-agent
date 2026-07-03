@@ -3940,6 +3940,39 @@ def build_user_context():
         lines.append(f"Watchlist: {wl_count} stock(s)")
     return "\n".join(lines)
 
+def resolve_stock(query: str) -> dict:
+    """Find the exact ticker for a stock the client mentions by name or partial name.
+    Call this BEFORE any analysis tool when the client uses a company name instead of a full ticker (like X.NS or X.BO).
+    Do NOT call this for conversational questions, platform questions, or when the ticker is already known.
+
+    Args:
+        query: The company name or partial name to search for.
+    """
+    matches = fuzzy_search_universe(query, universe_df)
+    good = [m for m in matches if m["match_score"] > 0.4]
+
+    if not good:
+        return {"status": "no_match", "message": f"No stocks found matching '{query}'. Ask the client for the exact company name or ticker."}
+
+    # Single match or one dominant match — resolve directly
+    if len(good) == 1:
+        m = good[0]
+        return {"status": "resolved", "ticker": m["ticker"], "name": m["name"], "score": m["score"]}
+    if good[0]["match_score"] >= 0.92 and good[1]["match_score"] < 0.80:
+        m = good[0]
+        return {"status": "resolved", "ticker": m["ticker"], "name": m["name"], "score": m["score"]}
+
+    # Multiple plausible matches — show disambiguation buttons to client
+    st.session_state.pending_disambiguation = {
+        "original_query": st.session_state.get("_last_user_message", query),
+        "matches": good[:10],
+    }
+    return {
+        "status": "ambiguous",
+        "message": f"Multiple companies match '{query}'. The client will see buttons to pick the right one — wait for their selection before proceeding.",
+        "matches": [{"ticker": m["ticker"], "name": m["name"]} for m in good[:6]]
+    }
+
 
 def navigate_to(view: str) -> dict:
     """Open a platform feature for the client. Call this when the client wants to ACT on a feature, not when they are just asking about it.
@@ -3978,6 +4011,7 @@ TOOLS = [
     get_sip_candidates,
     register_portfolio,
     navigate_to,
+    resolve_stock,
 ]
 
 tool_functions = {
@@ -3999,6 +4033,7 @@ tool_functions = {
     "get_sip_candidates": get_sip_candidates,
     "register_portfolio": register_portfolio,
     "navigate_to": navigate_to,
+    "resolve_stock": resolve_stock,
 }
 
 
@@ -4091,6 +4126,7 @@ You have 11 tools available. Pick the right combination for each question — yo
 16. get_sip_candidates — Build a SIP portfolio from a builder profile. Takes sip_amount, time_horizon, investor_type, review_freq, and avoid_sectors (a JSON string list of sector names to exclude, e.g. '["Energy"]'; pass '[]' for no exclusions). Returns pre-filtered candidates with a min/max stock count range. You decide the exact count based on candidate quality.
 17. register_portfolio — After presenting your finalized SIP portfolio, call this to register it for saving. Pass portfolio_name, investor_type, sip_amount, time_horizon, review_days (integer), stocks_json (JSON string list with ticker/name/sector/allocation_pct per item), portfolio_profile (JSON string of the full builder profile), target_amount (number, 0 if no goal), and target_date (ISO date string, empty if no goal). ALWAYS call this after presenting the final portfolio table.
 18. navigate_to — Open a platform feature for the client. Pass view as one of: builder, import, portfolios, watchlist, backtest, settings. Use when they want to ACT: "build me a portfolio" → navigate_to("builder"), "I have stocks on Zerodha" → navigate_to("import"), "show my portfolios" → navigate_to("portfolios"), "any picks this week" → navigate_to("watchlist"), "does this work" → navigate_to("backtest"). Do NOT navigate when they are just asking about a feature — explain first, then offer.
+19. resolve_stock — Resolve a company name to its exact ticker. Call this FIRST when the client mentions a stock by name or partial name (e.g. "infosys", "hdfc bank", "capacite") instead of a full ticker (INFY.NS). Returns the resolved ticker if unambiguous, or shows the client disambiguation buttons if multiple matches exist. If the status is "ambiguous", STOP and tell the client you have shown them options to choose from — do not proceed with analysis until they pick.
 
 SIP PORTFOLIO PROTOCOL:
 Portfolio building uses the embedded Builder form (🏗️ Build Portfolio sidebar button). When you receive a message starting with [BUILDER_PROFILE], you must execute a strict 2-Phase process.
@@ -4115,6 +4151,7 @@ PHASE 2: FINALIZE & REGISTER (TRIGGERED ONLY AFTER USER REPLIES)
 If someone asks to build a portfolio WITHOUT a [BUILDER_PROFILE] prefix, direct them to click the 🏗️ Build Portfolio button in the sidebar. If they insist or provide enough info inline, you may proceed by mapping their inputs to the profile parameters.
 
 TOOL SELECTION RULES:
+- TICKER RESOLUTION: If the client uses a company name (not a full .NS/.BO ticker), call resolve_stock FIRST. If it returns "ambiguous", stop and wait — the client will pick from buttons. If it returns "resolved", proceed with the resolved ticker. If they already gave a ticker like RELIANCE.NS, skip resolve_stock.
 - For a comprehensive stock analysis: call get_stock_data + get_historical_trends + get_financial_statements (income) + calculate_graham_value + search_book.
 - For "is this stock a good investment" type questions: use at minimum get_stock_data + get_historical_trends + calculate_graham_value + search_book.
 - For "how has X performed" questions: use get_price_history.
@@ -4724,23 +4761,7 @@ if st.session_state.sb_view_mode == "chat":
                             st.rerun()
 
         if prompt:
-            # ── Fuzzy search: disambiguate before LLM call ──
-            _is_builder = prompt.startswith("[BUILDER_PROFILE]")
-            _is_disambiguated = "(company:" in prompt and "ticker:" in prompt
-            if not _is_disambiguated and not _is_builder:
-                _fz = fuzzy_search_universe(prompt, universe_df)
-                _good = [m for m in _fz if m["match_score"] > 0.4]
-                # Only skip disambiguation if there's EXACTLY one strong match
-                _exact = [m for m in _good if m["match_score"] >= 0.95]
-                if len(_exact) == 1 and len(_good) <= 1:
-                    pass  # single exact match — go straight to LLM
-                elif len(_good) >= 2:
-                    st.session_state.pending_disambiguation = {
-                        "original_query": prompt,
-                        "matches": _good[:10],
-                    }
-                    st.rerun()
-
+            st.session_state._last_user_message = prompt
             st.session_state.messages.append({"role": "user", "content": prompt})
             with st.chat_message("user", avatar=USER_AVATAR):
                 st.markdown(prompt)
@@ -4777,6 +4798,9 @@ if st.session_state.sb_view_mode == "chat":
                     if st.session_state.get("_pending_navigate"):
                         st.session_state.sb_view_mode = st.session_state._pending_navigate
                         st.session_state.pop("_pending_navigate", None)
+                        st.rerun()
+
+                    if st.session_state.get("pending_disambiguation"):
                         st.rerun()
 
                     # ── Score History Chart (single-stock analysis) ──
