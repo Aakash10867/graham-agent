@@ -1583,6 +1583,143 @@ def generate_review_recommendations(enriched_holdings, investor_type, time_horiz
 
 
 
+def generate_ips(profile: dict, age: int = 30) -> dict:
+    """Derive a formal Investment Policy Statement from builder profile inputs.
+    Based on Reilly & Brown — Investment Analysis & Portfolio Management, Ch 2 & 6.
+    The book is the definitive standard. The system adapts to the book, not the reverse.
+    """
+    investor_type = profile.get("investor_type", "balanced")
+    time_horizon = profile.get("time_horizon", "medium")
+    preference = profile.get("preference", "growth")
+    sip_amount = profile.get("sip_amount", 5000)
+    philosophy = profile.get("philosophy", "growth_at_fair_price")
+
+    # ── Life cycle phase from age (Ch 2, Exhibit 2.1) ──
+    if age < 35:
+        life_cycle = "accumulation"
+    elif age < 55:
+        life_cycle = "consolidation"
+    elif age < 70:
+        life_cycle = "spending"
+    else:
+        life_cycle = "gifting"
+
+    # ── Return objective (Ch 2, Section 2.4.1) ──
+    if preference == "income" or investor_type == "defensive":
+        if time_horizon == "short":
+            return_objective = "capital_preservation"
+        else:
+            return_objective = "current_income"
+    elif investor_type == "enterprising":
+        return_objective = "capital_appreciation"
+    else:
+        return_objective = "total_return"
+
+    # ── Benchmark ──
+    if investor_type == "defensive":
+        benchmark = "NIFTY50"
+    elif investor_type == "enterprising":
+        benchmark = "NIFTY500"
+    else:
+        benchmark = "NIFTY200"
+
+    # ══════════════════════════════════════════════════════════
+    # PORTFOLIO SIZING — from the book, not from our system
+    # Evans & Archer (1968): 12-18 stocks for ~90% benefit
+    # Statman (1987): 30-40 optimal with costs
+    # Campbell et al. (2001): ~50 for full diversification
+    # ══════════════════════════════════════════════════════════
+    BOOK_MIN_STOCKS = 12
+    BOOK_RECOMMENDED_STOCKS = 20
+    BOOK_OPTIMAL_STOCKS = 40
+
+    # What the SIP can actually support (affordability)
+    # Use ₹500 as reference per-stock minimum (median NSE small/mid price)
+    affordable_stocks = max(3, sip_amount // 500)
+
+    # IPS target follows the book
+    if investor_type == "defensive":
+        ips_target_stocks = max(BOOK_MIN_STOCKS, 15)
+    elif investor_type == "enterprising":
+        ips_target_stocks = max(BOOK_MIN_STOCKS, 12)
+    else:
+        ips_target_stocks = max(BOOK_MIN_STOCKS, 15)
+
+    # Diversification gap — honest assessment
+    if affordable_stocks >= ips_target_stocks:
+        diversification_status = "adequate"
+        sip_needed_for_target = sip_amount
+    elif affordable_stocks >= BOOK_MIN_STOCKS:
+        diversification_status = "acceptable"
+        sip_needed_for_target = ips_target_stocks * 500
+    else:
+        diversification_status = "under_diversified"
+        sip_needed_for_target = BOOK_MIN_STOCKS * 500
+
+    actual_stocks = min(affordable_stocks, ips_target_stocks)
+
+    # ══════════════════════════════════════════════════════════
+    # CONCENTRATION LIMITS — book + SEBI norms
+    # Book Ch 2: mutual funds limited to 5% per stock
+    # SEBI: 10% max in single stock for mutual funds
+    # Book Ch 6: same-sector = high correlation = poor diversification
+    # ══════════════════════════════════════════════════════════
+    _equal_weight = round(100 / max(actual_stocks, 5), 1)
+    max_single_stock_pct = min(10.0, max(_equal_weight, 5.0))
+    max_sector_pct = 25.0
+
+    if actual_stocks <= 10:
+        max_same_sector = 2
+    elif actual_stocks <= 20:
+        max_same_sector = 3
+    else:
+        max_same_sector = 4
+
+    min_sectors = max(3, actual_stocks // 3)
+
+    # Cap distribution — book Ch 7 Fama-French size factor
+    cap_policy = {
+        "defensive":    {"large_cap_min_pct": 50, "mid_cap_min_pct": 20, "small_cap_max_pct": 10},
+        "balanced":     {"large_cap_min_pct": 30, "mid_cap_min_pct": 20, "small_cap_max_pct": 25},
+        "enterprising": {"large_cap_min_pct": 20, "mid_cap_min_pct": 20, "small_cap_max_pct": 35},
+    }.get(investor_type, {"large_cap_min_pct": 30, "mid_cap_min_pct": 20, "small_cap_max_pct": 25})
+
+    return {
+        "return_objective": return_objective,
+        "risk_tolerance": investor_type,
+        "life_cycle_phase": life_cycle,
+        "age": age,
+        "time_horizon": time_horizon,
+        "benchmark": benchmark,
+        "constraints": {
+            "liquidity": "monthly_sip",
+            "tax_awareness": "dynamic",
+            "sector_exclusions": profile.get("avoid_sectors", []),
+            "unique_preferences": profile.get("acceptable_tradeoff", "any"),
+        },
+        "portfolio_sizing": {
+            "book_minimum": BOOK_MIN_STOCKS,
+            "book_recommended": BOOK_RECOMMENDED_STOCKS,
+            "book_optimal": BOOK_OPTIMAL_STOCKS,
+            "ips_target": ips_target_stocks,
+            "affordable": affordable_stocks,
+            "actual": actual_stocks,
+            "diversification_status": diversification_status,
+            "sip_for_book_minimum": BOOK_MIN_STOCKS * 500,
+            "sip_for_ips_target": sip_needed_for_target,
+        },
+        "allocation_policy": {
+            "max_single_stock_pct": max_single_stock_pct,
+            "max_sector_pct": max_sector_pct,
+            "max_same_sector": max_same_sector,
+            "min_sectors": min_sectors,
+            **cap_policy,
+        },
+        "framework_weights": profile.get("framework_weights", {}),
+        "philosophy": philosophy,
+    }
+
+
 def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int, time_horizon: str, review_days: int = 90, stocks_json: str = "[]", portfolio_profile: str = "{}", target_amount: float = 0, target_date: str = "", decision_context: str = "") -> dict:
     """Register a finalized SIP portfolio so the user can save it to their account.
     Call this ONLY after you have presented the final portfolio table with all stocks and allocations.
@@ -3614,11 +3751,15 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
     df = df[df["years_of_data"] >= 2]
     df = df[pd.notna(df["pe"]) & pd.notna(df["roe_pct"]) & pd.notna(df["de"])]
     df = df[df["pe"] > 0]  # Exclude negative P/E (loss-making)
-    # ── Affordability filter: every stock must be buyable (≥1 share) at equal weight ──
+    # ── Affordability filter (Sprint 11: IPS-aware, book standard) ──
+    # Book says 12-20 stocks minimum. Price filter must support that.
+    # A stock is affordable if ≥1 share can be bought at equal weight across target count.
+    # Prefer lower-priced stocks: more shares = finer rebalancing + lower per-unit risk.
     if "price" in df.columns:
-        _max_stocks = min(20, sip_amount // 750)
-        _min_stocks = max(5, _max_stocks // 3)
-        _max_price = sip_amount / _min_stocks
+        _affordable_count = max(3, sip_amount // 500)  # How many stocks SIP can support
+        _ips_target = max(12, _affordable_count)        # Book minimum is 12
+        _actual_target = min(_affordable_count, _ips_target)
+        _max_price = sip_amount / max(5, _actual_target)
         _affordable = df[df["price"] <= _max_price]
         if len(_affordable) >= 10:
             df = _affordable
@@ -3639,7 +3780,7 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
         div_payers = df[pd.notna(df["dividend_yield_pct"]) & (df["dividend_yield_pct"] > 0)]
         if len(div_payers) >= 15:
             df = div_payers
-        target_count = 30
+        target_count = 50  # Sprint 11: larger pool for book-standard 12-15 stock picks
 
     elif investor_type == "balanced":
         # Quality + value balance
@@ -3648,7 +3789,7 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
         quality = df[(df["greenblatt_pass"] == True) | (df["dorsey_pass"] == True)]
         if len(quality) >= 20:
             df = quality
-        target_count = 40
+        target_count = 60  # Sprint 11: larger pool for book-standard 12-20 stock picks
 
     elif investor_type == "enterprising":
         # Growth-tilted: Greenblatt + Trajectory preferred
@@ -3657,11 +3798,11 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
         growers = df[df["trajectory_pass"] == True]
         if len(growers) >= 20:
             df = growers
-        target_count = 50
+        target_count = 60  # Sprint 11: larger pool for book-standard 12+ stock picks
 
     else:
         df = df[df["score"] >= 2]
-        target_count = 40
+        target_count = 60
 
     # ── Risk tier caps: limit small-cap exposure by profile ──
     if "risk_tier" in df.columns:
@@ -3708,12 +3849,15 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
     df["_sort_pe"] = df["pe"].apply(lambda x: x if pd.notna(x) else 9999)
     df["_sort_roe"] = df["roe_pct"].apply(lambda x: -x if pd.notna(x) else 9999)
     df["_sort_growth"] = df["revenue_cagr_3y"].apply(lambda x: -x if pd.notna(x) else 9999)
+    # Sprint 11: Price preference — at equal quality, lower price gives more shares
+    # per SIP cycle = finer rebalancing granularity (Reilly & Brown diversification theory)
+    df["_sort_price"] = df["price"].apply(lambda x: x if pd.notna(x) else 99999)
     if investor_type == "defensive":
-        df = df.sort_values(["_composite", "_sort_pe", "_sort_roe"], ascending=[False, True, True])
+        df = df.sort_values(["_composite", "_sort_pe", "_sort_roe", "_sort_price"], ascending=[False, True, True, True])
     elif investor_type == "enterprising":
-        df = df.sort_values(["_composite", "_sort_growth", "_sort_roe"], ascending=[False, True, True])
+        df = df.sort_values(["_composite", "_sort_growth", "_sort_roe", "_sort_price"], ascending=[False, True, True, True])
     else:
-        df = df.sort_values(["_composite", "_sort_roe", "_sort_pe"], ascending=[False, True, True])
+        df = df.sort_values(["_composite", "_sort_roe", "_sort_pe", "_sort_price"], ascending=[False, True, True, True])
 
     # ── Trim to target count ──
     df = df.head(target_count)
@@ -3775,8 +3919,11 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
 
     candidates = _sanitize(candidates)
 
-    max_stocks = min(20, sip_amount // 750)
-    min_stocks = max(5, max_stocks // 3)
+    # Sprint 11: Book-standard sizing (Reilly & Brown Ch 6)
+    # Book minimum: 12 stocks. System adapts to book, not reverse.
+    _affordable_count = max(3, sip_amount // 500)
+    max_stocks = min(30, _affordable_count)        # Cap at 30 (book's practical upper bound)
+    min_stocks = max(5, min(12, _affordable_count)) # Book says 12, but can't exceed what SIP affords
 
     fringe_candidates = []
     try:
@@ -3810,16 +3957,17 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
         "fringe_candidates": fringe_candidates, # Inject fringe list here
         "selection_instruction": (
             f"You have {len(candidates)} pre-filtered candidates. "
-            f"Pick between {min_stocks} and {max_stocks} stocks. YOU decide the exact count — "
-            f"it depends on how many candidates are genuinely strong, not a formula. "
-            f"Research shows ~15 stocks eliminates ~85% of unsystematic risk. But 8 excellent picks beat 15 mediocre ones. Never pad. "
+            f"Pick between {min_stocks} and {max_stocks} stocks. "
+            f"BOOK STANDARD (Reilly & Brown Ch 6): 12 stocks minimum for 90% diversification benefit. "
+            f"Below 12, the portfolio carries meaningful unsystematic risk — state this honestly if SIP constrains you below 12. "
+            f"Target: pick {min_stocks}-{min(max_stocks, 20)} stocks. Never pad with mediocre picks, but do not under-diversify when good candidates exist. "
             f"Use search_book to pull Graham/Greenblatt/Dorsey wisdom relevant to this {investor_type} profile with {time_horizon}-term horizon. "
             f"Use pe_vs_avg to check if a stock is cheap relative to its own history (negative = discount, positive = premium). "
             f"Use pct_from_high to spot stocks near 52-week lows (potential value) vs near highs (potential overvaluation). "
             f"Use revenue_cagr_3y and ni_cagr_3y to assess growth trajectory beyond single-year noise. "
             f"Use beta to assess how much each stock moves with the market — relevant for portfolio-level risk. "
             f"Apply qualitative moat assessment (Dorsey) — check ROE trends to see if moat is stable or eroding. "
-            f"Enforce max 2 stocks per sector for diversification. "
+            f"Enforce sector limits from the ALLOCATION POLICY in [BUILDER_PROFILE] (max same-sector stocks, max sector %). "
             f"Each candidate has a risk_tier (Large/Mid/Small) and liquidity_flag. "
             f"Small-cap stocks are capped at {int({'defensive': 10, 'balanced': 20, 'enterprising': 30}.get(investor_type, 20))}% "
             f"for this {investor_type} profile. Illiquid stocks (avg volume < 50k/day) are excluded. "
@@ -3828,6 +3976,13 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
             f"(2) whether any single sector exceeds 30% allocation — if so, rebalance, "
             f"(3) whether the portfolio beta is balanced — avoid loading up on all high-beta or all low-beta stocks. "
             f"If the portfolio fails these checks, revise your selection before outputting. "
+            f"IMPORTANT: The [BUILDER_PROFILE] message contains an ALLOCATION POLICY section with hard constraints "
+            f"derived from Reilly & Brown IPS theory (max single stock %, max sector %, min sectors, cap distribution). "
+            f"Your final portfolio MUST satisfy ALL of them. If you cannot find enough qualifying stocks to meet "
+            f"min sector requirements, pick the best available from under-represented sectors even at lower scores. "
+            f"PRICE PREFERENCE: When two candidates have similar scores/quality, prefer the lower-priced stock. "
+            f"Lower price = more shares per SIP cycle = finer rebalancing granularity = lower per-unit risk. "
+            f"A ₹100 stock where you buy 5 shares is better for portfolio management than a ₹2000 stock where you buy 1. "
             f"Allocate the monthly SIP of INR {sip_amount} across selected stocks. "
             f"For each pick, be prepared to explain WHY it fits this investor using book philosophy. "
             f"CRITICAL: If the user's message started with [BUILDER_PROFILE], you are in PHASE 1. DO NOT output the portfolio table yet. DO NOT call register_portfolio. Use this data ONLY to formulate your 1-3 clarification questions."
@@ -5806,6 +5961,13 @@ elif st.session_state.sb_view_mode == "builder":
         st.divider()
         st.markdown("#### 📋 Your Preferences")
 
+        # Age (outside form — interactive, like SIP calculator)
+        _calc_age = st.number_input(
+            "🎂 Your age",
+            min_value=18, max_value=80, value=30, step=1,
+            help="Helps us tailor risk and time horizon to your life stage.",
+        )
+
         with st.form("portfolio_builder_form"):
             # Q4 — Risk tolerance
             _b_risk_resp = st.radio(
@@ -5984,6 +6146,10 @@ elif st.session_state.sb_view_mode == "builder":
                 "acceptable_tradeoff": _b_tradeoff_val,
                 "framework_weights": _framework_weights.get(_b_philosophy_val, {}),
             }
+            # Sprint 11: Generate IPS from profile (book is the standard)
+            _b_ips = generate_ips(_b_profile, age=_calc_age)
+            _b_profile["ips_policy"] = _b_ips
+            _b_profile["age"] = _calc_age
             st.session_state.builder_profile = _b_profile
 
             # ── Build the chat prompt that triggers stock selection ──
@@ -6005,7 +6171,24 @@ elif st.session_state.sb_view_mode == "builder":
                 f"- Minimum score: {_b_min_score}/5\n"
                 f"- Acceptable trade-off: {_b_tradeoff_val}\n"
                 f"- Framework weights: {_framework_weights.get(_b_philosophy_val, {})}\n"
-                f"- Review: every {_b_rev_days} days ({_b_rev_freq})"
+                f"- Review: every {_b_rev_days} days ({_b_rev_freq})\n"
+                f"- Age: {_calc_age} | Life cycle: {_b_ips['life_cycle_phase']}\n"
+                f"- Return objective: {_b_ips['return_objective']}\n"
+                f"- Benchmark: {_b_ips['benchmark']}\n"
+                f"- Diversification: {_b_ips['portfolio_sizing']['diversification_status']} "
+                f"(can afford {_b_ips['portfolio_sizing']['affordable']} stocks, "
+                f"book minimum {_b_ips['portfolio_sizing']['book_minimum']}, "
+                f"IPS target {_b_ips['portfolio_sizing']['ips_target']})\n"
+                f"- ALLOCATION POLICY (hard constraints from Reilly & Brown IPS — do not violate):\n"
+                f"  Target stocks: {_b_ips['portfolio_sizing']['actual']}\n"
+                f"  Max single stock: {_b_ips['allocation_policy']['max_single_stock_pct']}%\n"
+                f"  Max single sector: {_b_ips['allocation_policy']['max_sector_pct']}%\n"
+                f"  Max same-sector stocks: {_b_ips['allocation_policy']['max_same_sector']}\n"
+                f"  Min distinct sectors: {_b_ips['allocation_policy']['min_sectors']}\n"
+                f"  Large cap minimum: {_b_ips['allocation_policy']['large_cap_min_pct']}%\n"
+                f"  Small cap maximum: {_b_ips['allocation_policy']['small_cap_max_pct']}%\n"
+                f"  PRICE PREFERENCE: When two candidates have similar scores and quality, prefer the lower-priced stock — "
+                f"it gives more shares per SIP cycle, enabling finer rebalancing and lower per-unit risk."
                 f"{_goal_line}{_avoid_line}{_paper_line}"
             )
             st.session_state.sb_view_mode = "chat"
