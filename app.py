@@ -1,5 +1,3 @@
-# TODO Sprint 8: Polish, completions, Sprint 7 fixes, XIRR everywhere, review reminders, paper auto-SIP, paper→real, Kite CSV.
-# TODO Sprint 10: "What can you do?" fuzzy match fix (needs Gemini web grounding for intent classification)
 """
 Kordent
 ========================
@@ -3990,6 +3988,68 @@ def navigate_to(view: str) -> dict:
                    "watchlist": "Watchlist", "backtest": "Does It Work?", "settings": "Settings"}
     return {"status": f"Opening {view_labels.get(view, view)}. The client will see it momentarily."}
 
+def get_web_context(query: str) -> dict:
+    """Search the web for recent real-world context about a company, sector, or macro topic.
+    Use this to ground your analysis in current events. Call for EVERY stock in a positive verdict
+    (STRONG BUY, BUY, CONDITIONAL BUY) and for EVERY shortlisted candidate during portfolio construction.
+    Also use for macro context like inflation outlook, RBI policy, or sector headwinds.
+
+    Args:
+        query: A specific search query (e.g. "Infosys recent news regulatory actions 2026",
+               "India pharma sector headwinds 2026", "India CPI inflation RBI outlook 2026").
+    """
+    client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+
+    search_prompt = f """Search the web and provide a concise summary of the most recent and material information for this query:
+
+"{query}"
+
+Focus on:
+- Material events from the last 90 days (regulatory actions, management changes, fraud/investigations, major contracts, earnings surprises, M&A)
+- Sector-level headwinds or tailwinds
+- Macro context if relevant (RBI policy, inflation, commodity cycles)
+
+Rules:
+- Lead with the MOST material item first
+- Include dates where possible
+- If nothing material is found, say "No material recent developments found" — do NOT fabricate
+- Keep the summary to 5-8 bullet points maximum
+- Cite source names (e.g. "per Economic Times", "per SEBI filing") where possible"""
+
+    last_good = st.session_state.get("last_working_model")
+    if last_good and last_good in FREE_MODELS:
+        models_to_try = [last_good] + [m for m in FREE_MODELS if m != last_good]
+    else:
+        models_to_try = FREE_MODELS
+
+    for model_name in models_to_try:
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=search_prompt,
+                config=types.GenerateContentConfig(
+                    tools=[types.Tool(google_search=types.GoogleSearch())],
+                ),
+            )
+            st.session_state["last_working_model"] = model_name
+            summary = ""
+            try:
+                summary = response.text or ""
+            except Exception:
+                for part in response.candidates[0].content.parts:
+                    if hasattr(part, 'text') and part.text:
+                        summary += part.text
+            if not summary.strip():
+                return {"query": query, "context": "No material recent developments found."}
+            return {"query": query, "context": summary.strip()}
+        except Exception as e:
+            error_msg = str(e).upper()
+            if any(err in error_msg for err in ["429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "500"]):
+                continue
+            return {"query": query, "error": f"Web search failed: {str(e)}"}
+
+    return {"query": query, "error": "All models exhausted — web search unavailable this turn."}
+
 
 # ──────────────────────────────────────────────
 # TOOLS REGISTRY
@@ -4014,6 +4074,7 @@ TOOLS = [
     register_portfolio,
     navigate_to,
     resolve_stock,
+    get_web_context,
 ]
 
 tool_functions = {
@@ -4036,6 +4097,7 @@ tool_functions = {
     "register_portfolio": register_portfolio,
     "navigate_to": navigate_to,
     "resolve_stock": resolve_stock,
+    "get_web_context": get_web_context,
 }
 
 
@@ -4129,6 +4191,7 @@ You have 11 tools available. Pick the right combination for each question — yo
 17. register_portfolio — After presenting your finalized SIP portfolio, call this to register it for saving. Pass portfolio_name, investor_type, sip_amount, time_horizon, review_days (integer), stocks_json (JSON string list with ticker/name/sector/allocation_pct per item), portfolio_profile (JSON string of the full builder profile), target_amount (number, 0 if no goal), and target_date (ISO date string, empty if no goal). ALWAYS call this after presenting the final portfolio table.
 18. navigate_to — Open a platform feature for the client. Pass view as one of: builder, import, portfolios, watchlist, backtest, settings. Use when they want to ACT: "build me a portfolio" → navigate_to("builder"), "I have stocks on Zerodha" → navigate_to("import"), "show my portfolios" → navigate_to("portfolios"), "any picks this week" → navigate_to("watchlist"), "does this work" → navigate_to("backtest"). Do NOT navigate when they are just asking about a feature — explain first, then offer.
 19. resolve_stock — Resolve a company name to its exact ticker. Call this FIRST when the client mentions a stock by name or partial name (e.g. "infosys", "hdfc bank", "capacite") instead of a full ticker (INFY.NS). Returns the resolved ticker if unambiguous, or shows the client disambiguation buttons if multiple matches exist. If the status is "ambiguous", STOP and tell the client you have shown them options to choose from — do not proceed with analysis until they pick.
+20. get_web_context — Search the web for recent real-world context. Use for: company-specific due diligence (news, regulatory actions, management changes, investigations), sector headwinds/tailwinds, macro context (inflation, RBI policy, commodity cycles). MANDATORY for every stock with a positive verdict (STRONG BUY, BUY, CONDITIONAL BUY) and every shortlisted candidate during portfolio construction. Pass a specific, targeted query — not a vague ask.
 
 SIP PORTFOLIO PROTOCOL:
 Portfolio building uses the embedded Builder form (🏗️ Build Portfolio sidebar button). When you receive a message starting with [BUILDER_PROFILE], you must execute a strict 2-Phase process.
@@ -4136,9 +4199,10 @@ Portfolio building uses the embedded Builder form (🏗️ Build Portfolio sideb
 PHASE 1: DRAFT & INTERROGATE (DO NOT SHOW THE PORTFOLIO YET)
 1. Call get_sip_candidates with the profile parameters.
 2. Silently construct a "V1" portfolio in your mind. Do NOT output a table, do NOT list the stocks, and do NOT call register_portfolio.
-3. Analyze the trade-offs in your V1 draft and review the "fringe_candidates" returned by the tool.
-4. Output a brief, layman-friendly summary of the strategy you are considering.
-5. Ask the user 1 to 3 targeted questions to refine the build. 
+3. Call get_web_context for EACH stock in your V1 shortlist (e.g. "Infosys recent news developments 2026"). If any candidate has material red flags (investigation, fraud, regulatory action, management crisis), drop it and pick the next-best from the pool. Also call get_web_context for the key sectors you are allocating to (e.g. "India IT sector outlook 2026") to check for sector-level headwinds.
+4. Analyze the trade-offs in your V1 draft and review the "fringe_candidates" returned by the tool.
+5. Output a brief, layman-friendly summary of the strategy you are considering.
+6. Ask the user 1 to 3 targeted questions to refine the build.
    - RULE: Speak to them as a layman. Do NOT use jargon like "Graham", "Dorsey", "moat", "beta", or "PE expansion". 
    - Example (Fringe Candidate): "I found a highly profitable company that fits your goals perfectly, but it's in the Energy sector which you asked to avoid. Are you open to making an exception for a top-tier performer?"
    - Example (Risk Trade-off): "To hit your target, we need a bit more growth. Would you prefer adding a fast-growing but bumpier stock, or stick to steady, slow-moving giants?"
@@ -4232,6 +4296,7 @@ For CONDITIONAL BUY (the key innovation — this is where you add the most value
 - State the THESIS: what story does the passing frameworks tell?
 - State the ANTI-THESIS: what story does the failing frameworks tell?
 - Use _book_reasoning principles to weigh these against each other
+- REAL-WORLD CHECK: You MUST call get_web_context for this company. Incorporate recent developments into your thesis — a CONDITIONAL BUY without real-world context is not defensible. If recent news strengthens the thesis, say so. If it weakens it, say so and adjust monitoring triggers accordingly.
 - Identify a CATALYST: what event or development would validate the thesis?
 - State INVALIDATION CONDITIONS: what would change this to AVOID or SELL?
 - Conclude with a Committee Note on position sizing (smaller than BUY), and what to monitor
@@ -4259,6 +4324,7 @@ Before finalizing your analysis for any stock with a positive verdict:
 Step A: Call get_stock_data for that ticker. Read the earnings_quality block.
         If anomaly_flags contains ANY "RED FLAG" → note this prominently. The deterministic verdict stands (quality gate already accounts for this), but you MUST flag it in your explanation.
 Step B: If anything looks unusual in the data (P/E < 3, ROE > 50%, dramatic YoY swings), call search_book with a relevant query to check for value trap patterns.
+Step C: Call get_web_context for the specific company (e.g. "Infosys recent news SEBI regulatory 2026"). If the results reveal material negative developments (investigation, fraud allegations, management exodus, regulatory action), you MUST note this prominently in your Committee Note. The deterministic verdict stands, but the client deserves to know the real-world context. For CONDITIONAL BUY, web context is what makes the thesis defensible — without it, the verdict is incomplete.
 VERIFICATION DOES NOT APPLY TO: Simple data lookups, WATCH/AVOID/SELL verdicts, conversational messages.
 
 EXECUTION PROTOCOL:
@@ -4334,7 +4400,8 @@ AUDIT CHECKLIST (use the Independent data, not the Analyst's claims):
 2. For every stock where the Analyst issues STRONG BUY, BUY, or CONDITIONAL BUY: check if cash_conversion < 0.5. If so, the positive verdict must be flagged.
 3. If the Independent data contains RED FLAG entries for a stock the Analyst recommended positively, but the Analyst did not mention or address those flags, the draft is invalid.
 4. For CONDITIONAL BUY verdicts: verify the Analyst stated BOTH a thesis AND invalidation conditions. A CONDITIONAL BUY without invalidation conditions is incomplete.
-5. If Independent Earnings Quality Data is empty (no tickers found or no flags raised), the draft is likely safe on this dimension.
+5. For CONDITIONAL BUY verdicts: verify the Analyst incorporated recent real-world context (news, regulatory, sector developments) into the thesis. A CONDITIONAL BUY without real-world context is incomplete.
+6. If Independent Earnings Quality Data is empty (no tickers found or no flags raised), the draft is likely safe on this dimension.
 
 CRITICAL BYPASS RULES (Auto-Approve):
 - If the Analyst is simply asking the user a question (such as the portfolio builder sequence), reply EXACTLY with: [APPROVED]
