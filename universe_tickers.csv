@@ -562,7 +562,6 @@ ticker,name,exchange
 516108.BO,South India Paper Mills Ltd.,BSE
 516110.BO,FAMILY CARE HOSPITALS LIMITED,BSE
 517035.BO,RIR POWER ELECTRONICS LIMITED,BSE
-517044.BO,International Data Managements Ltd.,BSE
 517063.BO,Jetking Infotrain Ltd.,BSE
 517077.BO,Ind-Agiv Commerce Ltd.,BSE
 517096.BO,Aplab Ltd.,BSE
@@ -1546,6 +1545,7 @@ ticker,name,exchange
 538521.BO,YAAN ENTERPRISES LIMITED,BSE
 538539.BO,ANNVRRIDHHI VENTURES LIMITED,BSE
 538540.BO,RAAMA FINANCE LIMITED,BSE
+538542.BO,GoldCoin Health Foods Limited,BSE
 538546.BO,Bansal Roofing Products Limited,BSE
 538556.BO,Arman Holdings Limited,BSE
 538563.BO,SMT ENGINEERING LIMITED,BSE
@@ -2623,6 +2623,7 @@ ticker,name,exchange
 544800.BO,ANUBHAV PLAST LIMITED,BSE
 544804.BO,Riyaasat Lifestyle Limited,BSE
 544805.BO,Jivial Industries Limited,BSE
+544807.BO,CRAZY SNACKS LIMITED,BSE
 555555.BO,ICICI Prudential Mutual Fund,BSE
 590103.BO,Reliance Mutual Fund-Permitted,BSE
 590104.BO,Reliance Mutual Fund-Permitted,BSE
@@ -2734,6 +2735,7 @@ AGARIND.NS,Agarwal Industrial Corporation Limited,NSE
 AGARWALEYE.NS,Dr. Agarwal's Health Care Limited,NSE
 AGI.NS,AGI Greenpac Limited,NSE
 AGIIL.NS,Agi Infra Limited,NSE
+AGL.NS,Allcargo Global Limited,NSE
 AGRITECH.NS,Agri-Tech (India) Limited,NSE
 AGROPHOS.NS,Agro Phos India Limited,NSE
 AHCL.NS,Anlon Healthcare Limited,NSE
