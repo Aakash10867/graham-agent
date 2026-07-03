@@ -319,6 +319,7 @@ def fetch_fundamentals(ticker, retries=3):
                     avg_vol = vols.mean()
                     if avg_vol > 0:
                         data["vol_spike_flag"] = bool(vols.iloc[-1] > (3 * avg_vol))
+                        data["avg_daily_volume"] = round(float(avg_vol), 0)
 
                     # 14-day RSI
                     if len(closes) > 14:
@@ -626,7 +627,8 @@ def main():
         "pe_4y_avg", "pe_vs_avg",
         "rev_growth", "ni_growth", "debt_growth",
         "revenue_cagr_3y", "ni_cagr_3y",
-        "price_1d_pct", "price_5d_pct", "rsi_14", "vol_spike_flag",
+        "price_1d_pct", "price_5d_pct", "rsi_14", "vol_spike_flag", "avg_daily_volume",
+        "risk_tier", "liquidity_flag",
         "years_of_data",
         "revenue_y0", "revenue_y1", "revenue_y2", "revenue_y3",
         "net_income_y0", "net_income_y1", "net_income_y2", "net_income_y3",
@@ -696,6 +698,29 @@ def main():
     # Only keep columns that exist
     columns = [c for c in columns if c in df.columns]
     df = df[columns].sort_values("ticker").reset_index(drop=True)
+
+    # ── Risk tier and liquidity flag ──
+    def _risk_tier(mcap):
+        if pd.isna(mcap) or mcap is None:
+            return "Unknown"
+        if mcap >= 2e11:      # ≥ ₹20,000 Cr
+            return "Large"
+        elif mcap >= 5e10:    # ≥ ₹5,000 Cr
+            return "Mid"
+        else:
+            return "Small"
+
+    if "market_cap" in df.columns:
+        df["risk_tier"] = df["market_cap"].apply(_risk_tier)
+    else:
+        df["risk_tier"] = "Unknown"
+
+    if "avg_daily_volume" in df.columns:
+        df["liquidity_flag"] = df["avg_daily_volume"].apply(
+            lambda v: "illiquid" if pd.notna(v) and v < 50000 else "liquid"
+        )
+    else:
+        df["liquidity_flag"] = "Unknown"
 
     # Add metadata
     df["updated_date"] = datetime.now().strftime("%Y-%m-%d")
