@@ -463,7 +463,7 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
                                      TableStyle, PageBreak, HRFlowable, KeepTogether)
     from reportlab.platypus import Image as RLImage
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
+    from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT, TA_JUSTIFY
     import io
  
     buffer = io.BytesIO()
