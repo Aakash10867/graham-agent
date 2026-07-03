@@ -5734,12 +5734,12 @@ elif st.session_state.sb_view_mode == "builder":
         _calc_slider_cols = st.columns(2)
         with _calc_slider_cols[0]:
             _calc_years = st.slider(
-                "⏳ Time period (years)", min_value=1, max_value=30, value=10,
+                "⏳ Time period (years)", min_value=1, max_value=30, value=15,
             )
         with _calc_slider_cols[1]:
             _calc_return = st.slider(
                 "📈 Expected return (% p.a.)",
-                min_value=6.0, max_value=20.0, value=12.0, step=0.5,
+                min_value=6.0, max_value=20.0, value=13.0, step=0.5,
                 help="8%: Conservative · 12%: Equity avg · 16%+: Aggressive",
             )
 
