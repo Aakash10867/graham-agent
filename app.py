@@ -4396,10 +4396,8 @@ Rules:
                 return {"query": query, "context": "No material recent developments found."}
             return {"query": query, "context": summary.strip()}
         except Exception as e:
-            error_msg = str(e).upper()
-            if any(err in error_msg for err in ["429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "500"]):
-                continue
-            return {"query": query, "error": f"Web search failed: {str(e)}"}
+            # Sprint 11: Try next model on ANY error — some models don't support google_search
+            continue
 
     return {"query": query, "error": "All models exhausted — web search unavailable this turn."}
 
@@ -5236,7 +5234,7 @@ if st.session_state.sb_view_mode == "chat":
                         error_msg = str(e)
                         error_upper = error_msg.upper()
                         if any(err in error_upper for err in ["429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "ALL MODELS RATE-LIMITED"]):
-                            # Sprint 11: Retry once after a short wait before falling back
+                            # Retry once after a short wait before falling back
                             import time
                             st.warning("API busy — retrying in 3 seconds...")
                             time.sleep(3)
