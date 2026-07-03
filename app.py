@@ -4396,10 +4396,9 @@ Rules:
                 return {"query": query, "context": "No material recent developments found."}
             return {"query": query, "context": summary.strip()}
         except Exception as e:
-            error_msg = str(e).upper()
-            if any(err in error_msg for err in ["429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "500"]):
-                continue
-            return {"query": query, "error": f"Web search failed: {str(e)}"}
+            # Continue to next model on ANY error, not just rate limits.
+            # Some models don't support google_search grounding.
+            continue
 
     return {"query": query, "error": "All models exhausted — web search unavailable this turn."}
 
