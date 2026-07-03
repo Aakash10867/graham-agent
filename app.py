@@ -3897,6 +3897,65 @@ def _sanitize_for_json(obj):
     if hasattr(obj, 'item'):
         return obj.item()
     return obj
+
+def build_user_context():
+    """Build compact client state summary for the system prompt."""
+    if not st.session_state.get("sb_user_id"):
+        return "Client is not logged in. They can use chat for stock analysis but cannot save portfolios or access personalized features."
+    sb = get_supabase()
+    try:
+        ports = sb.table("portfolios").select(
+            "name, sip_amount, time_horizon, investor_type, current_value, current_return_pct, is_paper"
+        ).eq("user_id", st.session_state.sb_user_id).execute().data or []
+    except Exception:
+        ports = []
+    try:
+        wl_count = len(sb.table("watchlist").select("id").eq(
+            "user_id", st.session_state.sb_user_id
+        ).execute().data or [])
+    except Exception:
+        wl_count = 0
+
+    name = st.session_state.get("_profile_name", "")
+    if not ports and wl_count == 0:
+        ctx = "New client — no portfolios, no watchlist."
+        if name:
+            ctx = f"Name: {name}. " + ctx
+        return ctx
+
+    lines = []
+    if name:
+        lines.append(f"Name: {name}")
+    real_ports = [p for p in ports if not p.get("is_paper")]
+    paper_ports = [p for p in ports if p.get("is_paper")]
+    if real_ports:
+        lines.append(f"{len(real_ports)} active portfolio(s):")
+        for p in real_ports:
+            val = f"₹{p.get('current_value', 0):,.0f}" if p.get('current_value') else "not yet valued"
+            ret = f"({p.get('current_return_pct', 0):+.1f}%)" if p.get('current_return_pct') is not None else ""
+            lines.append(f"  {p['name']} — {p.get('investor_type', '')} / {p.get('time_horizon', '')} / ₹{p.get('sip_amount', 0):,}/mo — {val} {ret}")
+    if paper_ports:
+        lines.append(f"{len(paper_ports)} paper portfolio(s) (practice mode)")
+    if wl_count:
+        lines.append(f"Watchlist: {wl_count} stock(s)")
+    return "\n".join(lines)
+
+
+def navigate_to(view: str) -> dict:
+    """Open a platform feature for the client. Call this when the client wants to ACT on a feature, not when they are just asking about it.
+
+    Args:
+        view: The feature to open. One of: builder, import, portfolios, watchlist, backtest, settings
+    """
+    valid = {"builder", "import", "portfolios", "watchlist", "backtest", "settings"}
+    if view not in valid:
+        return {"error": f"Unknown view '{view}'. Valid: {', '.join(sorted(valid))}"}
+    st.session_state._pending_navigate = view
+    view_labels = {"builder": "Portfolio Builder", "import": "Import", "portfolios": "My Portfolios",
+                   "watchlist": "Watchlist", "backtest": "Does It Work?", "settings": "Settings"}
+    return {"status": f"Opening {view_labels.get(view, view)}. The client will see it momentarily."}
+
+
 # ──────────────────────────────────────────────
 # TOOLS REGISTRY
 # ──────────────────────────────────────────────
@@ -3918,6 +3977,7 @@ TOOLS = [
     get_macro_context,
     get_sip_candidates,
     register_portfolio,
+    navigate_to,
 ]
 
 tool_functions = {
@@ -3938,6 +3998,7 @@ tool_functions = {
     "get_macro_context": get_macro_context,
     "get_sip_candidates": get_sip_candidates,
     "register_portfolio": register_portfolio,
+    "navigate_to": navigate_to,
 }
 
 
@@ -4029,6 +4090,7 @@ You have 11 tools available. Pick the right combination for each question — yo
 15. get_macro_context — Gets the sector and 5-day performance of the broader market (Nifty 50) to gauge macro momentum versus asset momentum.
 16. get_sip_candidates — Build a SIP portfolio from a builder profile. Takes sip_amount, time_horizon, investor_type, review_freq, and avoid_sectors (a JSON string list of sector names to exclude, e.g. '["Energy"]'; pass '[]' for no exclusions). Returns pre-filtered candidates with a min/max stock count range. You decide the exact count based on candidate quality.
 17. register_portfolio — After presenting your finalized SIP portfolio, call this to register it for saving. Pass portfolio_name, investor_type, sip_amount, time_horizon, review_days (integer), stocks_json (JSON string list with ticker/name/sector/allocation_pct per item), portfolio_profile (JSON string of the full builder profile), target_amount (number, 0 if no goal), and target_date (ISO date string, empty if no goal). ALWAYS call this after presenting the final portfolio table.
+18. navigate_to — Open a platform feature for the client. Pass view as one of: builder, import, portfolios, watchlist, backtest, settings. Use when they want to ACT: "build me a portfolio" → navigate_to("builder"), "I have stocks on Zerodha" → navigate_to("import"), "show my portfolios" → navigate_to("portfolios"), "any picks this week" → navigate_to("watchlist"), "does this work" → navigate_to("backtest"). Do NOT navigate when they are just asking about a feature — explain first, then offer.
 
 SIP PORTFOLIO PROTOCOL:
 Portfolio building uses the embedded Builder form (🏗️ Build Portfolio sidebar button). When you receive a message starting with [BUILDER_PROFILE], you must execute a strict 2-Phase process.
@@ -4169,6 +4231,55 @@ Follow these core behavioral directives:
 3. Book-Grounded Reasoning: For CONDITIONAL BUY especially, use the principles from _book_reasoning to frame your thesis. Name the author and concept (e.g., "Marks's cycle awareness suggests..." or "Klarman would demand a catalyst here...").
 4. Dynamic Formatting: Use markdown headers, bullet points, and bold text organically. The verdict badge should be the first thing the user sees.
 5. Committee Note: Conclude with actionable risk management advice grounded in the book principles. For CONDITIONAL BUY, this MUST include monitoring triggers.
+
+FUND MANAGER ROLE:
+You are not a stock screener. You are the client's fund manager. A fund manager handles four things:
+1. Investment Policy — understand the client (goals, risk appetite, constraints, life stage)
+2. Asset Allocation — how to distribute capital across securities
+3. Security Selection — pick specific stocks (your 5 frameworks + quality gate)
+4. Portfolio Monitoring — track performance, rebalance toward targets, surface problems early
+
+Most conversations are about step 3 (stock analysis). But when a client asks about getting started, managing money, how things work, or whether they can trust you — they are asking about steps 1, 2, or 4. Meet them where they are. Do not redirect everything to stock analysis.
+
+PLATFORM FEATURES:
+You have a navigate_to tool that opens any feature directly. Use it when the client's intent is to ACT. When their intent is to UNDERSTAND, explain first, then offer to open it.
+
+Builder (navigate_to "builder"): Guided portfolio construction — SIP amount, horizon, risk tolerance, goals, sector preferences. You then select stocks and register the portfolio. Suggest for: new clients, "help me invest", "build a portfolio", "I have X per month", "where do I start."
+
+Import (navigate_to "import"): Bring in existing holdings via Zerodha Kite CSV export or manual ticker entry. Suggest for: "I already have stocks", "I use Zerodha", "I have a demat account", "can I add my existing portfolio."
+
+Portfolios (navigate_to "portfolios"): Dashboard of saved portfolios — performance, holdings, target vs actual allocation, alerts, reviews, SIP deployment, PDF reports. Suggest for: "how is my portfolio", "show my investments", "when is my next review", "deploy my SIP."
+
+Watchlist (navigate_to "watchlist"): Track stocks without buying, paper portfolios for practice, and This Weeks Picks — a curated weekly buy list personalized to the clients profile. Suggest for: "watch this stock", "any recommendations this week", "I want to practice first", "what should I buy."
+
+Backtest (navigate_to "backtest"): Historical simulation — does Kordents scoring actually predict returns? Quarterly backtests against Nifty 50. Suggest for: "does this actually work", "prove it", "whats your track record", "why should I believe the scores."
+
+Settings (navigate_to "settings"): Profile name, email display, Telegram alerts setup. Suggest for: "change my name", "connect Telegram", "notifications."
+
+EXPLAINING TRUST AND METHODOLOGY:
+When a client questions credibility, methodology, or trustworthiness:
+— Kordent scores ~4,500 NSE/BSE stocks using 5 frameworks extracted from 7 canonical investment books (Graham, Greenblatt, Dorsey, Buffett, Lynch, Schilit, Mulford).
+— A quality gate (Schilit + Mulford) catches financial manipulation deterministically before any stock reaches the recommendation stage.
+— Verdicts are deterministic and tiered (STRONG BUY through SELL). You explain them — you never override them.
+— Three additional books (Marks, Fisher, Klarman) provide qualitative reasoning for nuanced cases.
+— Everything is transparent: the client sees every score, every spectrum value, every pass/fail flag.
+— Always offer a demonstration: "Pick a stock you know well — a company you work at, buy from, or follow — and I will show you exactly how the analysis works, with full transparency. Then you decide."
+— If they ask about the backtest, offer to navigate there. Evidence over persuasion.
+
+CLIENT CONTEXT:
+__USER_CONTEXT__
+Use this to inform your responses. If they have no portfolios, they are new — guide gently. If they have active portfolios, they are an existing client — focus on insights and next actions. Never recite this context unprompted. Never say "based on your profile" or "I can see you have." Just know it and respond accordingly.
+
+CONVERSATIONAL PRINCIPLES:
+1. You are a fund manager sitting across the table from your client. Warm, competent, direct. Not a help desk, not a chatbot, not a disclaimer machine.
+2. Intent to act → do it or navigate. Do not describe features the client can read about. Open the page.
+3. Intent to understand → explain with depth and conviction. Use search_book to ground answers in the actual texts.
+4. Confused or overwhelmed → simplify, offer ONE concrete next step. "Lets start here" is better than listing five options.
+5. Frustrated → acknowledge, do not become defensive. Fix the problem or clearly state what you cannot do.
+6. IPOs, crypto, F&O, intraday → Kordent is built for long-term value investing. Acknowledge their interest without judgment. Explain the approach. Do not lecture.
+7. "Compare X vs Y" → call tools for both tickers and synthesize. This is natural and expected.
+8. Never say "I cannot do that" when a platform feature handles it. Navigate instead.
+9. If you do not know something about the client, ask. A fund manager who guesses instead of asking is a bad fund manager.
 """
 
 AUDITOR_SYSTEM_PROMPT = """You are the Chief Risk Officer and Auditor for an Investment Committee.
@@ -4253,6 +4364,10 @@ def sanitize_history(history):
 def agent_turn(user_message):
     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
+    # Inject client context into system instruction
+    _user_ctx = build_user_context()
+    full_instruction = SYSTEM_INSTRUCTION.replace("__USER_CONTEXT__", _user_ctx)
+
     raw_history = st.session_state.get("chat_history", [])
     history = sanitize_history(raw_history)
 
@@ -4269,7 +4384,7 @@ def agent_turn(user_message):
             analyst_chat = client.chats.create(
                 model=model_name,
                 config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_INSTRUCTION,
+                    system_instruction=full_instruction,
                     tools=TOOLS,
                 ),
                 history=history,
@@ -4657,6 +4772,11 @@ if st.session_state.sb_view_mode == "chat":
                     st.caption(f"⚡ {model_used}")
                     st.session_state.messages.append({"role": "assistant", "content": answer, "model": model_used, "verdict_tier": _vt})
                     if st.session_state.get("pending_portfolio"):
+                        st.rerun()
+
+                    if st.session_state.get("_pending_navigate"):
+                        st.session_state.sb_view_mode = st.session_state._pending_navigate
+                        st.session_state.pop("_pending_navigate", None)
                         st.rerun()
 
                     # ── Score History Chart (single-stock analysis) ──
