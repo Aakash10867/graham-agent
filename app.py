@@ -2503,6 +2503,11 @@ with st.sidebar:
                 st.session_state.pop("pending_watch_tickers", None)
             st.rerun()
 
+        if st.session_state.sb_view_mode != "chat":
+            if st.button("💬 Back to Chat", width="stretch"):
+                st.session_state.sb_view_mode = "chat"
+                st.rerun()
+
         # ── Navigation ──
         if st.session_state.sb_view_mode != "builder":
             if st.button("🏗️ Build Portfolio", width="stretch"):
@@ -4507,6 +4512,14 @@ if st.session_state.sb_view_mode == "chat":
                 _paper_tag = " · 👁 Paper Portfolio" if portfolio.get("is_paper") else ""
                 _goal_tag = f" · Goal: ₹{portfolio['target_amount']:,.0f}" if portfolio.get("target_amount") else ""
                 st.caption(f"Total SIP: ₹{portfolio['sip_amount']:,}/month · {portfolio.get('investor_type', '')} · {portfolio.get('time_horizon', '')} horizon{_goal_tag}{_paper_tag}")
+                _custom_name = st.text_input(
+                    "Portfolio name",
+                    value=portfolio["name"],
+                    placeholder=portfolio["name"],
+                    key="portfolio_name_input",
+                )
+                if _custom_name and _custom_name.strip():
+                    portfolio["name"] = _custom_name.strip()
                 if st.button("💾 Save Portfolio", width="stretch"):
                     try:
                         sb = get_supabase()
