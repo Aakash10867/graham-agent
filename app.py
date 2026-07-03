@@ -5645,47 +5645,101 @@ elif st.session_state.sb_view_mode == "builder":
     st.markdown("### 🏗️ Build Your Portfolio")
     st.caption("Answer a few simple questions — no financial jargon, we promise.")
 
+    def _sip_future_value(monthly, annual_pct, years):
+        n = years * 12
+        r = annual_pct / 12 / 100
+        if r <= 0:
+            return monthly * n
+        return monthly * ((1 + r)**n - 1) / r * (1 + r)
+
     if st.session_state.sb_user_id is None:
         st.warning("Please log in via the sidebar to build a portfolio.")
     else:
+        # ── SIP Calculator (interactive, outside form) ──
+        st.markdown("#### 💰 SIP Calculator")
+        st.caption("See how your money grows with compounding. Adjust to explore.")
+
+        _calc_sip = st.number_input(
+            "Monthly investment (₹)",
+            min_value=500, max_value=10000000, value=5000, step=500,
+            help="Start small — you can always increase later.",
+        )
+        _calc_slider_cols = st.columns(2)
+        with _calc_slider_cols[0]:
+            _calc_years = st.slider(
+                "⏳ Time period (years)", min_value=1, max_value=30, value=10,
+            )
+        with _calc_slider_cols[1]:
+            _calc_return = st.slider(
+                "📈 Expected return (% p.a.)",
+                min_value=6.0, max_value=20.0, value=12.0, step=0.5,
+                help="8%: Conservative · 12%: Equity avg · 16%+: Aggressive",
+            )
+
+        _total_invested = _calc_sip * 12 * _calc_years
+        _future_value = _sip_future_value(_calc_sip, _calc_return, _calc_years)
+        _est_returns = _future_value - _total_invested
+
+        _m1, _m2, _m3 = st.columns(3)
+        _m1.metric("Invested", f"₹{_total_invested:,.0f}")
+        _m2.metric("Est. Returns", f"₹{_est_returns:,.0f}")
+        _m3.metric("Total Value", f"₹{_future_value:,.0f}")
+
+        # Stacked bar chart — the compounding hockey stick
+        _yr_range = list(range(1, _calc_years + 1))
+        _inv_arr = [_calc_sip * 12 * y for y in _yr_range]
+        _fv_arr = [_sip_future_value(_calc_sip, _calc_return, y) for y in _yr_range]
+        _ret_arr = [fv - inv for fv, inv in zip(_fv_arr, _inv_arr)]
+
+        _chart_fig = go.Figure()
+        _chart_fig.add_trace(go.Bar(
+            name="Invested", x=[f"Yr {y}" for y in _yr_range],
+            y=_inv_arr, marker_color="#9CA3AF",
+        ))
+        _chart_fig.add_trace(go.Bar(
+            name="Returns", x=[f"Yr {y}" for y in _yr_range],
+            y=_ret_arr, marker_color="#10B981",
+        ))
+        _chart_fig.update_layout(
+            barmode="stack", height=280,
+            margin=dict(l=0, r=0, t=30, b=0),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+            xaxis_title="", yaxis_title="",
+            yaxis_tickprefix="₹",
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
+        )
+        st.plotly_chart(_chart_fig, use_container_width=True, key="sip_calc_chart")
+
+        # Optional goal mode
+        _calc_has_goal = st.checkbox("🎯 I have a specific savings goal", value=False)
+        _calc_goal_amt = 0
+        if _calc_has_goal:
+            _calc_goal_amt = st.number_input(
+                "Target amount (₹)", min_value=10000, value=max(10000, int(_future_value)), step=100000,
+            )
+            if _calc_goal_amt > _total_invested:
+                _lo, _hi = 0.0, 50.0
+                for _ in range(100):
+                    _mid = (_lo + _hi) / 2
+                    if _sip_future_value(_calc_sip, _mid, _calc_years) < _calc_goal_amt:
+                        _lo = _mid
+                    else:
+                        _hi = _mid
+                _req_return = round((_lo + _hi) / 2, 1)
+                if _req_return > 20:
+                    st.warning(f"⚠️ Requires ~{_req_return}% annual returns — consider increasing your SIP or extending the time period.")
+                elif abs(_req_return - _calc_return) < 1:
+                    st.success("✅ Your current settings already reach this goal!")
+                else:
+                    st.info(f"📊 To reach ₹{_calc_goal_amt:,.0f} in {_calc_years} years, you'd need ~{_req_return}% annual returns.")
+            else:
+                st.success("✅ Your SIP already covers this goal even without any returns!")
+
+        st.divider()
+        st.markdown("#### 📋 Your Preferences")
+
         with st.form("portfolio_builder_form"):
-            # Q1 — Monthly investment
-            _b_sip = st.number_input(
-                "💰 How much can you invest every month? (₹)",
-                min_value=500, max_value=10000000, value=5000, step=500,
-                help="Start small — you can always increase later.",
-            )
-
-            st.divider()
-
-            # Q2 — Time horizon
-            _b_horizon_label = st.radio(
-                "⏳ How long do you plan to keep investing?",
-                options=["1–3 years", "3–7 years", "7+ years"],
-                index=1,
-                help="Longer horizons let compounding do the heavy lifting.",
-            )
-
-            st.divider()
-
-            # Q3 — Goal (optional)
-            st.markdown("**🎯 Do you have a specific savings target?** *(optional — leave amount at 0 to skip)*")
-            _b_goal_cols = st.columns(2)
-            with _b_goal_cols[0]:
-                _b_target_amt = st.number_input(
-                    "Target amount (₹)", min_value=0, value=0, step=100000,
-                    help="Leave at 0 if you don't have a number in mind.",
-                )
-            with _b_goal_cols[1]:
-                _b_target_dt = st.date_input(
-                    "By when?",
-                    value=datetime.date.today() + datetime.timedelta(days=365 * 5),
-                    min_value=datetime.date.today() + datetime.timedelta(days=180),
-                    help="Only matters if you set a target amount.",
-                )
-
-            st.divider()
-
             # Q4 — Risk tolerance
             _b_risk_resp = st.radio(
                 "📉 If your portfolio dropped 20% in a month, would you:",
@@ -5788,11 +5842,14 @@ elif st.session_state.sb_view_mode == "builder":
                 "Steady dividends and low risk": "income",
                 "Maximum growth, even if it's bumpy": "growth",
             }
-            _horizon_map = {"1–3 years": "short", "3–7 years": "medium", "7+ years": "long"}
-
             _b_risk = _risk_map.get(_b_risk_resp, "moderate")
             _b_pref = _pref_map.get(_b_pref_resp, "growth")
-            _b_time = _horizon_map.get(_b_horizon_label, "medium")
+            if _calc_years <= 3:
+                _b_time = "short"
+            elif _calc_years <= 7:
+                _b_time = "medium"
+            else:
+                _b_time = "long"
 
             # investor_type from risk × preference
             if _b_risk == "conservative" or _b_pref == "income":
@@ -5806,15 +5863,9 @@ elif st.session_state.sb_view_mode == "builder":
             _rev_map = {"defensive": ("passive", 180), "balanced": ("moderate", 90), "enterprising": ("active", 60)}
             _b_rev_freq, _b_rev_days = _rev_map.get(_b_inv_type, ("moderate", 90))
 
-            # Override time_horizon from target_date when goal is set
-            if _b_target_amt > 0:
-                _yrs = ((_b_target_dt - datetime.date.today()).days) / 365.25
-                if _yrs <= 3:
-                    _b_time = "short"
-                elif _yrs <= 7:
-                    _b_time = "medium"
-                else:
-                    _b_time = "long"
+            # Goal from SIP calculator
+            _b_target_amt = _calc_goal_amt if _calc_has_goal and _calc_goal_amt > 0 else None
+            _b_target_dt = datetime.date.today() + datetime.timedelta(days=int(_calc_years * 365.25))
 
             # Sprint 6: Map philosophy, selectivity, trade-off
             _philosophy_map = {
@@ -5848,9 +5899,10 @@ elif st.session_state.sb_view_mode == "builder":
             }
 
             _b_profile = {
-                "sip_amount": _b_sip,
-                "target_amount": _b_target_amt if _b_target_amt > 0 else None,
-                "target_date": _b_target_dt.isoformat() if _b_target_amt > 0 else None,
+                "sip_amount": _calc_sip,
+                "target_amount": _b_target_amt if _b_target_amt else None,
+                "target_date": _b_target_dt.isoformat() if _b_target_amt else None,
+                "expected_return_pct": _calc_return,
                 "risk": _b_risk,
                 "avoid_sectors": _b_avoid,
                 "preference": _b_pref,
@@ -5868,15 +5920,17 @@ elif st.session_state.sb_view_mode == "builder":
             st.session_state.builder_profile = _b_profile
 
             # ── Build the chat prompt that triggers stock selection ──
-            _goal_line = f"\n- Goal: ₹{_b_target_amt:,.0f} by {_b_target_dt.isoformat()}" if _b_target_amt > 0 else ""
+            _horizon_label = f"{_calc_years} years"
+            _goal_line = f"\n- Goal: ₹{_b_target_amt:,.0f} by {_b_target_dt.isoformat()}" if _b_target_amt else ""
             _avoid_line = f"\n- Avoid sectors: {', '.join(_b_avoid)}" if _b_avoid else ""
             _paper_line = "\n- Mode: Paper portfolio (watch only)" if _b_is_paper else ""
 
             st.session_state.pending_prompt = (
                 f"[BUILDER_PROFILE]\n"
                 f"Build me a portfolio with these preferences:\n"
-                f"- Monthly SIP: ₹{_b_sip:,}\n"
-                f"- Time horizon: {_b_time} ({_b_horizon_label})\n"
+                f"- Monthly SIP: ₹{_calc_sip:,}\n"
+                f"- Time horizon: {_b_time} ({_horizon_label})\n"
+                f"- Expected return: {_calc_return}% p.a.\n"
                 f"- Investor type: {_b_inv_type}\n"
                 f"- Risk tolerance: {_b_risk}\n"
                 f"- Preference: {_b_pref}\n"
