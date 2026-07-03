@@ -3596,6 +3596,23 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
         df = df[df["score"] >= 2]
         target_count = 40
 
+    # ── Risk tier caps: limit small-cap exposure by profile ──
+    if "risk_tier" in df.columns:
+        _small_cap_limit = {"defensive": 0.10, "balanced": 0.20, "enterprising": 0.30}.get(investor_type, 0.20)
+        _total = len(df)
+        if _total > 0:
+            _small = df[df["risk_tier"] == "Small"]
+            _max_small = max(1, int(_total * _small_cap_limit))
+            if len(_small) > _max_small:
+                _keep_small = _small.sort_values("score", ascending=False).head(_max_small)
+                df = pd.concat([df[df["risk_tier"] != "Small"], _keep_small])
+
+        # Exclude illiquid stocks entirely (avg volume < 50k/day)
+        if "liquidity_flag" in df.columns:
+            _liquid = df[df["liquidity_flag"] != "illiquid"]
+            if len(_liquid) >= 10:
+                df = _liquid
+
     # ── Time horizon adjustments ──
     if time_horizon == "short":
         # Short horizon: prefer lower volatility, higher score
@@ -3674,6 +3691,8 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
             "beta": round(row["beta"], 2) if pd.notna(row.get("beta")) else None,
             "revenue_cagr_3y": round(row["revenue_cagr_3y"], 2) if pd.notna(row.get("revenue_cagr_3y")) else None,
             "ni_cagr_3y": round(row["ni_cagr_3y"], 2) if pd.notna(row.get("ni_cagr_3y")) else None,
+            "risk_tier": row.get("risk_tier", "Unknown") if pd.notna(row.get("risk_tier")) else "Unknown",
+            "liquidity_flag": row.get("liquidity_flag", "Unknown") if pd.notna(row.get("liquidity_flag")) else "Unknown",
         }
         candidates.append(candidate)
 
@@ -3734,6 +3753,10 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
             f"Use beta to assess how much each stock moves with the market — relevant for portfolio-level risk. "
             f"Apply qualitative moat assessment (Dorsey) — check ROE trends to see if moat is stable or eroding. "
             f"Enforce max 2 stocks per sector for diversification. "
+            f"Each candidate has a risk_tier (Large/Mid/Small) and liquidity_flag. "
+            f"Small-cap stocks are capped at {int({'defensive': 10, 'balanced': 20, 'enterprising': 30}.get(investor_type, 20))}% "
+            f"for this {investor_type} profile. Illiquid stocks (avg volume < 50k/day) are excluded. "
+            f"If including a Small-cap, note the higher volatility risk in your explanation. "
             f"Before finalizing, compute: (1) how many sectors you cover — aim for at least 4, "
             f"(2) whether any single sector exceeds 30% allocation — if so, rebalance, "
             f"(3) whether the portfolio beta is balanced — avoid loading up on all high-beta or all low-beta stocks. "
