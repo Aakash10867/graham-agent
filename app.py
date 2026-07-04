@@ -1937,17 +1937,115 @@ def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int,
     final_target = _profile.get("target_amount") or (target_amount if target_amount > 0 else None)
     final_date = _profile.get("target_date") or (target_date if target_date else None)
 
-    # Validate against IPS before allowing save
+    # Validate against IPS — auto-fix violations deterministically.
+    # LLMs cannot reliably count sectors or enforce caps. Don't ask them to retry.
     _ips = _profile.get("ips_policy", {})
     if _ips and stocks:
         _validation = validate_portfolio_ips(stocks, _ips)
         if not _validation["valid"]:
-            return {
-                "error": "Portfolio violates IPS allocation policy",
-                "violations": _validation["violations"],
-                "warnings": _validation.get("warnings", []),
-                "instruction": "Revise your stock selection to fix these violations, then call register_portfolio again."
-            }
+            _alloc = _ips.get("allocation_policy", {})
+            _max_same_sector = _alloc.get("max_same_sector", 2)
+            _small_cap_max = _alloc.get("small_cap_max_pct", 10)
+            _fixes_applied = []
+
+            # Fix 1: Trim excess same-sector stocks (keep highest-scored)
+            from collections import Counter
+            _sector_counts = Counter(s.get("sector", "Unknown") for s in stocks)
+            for _sec, _cnt in _sector_counts.items():
+                if _cnt > _max_same_sector:
+                    _sec_stocks = [s for s in stocks if s.get("sector") == _sec]
+                    # Sort by score descending (keep best), fallback to allocation_pct
+                    _sec_stocks.sort(key=lambda x: (
+                        x.get("score", 0) if isinstance(x.get("score"), (int, float)) else 0
+                    ), reverse=True)
+                    _to_remove = _sec_stocks[_max_same_sector:]
+                    for _r in _to_remove:
+                        stocks.remove(_r)
+                        _fixes_applied.append(f"Removed {_r.get('name', _r.get('ticker', '?'))} (excess {_sec})")
+
+            # Fix 2: Remove small-caps if over limit
+            try:
+                _total_alloc = sum(s.get("allocation_pct", 0) for s in stocks) or 100
+                _small_weight = 0
+                for s in list(stocks):
+                    _row = universe_df[universe_df["ticker"] == s.get("ticker", "")]
+                    if not _row.empty and _row.iloc[0].get("risk_tier", "") == "Small":
+                        _pct = (s.get("allocation_pct", 0) / _total_alloc) * 100
+                        _small_weight += _pct
+                if _small_weight > _small_cap_max:
+                    # Remove lowest-scored small-caps until under limit
+                    _smalls = []
+                    for s in stocks:
+                        _row = universe_df[universe_df["ticker"] == s.get("ticker", "")]
+                        if not _row.empty and _row.iloc[0].get("risk_tier", "") == "Small":
+                            _smalls.append(s)
+                    _smalls.sort(key=lambda x: x.get("score", 0) if isinstance(x.get("score"), (int, float)) else 0)
+                    while _small_weight > _small_cap_max and _smalls:
+                        _drop = _smalls.pop(0)
+                        _pct = (_drop.get("allocation_pct", 0) / _total_alloc) * 100
+                        _small_weight -= _pct
+                        stocks.remove(_drop)
+                        _fixes_applied.append(f"Removed {_drop.get('name', _drop.get('ticker', '?'))} (small-cap over {_small_cap_max}%)")
+            except Exception:
+                pass
+
+            # Fix 3: Backfill to maintain minimum stock count
+            _sizing = _ips.get("portfolio_sizing", {})
+            _target_count = _sizing.get("actual", _sizing.get("ips_target", len(stocks)))
+            _candidates = st.session_state.get("_last_candidates", [])
+            _current_tickers = {s.get("ticker") for s in stocks}
+
+            if len(stocks) < _target_count and _candidates:
+                # Available replacements: not already in portfolio
+                _available = [c for c in _candidates if c["ticker"] not in _current_tickers]
+                # Sort by score descending
+                _available.sort(key=lambda x: x.get("score", 0), reverse=True)
+
+                _sector_counts = Counter(s.get("sector", "Unknown") for s in stocks)
+                for _cand in _available:
+                    if len(stocks) >= _target_count:
+                        break
+                    _csec = _cand.get("sector", "Unknown")
+                    # Only add if it won't create a new sector violation
+                    if _sector_counts.get(_csec, 0) >= _max_same_sector:
+                        continue
+                    # Skip small-caps if already at limit
+                    try:
+                        _row = universe_df[universe_df["ticker"] == _cand["ticker"]]
+                        if not _row.empty and _row.iloc[0].get("risk_tier", "") == "Small":
+                            _sm_count = sum(1 for s in stocks
+                                if not universe_df[universe_df["ticker"] == s.get("ticker", "")].empty
+                                and universe_df[universe_df["ticker"] == s.get("ticker", "")].iloc[0].get("risk_tier", "") == "Small")
+                            if (_sm_count / max(len(stocks), 1)) * 100 >= _small_cap_max:
+                                continue
+                    except Exception:
+                        pass
+                    stocks.append({
+                        "ticker": _cand["ticker"],
+                        "name": _cand.get("name", ""),
+                        "sector": _csec,
+                        "allocation_pct": 0,
+                    })
+                    _sector_counts[_csec] = _sector_counts.get(_csec, 0) + 1
+                    _fixes_applied.append(f"Added {_cand.get('name', _cand['ticker'])} (backfill from {_csec})")
+
+            # Fix 4: Rebalance all stocks to equal weight
+            if stocks:
+                _new_pct = round(100 / len(stocks), 1)
+                for s in stocks:
+                    s["allocation_pct"] = _new_pct
+
+            # Re-validate after fixes
+            _revalidation = validate_portfolio_ips(stocks, _ips)
+            if not _revalidation["valid"]:
+                return {
+                    "error": "Portfolio violates IPS allocation policy even after auto-fix",
+                    "violations": _revalidation["violations"],
+                    "fixes_attempted": _fixes_applied,
+                    "instruction": "Revise your stock selection to fix these violations, then call register_portfolio again."
+                }
+            if _fixes_applied:
+                st.session_state._ips_auto_fixes = _fixes_applied
 
     st.session_state.pending_portfolio = {
         "name": portfolio_name,
@@ -4246,6 +4344,7 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
     # ── Deterministic web grounding (Reilly & Brown Step 2) ──
     # Fires EVERY time at the data layer. Macro, tax, sector context
     # baked into candidates so all downstream decisions are grounded.
+    st.session_state._last_candidates = candidates
     web_grounding = {}
     _ts = st.session_state.get("_tool_status")
     try:
