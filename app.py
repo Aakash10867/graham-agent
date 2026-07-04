@@ -4243,6 +4243,12 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
     # Fires EVERY time at the data layer. Macro, tax, sector context
     # baked into candidates so all downstream decisions are grounded.
     web_grounding = {}
+    _ts = st.session_state.get("_tool_status")
+    try:
+        if _ts:
+            _ts.update(label="🌐 Fetching macro & tax context...", state="running")
+    except Exception:
+        pass
     try:
         _macro = get_web_context(
             "India macroeconomic outlook 2026 CPI inflation rate "
@@ -4260,6 +4266,11 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
     ))[:5]
     if _top_sectors:
         try:
+            try:
+                if _ts:
+                    _ts.update(label="🌐 Checking sector outlook...", state="running")
+            except Exception:
+                pass
             _sec = get_web_context(
                 f"India stock market sector outlook 2026 "
                 f"{' '.join(_top_sectors)} headwinds tailwinds "
@@ -5172,6 +5183,7 @@ def sanitize_history(history):
 
 
 def agent_turn(user_message, status_container=None):
+    st.session_state._tool_status = status_container
     def _update_status(label):
         if status_container:
             try:
