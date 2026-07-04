@@ -5569,6 +5569,9 @@ if st.session_state.sb_view_mode == "chat":
                                 price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
                             except Exception:
                                 price = 0
+                            # Fallback: universe price if yfinance failed
+                            if price <= 0 and len(row):
+                                price = float(row["close"].iloc[0]) if "close" in row.columns and pd.notna(row["close"].iloc[0]) else 0
                             row = universe_df[universe_df["ticker"] == ticker]
                             pe = float(row["pe"].iloc[0]) if len(row) and pd.notna(row["pe"].iloc[0]) else None
                             roe = float(row["roe_y0"].iloc[0]) if len(row) and "roe_y0" in row.columns and pd.notna(row["roe_y0"].iloc[0]) else None
