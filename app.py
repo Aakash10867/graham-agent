@@ -6347,6 +6347,17 @@ elif st.session_state.sb_view_mode == "portfolios":
                 if port.get("paper_converted_at"):
                     st.caption(f"📋 Converted from paper on {str(port['paper_converted_at'])[:10]}")
 
+                _beta = port.get("portfolio_beta")
+                _sharpe = port.get("sharpe_ratio")
+                _alpha = port.get("jensen_alpha")
+                if _beta is not None:
+                    _header += f" · β {_beta:.2f}"
+                if _sharpe is not None:
+                    _header += f" · Sharpe {_sharpe:.2f}"
+                if _alpha is not None:
+                    _alpha_sign = "+" if _alpha >= 0 else ""
+                    _header += f" · α {_alpha_sign}{_alpha*100:.1f}%"
+
                 # ── Alert Banner ──
                 try:
                     alerts_resp = sb.table("portfolio_alerts").select("*").eq(
