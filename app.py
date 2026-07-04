@@ -1818,8 +1818,9 @@ def generate_ips(profile: dict, age: int = 30) -> dict:
     BOOK_OPTIMAL_STOCKS = 40
 
     # What the SIP can actually support (affordability)
-    # Use ₹500 as reference per-stock minimum (median NSE small/mid price)
-    affordable_stocks = max(3, sip_amount // 500)
+    # Progressive diversification buys cheapest first (1 share each),
+    # so the floor is ~₹250/stock (median cheap large-cap), not ₹500.
+    affordable_stocks = max(3, sip_amount // 250)
 
     # IPS target follows the book
     if investor_type == "defensive":
