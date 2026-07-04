@@ -4027,6 +4027,70 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
 
     candidates = _sanitize(candidates)
 
+    # ══════════════════════════════════════════════════════════════════
+    # Sprint 11: Correlation-based diversification ranking (Ch 6)
+    # The book's core insight: portfolio risk = f(covariance), not f(individual variance)
+    # Compute actual correlations and rank candidates by diversification contribution
+    # ══════════════════════════════════════════════════════════════════
+    try:
+        import yfinance as yf
+        from datetime import datetime, timedelta
+        _tickers = [c["ticker"] for c in candidates if c.get("ticker")]
+        if len(_tickers) >= 5:
+            _end = datetime.now()
+            _start = _end - timedelta(days=365)
+            _hist = yf.download(_tickers, start=_start.strftime("%Y-%m-%d"),
+                                end=_end.strftime("%Y-%m-%d"), progress=False)
+            if not _hist.empty:
+                _prices = _hist["Close"] if len(_tickers) > 1 else _hist["Close"].to_frame(_tickers[0])
+                _returns = _prices.pct_change().dropna()
+                _corr = _returns.corr()
+
+                # Greedy selection: pick stocks that minimize avg correlation with already-selected
+                _selected_order = []
+                _remaining = list(_corr.columns)
+
+                # Start with the highest-scoring stock
+                _score_map = {c["ticker"]: c.get("score", 0) for c in candidates}
+                _remaining.sort(key=lambda t: -_score_map.get(t, 0))
+                if _remaining:
+                    _selected_order.append(_remaining.pop(0))
+
+                while _remaining and len(_selected_order) < len(_tickers):
+                    best_ticker = None
+                    best_avg_corr = 999
+                    for t in _remaining:
+                        if t not in _corr.columns:
+                            continue
+                        # Average correlation with all already-selected stocks
+                        _avg = _corr.loc[t, _selected_order].mean() if _selected_order else 0
+                        # Tie-break: prefer higher score, then lower price
+                        if _avg < best_avg_corr or (abs(_avg - best_avg_corr) < 0.01 and _score_map.get(t, 0) > _score_map.get(best_ticker, 0)):
+                            best_avg_corr = _avg
+                            best_ticker = t
+                    if best_ticker:
+                        _selected_order.append(best_ticker)
+                        _remaining.remove(best_ticker)
+                    else:
+                        break
+
+                # Inject correlation data into each candidate
+                for c in candidates:
+                    t = c["ticker"]
+                    if t in _corr.columns and t in _selected_order:
+                        c["diversification_rank"] = _selected_order.index(t) + 1
+                        # Avg correlation with top-5 picks
+                        _top5 = [s for s in _selected_order[:5] if s != t and s in _corr.columns]
+                        c["avg_corr_with_top5"] = round(_corr.loc[t, _top5].mean(), 3) if _top5 else None
+                    elif t in _corr.columns:
+                        c["diversification_rank"] = len(_selected_order) + 1
+                        c["avg_corr_with_top5"] = None
+
+                # Re-sort candidates by diversification rank
+                candidates.sort(key=lambda c: c.get("diversification_rank", 999))
+    except Exception as e:
+        print(f"Correlation computation failed (non-blocking): {e}")
+
     # Sprint 11: Book-standard sizing (Reilly & Brown Ch 6)
     # Book minimum: 12 stocks. System adapts to book, not reverse.
     _affordable_count = max(3, sip_amount // 500)
@@ -4589,6 +4653,32 @@ PHASE 2: FINALIZE & REGISTER (TRIGGERED ONLY AFTER USER REPLIES)
 4. Call register_portfolio with all fields including portfolio_profile, target_amount, and target_date. CRITICAL: Use the `decision_context` parameter to summarize the user's answers to your Phase 1 questions so the system remembers their accepted trade-offs (e.g. "User accepted volatility in Industrials for higher growth"). Do not ask for permission to save, just call the tool.
 
 If someone asks to build a portfolio WITHOUT a [BUILDER_PROFILE] prefix, direct them to click the 🏗️ Build Portfolio button in the sidebar. If they insist or provide enough info inline, you may proceed by mapping their inputs to the profile parameters.
+
+INVESTMENT ANALYSIS FRAMEWORK (Reilly & Brown):
+When analyzing any stock, follow the book's top-down approach (Ch 9):
+Step 1 — MACRO: What is the current economic environment? (RBI policy, inflation, yield curve, business cycle phase)
+  Call get_web_context for macro context before diving into company specifics.
+Step 2 — SECTOR: Where is this industry in its life cycle? (pioneering/growth/maturity/decline)
+  What are the competitive dynamics? (Porter's five forces: rivalry, entry barriers, substitutes, supplier power, buyer power)
+  Call get_web_context for sector outlook.
+Step 3 — COMPANY: Apply the 5 frameworks + quality gate. Use FCFE/DDM cross-checks from Ch 8 where data permits.
+  Check if the stock is a growth company priced as a growth STOCK (Ch 5 distinction: a great company at a bad price is a bad investment).
+Step 4 — BEHAVIORAL AUDIT (Ch 5): Before finalizing your thesis, ask yourself:
+  - Am I anchoring to a past price or someone else's target?
+  - Am I exhibiting confirmation bias — only looking for evidence that supports my thesis?
+  - Is my thesis DIFFERENT from consensus? (If not, the market already prices it in — no edge)
+  - Am I confusing a "good company" with a "good stock"? (representativeness bias)
+  - Would I still recommend this if it had dropped 30% last week? (loss aversion check)
+
+SIP PORTFOLIO CONSTRUCTION — CORRELATION-AWARE (Reilly & Brown Ch 6):
+When building a portfolio, the candidate list now includes diversification_rank and avg_corr_with_top5 for each stock.
+- diversification_rank = the order in which stocks should be added for MAXIMUM risk reduction (computed from actual 1-year return correlations, not sector labels)
+- avg_corr_with_top5 = how correlated this stock is with the top 5 picks (lower = better for diversification)
+- PRIORITY 1: Minimize unsystematic risk (pick low-correlation stocks across different sectors and cap tiers)
+- PRIORITY 2: Maximize quality (higher-scoring stocks preferred within the diversification constraint)
+- PRIORITY 3: Price preference (lower-priced stocks give more shares = finer rebalancing)
+- A stock ranked #3 in diversification with score 3/5 is BETTER for the portfolio than a stock ranked #20 with score 4/5, because it reduces portfolio variance more.
+- The goal is to push unsystematic risk as close to zero as possible — the book says this is the first job of portfolio construction.
 
 TOOL SELECTION RULES:
 - TICKER RESOLUTION: If the client uses a company name (not a full .NS/.BO ticker), call resolve_stock FIRST. If it returns "ambiguous", stop and wait — the client will pick from buttons. If it returns "resolved", proceed with the resolved ticker. If they already gave a ticker like RELIANCE.NS, skip resolve_stock.
