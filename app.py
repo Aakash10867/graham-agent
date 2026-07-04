@@ -5538,7 +5538,8 @@ if st.session_state.sb_view_mode == "chat":
                 response_placeholder = st.empty()
                 answer = None
                 model_used = None
-                with st.status("🧠 Preparing analysis...", expanded=False) as status:
+                _status_slot = st.empty()
+                with _status_slot.status("🧠 Preparing analysis...", expanded=False) as status:
                     try:
                         answer, model_used = agent_turn(prompt, status_container=status)
                         status.update(label="✅ Analysis complete", state="complete")
@@ -5564,6 +5565,7 @@ if st.session_state.sb_view_mode == "chat":
                                 st.session_state.messages.pop()
                             st.session_state.pending_retry = prompt
                 if answer:
+                    _status_slot.empty()
                     _vt = st.session_state.pop("_last_verdict_tier", None)
                     if _vt and not st.session_state.get("builder_profile"):
                         _render_verdict_badge(stored_tier=_vt)
