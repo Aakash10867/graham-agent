@@ -1742,7 +1742,14 @@ def validate_portfolio_ips(stocks: list, ips_policy: dict) -> dict:
     except Exception:
         pass  # universe_df not available in all contexts
 
-    # ── 4. Holdings count vs book standard ──
+    # ── 4. Holdings count ──
+    # 4a. IPS target (hard — user paid for this many stocks)
+    ips_target = sizing.get("actual", sizing.get("ips_target", 0))
+    if ips_target and len(stocks) < ips_target:
+        violations.append(
+            f"Portfolio has {len(stocks)} stocks — IPS requires {ips_target}. "
+            f"Backfill from fringe_candidates; never present fewer than target.")
+    # 4b. Book minimum (warning — honest about under-diversification)
     book_min = sizing.get("book_minimum", 12)
     if len(stocks) < book_min:
         warnings.append(
@@ -4232,6 +4239,37 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
     except Exception:
         pass
 
+    # ── Deterministic web grounding (Reilly & Brown Step 2) ──
+    # Fires EVERY time at the data layer. Macro, tax, sector context
+    # baked into candidates so all downstream decisions are grounded.
+    web_grounding = {}
+    try:
+        _macro = get_web_context(
+            "India macroeconomic outlook 2026 CPI inflation rate "
+            "RBI repo rate monetary policy LTCG STCG capital gains "
+            "tax rate equity holding period"
+        )
+        web_grounding["macro_and_tax"] = _macro.get(
+            "context", _macro.get("error", "Unavailable"))
+    except Exception:
+        web_grounding["macro_and_tax"] = "Web search unavailable."
+
+    _top_sectors = list(dict.fromkeys(
+        c.get("sector", "") for c in candidates
+        if c.get("sector") and c.get("sector") != "N/A"
+    ))[:5]
+    if _top_sectors:
+        try:
+            _sec = get_web_context(
+                f"India stock market sector outlook 2026 "
+                f"{' '.join(_top_sectors)} headwinds tailwinds "
+                f"recent developments"
+            )
+            web_grounding["sector_outlook"] = _sec.get(
+                "context", _sec.get("error", "Unavailable"))
+        except Exception:
+            web_grounding["sector_outlook"] = "Web search unavailable."
+
     return {
         "investor_profile": {
             "sip_amount_inr": sip_amount,
@@ -4246,7 +4284,20 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
         },
         "candidates_count": len(candidates),
         "candidates": candidates,
-        "fringe_candidates": fringe_candidates, # Inject fringe list here
+        "fringe_candidates": fringe_candidates,
+        "web_grounding": web_grounding,
+        "web_grounding_instruction": (
+            "MANDATORY — Reilly & Brown Step 2 data above. "
+            "You MUST use this in your portfolio rationale: "
+            "(1) State the current inflation rate and compute "
+            "real expected return (nominal minus inflation). "
+            "(2) State current LTCG/STCG rates and mention "
+            "holding period implications. "
+            "(3) Factor sector outlook into selection — flag "
+            "headwinds/tailwinds per stock. "
+            "(4) Reference business cycle positioning if data "
+            "indicates a clear phase."
+        ),
         "selection_instruction": (
             f"You have {len(candidates)} pre-filtered candidates. "
             f"Pick between {min_stocks} and {max_stocks} stocks. "
@@ -4760,14 +4811,16 @@ Portfolio building uses the embedded Builder form (🏗️ Build Portfolio sideb
 PHASE 1: DRAFT & INTERROGATE (DO NOT SHOW THE PORTFOLIO YET)
 1. Call get_sip_candidates with the profile parameters.
 2. Silently construct a "V1" portfolio in your mind. Do NOT output a table, do NOT list the stocks, and do NOT call register_portfolio.
-3. Call get_web_context for EACH stock in your V1 shortlist (e.g. "Infosys recent news developments 2026"). If any candidate has material red flags (investigation, fraud, regulatory action, management crisis), drop it and pick the next-best from the pool. Also call get_web_context for the key sectors you are allocating to (e.g. "India IT sector outlook 2026") to check for sector-level headwinds.
+3. The candidates already contain "web_grounding" with live macro, tax, and sector data. Use this to inform your V1 draft — no separate web search needed here.
 4. Analyze the trade-offs in your V1 draft and review the "fringe_candidates" returned by the tool.
 5. Output a brief, layman-friendly summary of the strategy you are considering.
 6. Ask the user 1 to 3 targeted questions to refine the build.
-   - RULE: Speak to them as a layman. Do NOT use jargon like "Graham", "Dorsey", "moat", "beta", or "PE expansion". 
+   - RULE: Speak to them as a layman. Do NOT use jargon like "Graham", "Dorsey", "moat", "beta", or "PE expansion".
+   - HARD RULE: Your questions must NEVER offer options that violate the ALLOCATION POLICY in [BUILDER_PROFILE]. Sector caps, small-cap limits, large-cap minimums, and stock count targets are NON-NEGOTIABLE hard constraints — they are not preferences the user can override. Never ask "would you like higher sector concentration?" when the IPS caps it. Never ask "would you prefer fewer stocks?" when the IPS sets a target count.
+   - HARD RULE: You MUST select exactly the number of stocks specified in the ALLOCATION POLICY target. If some candidates fail quality checks or have red flags, backfill from fringe_candidates or pick the next-best from the pool. NEVER present fewer stocks than the target unless there are literally not enough qualifying candidates in the entire universe.
    - Example (Fringe Candidate): "I found a highly profitable company that fits your goals perfectly, but it's in the Energy sector which you asked to avoid. Are you open to making an exception for a top-tier performer?"
    - Example (Risk Trade-off): "To hit your target, we need a bit more growth. Would you prefer adding a fast-growing but bumpier stock, or stick to steady, slow-moving giants?"
-6. Stop and wait for the user's reply.
+7. Stop and wait for the user's reply.
 
 PHASE 2: FINALIZE & REGISTER (TRIGGERED ONLY AFTER USER REPLIES)
 1. When the user answers your questions, finalize the stock selection.
