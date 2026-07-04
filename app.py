@@ -6332,6 +6332,10 @@ elif st.session_state.sb_view_mode == "portfolios":
                     _header += f" · ₹{_pv:,.0f}"
                 if _pr is not None:
                     _header += f" ({_pr:+.1f}%)"
+                _div = port.get("diversification_score")
+                if _div is not None:
+                    _div_emoji = "🟢" if _div >= 70 else "🟡" if _div >= 40 else "🔴"
+                    _header += f" · {_div_emoji} {_div}/100"
                 st.markdown(_header)
                 _px = port.get("xirr_pct")
                 if _px is not None:
