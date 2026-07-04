@@ -132,19 +132,32 @@ def allocate_shares(stocks, sip_amount):
             s["actual_amount"] = s["price"]
             remaining = sip_amount - sum(x["actual_amount"] for x in result)
 
-    # ── Phase 2: fill toward target allocation, largest gap first ──
+    # ── Phase 2: 0-share stocks ALWAYS get priority (unsystematic risk) ──
+    # Only after ALL affordable 0-share stocks have 1 share does gap-fill begin.
+    # This ensures progressive diversification across SIP cycles:
+    #   Cycle 1 → cheapest 0-share stocks funded
+    #   Cycle 2 → next tier of 0-share stocks funded
+    #   Cycle 3+ → rebalancing toward target allocation
     _max_iter = len(result) * 200  # safety cap
     _iter = 0
     while remaining > 0 and _iter < _max_iter:
         _iter += 1
         best = None
-        best_gap = -float("inf")
-        for s in result:
-            target = sip_amount * s["allocation_pct"] / 100
-            gap = target - s["actual_amount"]
-            if s["price"] > 0 and s["price"] <= remaining and gap > best_gap:
-                best = s
-                best_gap = gap
+
+        # Priority 1: any 0-share stock we can still afford (cheapest first)
+        _zeros = [s for s in result if s["shares"] == 0 and 0 < s["price"] <= remaining]
+        if _zeros:
+            _zeros.sort(key=lambda x: x["price"])
+            best = _zeros[0]
+        else:
+            # Priority 2: largest (target - actual) gap
+            best_gap = -float("inf")
+            for s in result:
+                target = sip_amount * s["allocation_pct"] / 100
+                gap = target - s["actual_amount"]
+                if s["price"] > 0 and s["price"] <= remaining and gap > best_gap:
+                    best = s
+                    best_gap = gap
         if best is None:
             break
         best["shares"] += 1
