@@ -101,23 +101,24 @@ def get_supabase():
             st.session_state.sb_user_id = None
     return client
 
-def allocate_shares(stocks, sip_amount):
+def allocate_shares(stocks, sip_amount, existing_shares=None):
     """Progressive diversification allocation (Reilly & Brown Ch 6).
 
-    Phase 1 — Diversification priority: buy 1 share of each stock starting
-              with the cheapest.  This maximises the number of distinct
-              holdings per SIP cycle and reduces unsystematic risk fastest.
-    Phase 2 — Gap-based fill: remaining budget goes to the stock whose
-              actual allocation is furthest below its target allocation.
+    existing_shares: dict of {ticker: portfolio_shares} for deploy/SIP cycles.
+                     None for initial portfolio creation.
 
-    Across multiple SIP cycles this means:
-      Cycle 1 → cheapest zero-share stocks get funded first
-      Cycle 2 → remaining zero-share stocks get funded
-      Cycle 3+ → rebalancing toward target allocation
+    Phase 1 — Buy 1 share of each stock, cheapest first.
+    Phase 2 — Priority to stocks with 0 PORTFOLIO-LEVEL shares (cheapest first).
+              These are the holdings that need funding most urgently to reduce
+              unsystematic risk across cycles.
+    Phase 3 — Gap-based fill: remaining budget goes to the stock whose
+              actual allocation is furthest below its target allocation.
     """
+    _existing = existing_shares or {}
     result = []
     for s in stocks:
-        result.append({**s, "shares": 0, "actual_amount": 0})
+        result.append({**s, "shares": 0, "actual_amount": 0,
+                       "_portfolio_shares": _existing.get(s.get("ticker", ""), 0)})
 
     remaining = sip_amount
 
@@ -132,32 +133,37 @@ def allocate_shares(stocks, sip_amount):
             s["actual_amount"] = s["price"]
             remaining = sip_amount - sum(x["actual_amount"] for x in result)
 
-    # ── Phase 2: 0-share stocks ALWAYS get priority (unsystematic risk) ──
-    # Only after ALL affordable 0-share stocks have 1 share does gap-fill begin.
-    # This ensures progressive diversification across SIP cycles:
-    #   Cycle 1 → cheapest 0-share stocks funded
-    #   Cycle 2 → next tier of 0-share stocks funded
-    #   Cycle 3+ → rebalancing toward target allocation
-    _max_iter = len(result) * 200  # safety cap
+    # ── Phase 2 + 3: portfolio-zero priority, then gap-fill ──
+    _max_iter = len(result) * 200
     _iter = 0
     while remaining > 0 and _iter < _max_iter:
         _iter += 1
         best = None
 
-        # Priority 1: any 0-share stock we can still afford (cheapest first)
-        _zeros = [s for s in result if s["shares"] == 0 and 0 < s["price"] <= remaining]
-        if _zeros:
-            _zeros.sort(key=lambda x: x["price"])
-            best = _zeros[0]
+        # Priority 1: stocks with 0 shares in the PORTFOLIO even after Phase 1
+        # (new_shares from Phase 1 but portfolio still at 0 means this is first cycle)
+        _portfolio_zeros = [s for s in result
+                           if s["_portfolio_shares"] + s["shares"] <= 0
+                           and 0 < s["price"] <= remaining]
+        if _portfolio_zeros:
+            _portfolio_zeros.sort(key=lambda x: x["price"])
+            best = _portfolio_zeros[0]
         else:
-            # Priority 2: largest (target - actual) gap
-            best_gap = -float("inf")
-            for s in result:
-                target = sip_amount * s["allocation_pct"] / 100
-                gap = target - s["actual_amount"]
-                if s["price"] > 0 and s["price"] <= remaining and gap > best_gap:
-                    best = s
-                    best_gap = gap
+            # Priority 2: stocks with 0 NEW shares that ARE in portfolio
+            _new_zeros = [s for s in result if s["shares"] == 0 and 0 < s["price"] <= remaining]
+            if _new_zeros:
+                _new_zeros.sort(key=lambda x: x["price"])
+                best = _new_zeros[0]
+            else:
+                # Priority 3: largest (target - actual) gap
+                best_gap = -float("inf")
+                for s in result:
+                    target = sip_amount * s["allocation_pct"] / 100
+                    gap = target - s["actual_amount"]
+                    if s["price"] > 0 and s["price"] <= remaining and gap > best_gap:
+                        best = s
+                        best_gap = gap
+
         if best is None:
             break
         best["shares"] += 1
@@ -8153,7 +8159,8 @@ elif st.session_state.sb_view_mode == "portfolios":
                                             s["allocation_pct"] = equal_pct
                                     
                                     if sip_stocks:
-                                        allocated, _ = allocate_shares(sip_stocks, exec_amount)
+                                        _existing = {h["ticker"]: h["shares"] for h in display_holdings}
+                                        allocated, _ = allocate_shares(sip_stocks, exec_amount, existing_shares=_existing)
                                         
                                         # ── TRACK LIVE SPENDING ──
                                         live_spent = 0
@@ -8601,7 +8608,8 @@ elif st.session_state.sb_view_mode == "portfolios":
                     sip_alloc = {}
                     unallocated_sip = cycle_amount
                     if sip_stocks and cycle_amount > 0:
-                        allocated, unallocated_sip = allocate_shares(sip_stocks, cycle_amount)
+                        _existing = {h.get("ticker", ""): h.get("shares", 0) for h in rev_holdings}
+                        allocated, unallocated_sip = allocate_shares(sip_stocks, cycle_amount, existing_shares=_existing)
                         for a in allocated:
                             sip_alloc[a["ticker"]] = a["shares"]
                         st.caption(f"💰 This cycle ({review_days} days): ₹{cycle_amount:,} to invest — suggested shares pre-filled below")
