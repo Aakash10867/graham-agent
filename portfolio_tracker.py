@@ -186,6 +186,64 @@ def compute_xirr_standalone(supabase, portfolio_id, current_value, nifty_shadow_
         except Exception:
             pass
     return port_xirr_pct, nifty_xirr_pct
+
+def compute_diversification_score(holdings, universe_df=None):
+    """Compute portfolio diversification score (0-100).
+    Reilly & Brown Ch 6: HHI sector spread, concentration, holdings count, cap distribution."""
+    if not holdings or len(holdings) == 0:
+        return 0
+
+    total_value = sum(h.get("current_value", 0) or h.get("sip_amount_inr", 0) or 0 for h in holdings)
+    if total_value <= 0:
+        return 0
+
+    def _val(h):
+        return h.get("current_value", 0) or h.get("sip_amount_inr", 0) or 0
+
+    # ── 1. Sector HHI inverted (40%) ──
+    sector_weights = {}
+    for h in holdings:
+        sec = h.get("sector", "Unknown") or "Unknown"
+        sector_weights[sec] = sector_weights.get(sec, 0) + _val(h)
+    sector_fracs = [v / total_value for v in sector_weights.values()]
+    hhi = sum(f ** 2 for f in sector_fracs)
+    n_sectors = max(len(sector_fracs), 1)
+    hhi_min = 1.0 / n_sectors
+    hhi_score = max(0, (1.0 - hhi) / (1.0 - hhi_min) * 100) if hhi_min < 1.0 else 0
+
+    # ── 2. Single-stock concentration (20%) ──
+    stock_fracs = [_val(h) / total_value for h in holdings]
+    max_weight = max(stock_fracs) if stock_fracs else 1.0
+    conc_score = max(0, min(100, (1.0 - max_weight) / 0.9 * 100))
+
+    # ── 3. Holdings adequacy vs book minimum of 12 (20%) ──
+    BOOK_MIN = 12
+    adequacy_score = min(100, (len(holdings) / BOOK_MIN) * 100)
+
+    # ── 4. Cap distribution (20%) ──
+    cap_score = 50
+    if universe_df is not None and not universe_df.empty:
+        try:
+            large_w, small_w = 0.0, 0.0
+            for h in holdings:
+                row = universe_df[universe_df["ticker"] == h.get("ticker", "")]
+                tier = row.iloc[0].get("risk_tier", "Unknown") if not row.empty else "Unknown"
+                frac = _val(h) / total_value
+                if tier == "Large":
+                    large_w += frac
+                elif tier == "Small":
+                    small_w += frac
+            if small_w > 0.5:
+                cap_score = max(0, 100 - (small_w - 0.5) * 200)
+            elif large_w < 0.1 and len(holdings) >= 5:
+                cap_score = max(0, large_w * 1000)
+            else:
+                cap_score = 80
+        except Exception:
+            pass
+
+    final = (hhi_score * 0.4) + (conc_score * 0.2) + (adequacy_score * 0.2) + (cap_score * 0.2)
+    return round(max(0, min(100, final)))
  
 def run_daily_tracker():
     print("Initiating Kordent Daily Portfolio Audit...")
@@ -389,7 +447,17 @@ def run_daily_tracker():
                 print(f"  XIRR store failed (non-blocking): {e}")
 
         _xirr_str = f" | XIRR {_p_xirr:+.1f}%" if _p_xirr is not None else ""
-        print(f"Updated [{port['name']}]: Value {current_total_value:,.2f} | Return {return_pct:+.2f}%{_xirr_str}")
+        # Diversification score
+        _div_score = compute_diversification_score(port_holdings, universe_df)
+        try:
+            supabase.table("portfolios").update({
+                "diversification_score": _div_score
+            }).eq("id", port_id).execute()
+        except Exception as e:
+            print(f"  Diversification score store failed (non-blocking): {e}")
+
+        _div_label = "🟢" if _div_score >= 70 else "🟡" if _div_score >= 40 else "🔴"
+        print(f"Updated [{port['name']}]: Value {current_total_value:,.2f} | Return {return_pct:+.2f}%{_xirr_str} | Div {_div_label}{_div_score}")
         _port_values[port_id] = (round(current_total_value, 2), round(return_pct, 2), _p_xirr, _n_xirr)
 
         # ── SIP budget management (30% cap for mid-cycle opportunities) ──
