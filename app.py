@@ -5375,13 +5375,13 @@ def agent_turn(user_message, status_container=None):
                 )
     
                 if not _skip_auditor:
-                auditor_response = client.models.generate_content(
-                    model=model_name,
-                    contents=auditor_input,
-                    config=types.GenerateContentConfig(system_instruction=AUDITOR_SYSTEM_PROMPT)
-                )
-
-                audit_result = auditor_response.text.strip()
+                    auditor_response = client.models.generate_content(
+                        model=model_name,
+                        contents=auditor_input,
+                        config=types.GenerateContentConfig(system_instruction=AUDITOR_SYSTEM_PROMPT)
+                    )
+    
+                    audit_result = auditor_response.text.strip()
 
             # --- PHASE 3: RESOLUTION ---
             if audit_result.startswith("[REJECT]"):
