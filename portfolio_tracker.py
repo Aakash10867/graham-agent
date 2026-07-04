@@ -244,6 +244,156 @@ def compute_diversification_score(holdings, universe_df=None):
 
     final = (hhi_score * 0.4) + (conc_score * 0.2) + (adequacy_score * 0.2) + (cap_score * 0.2)
     return round(max(0, min(100, final)))
+
+def compute_portfolio_risk_metrics(holdings, universe_df=None, nifty_history=None):
+    """Compute portfolio-level risk and performance metrics from Reilly & Brown.
+    Ch 7: CAPM, Beta, Alpha (Jensen). Ch 18: Sharpe, Treynor, Sortino, IR.
+
+    Returns dict with all computed metrics, or empty dict on failure."""
+    import yfinance as yf
+    from datetime import datetime, timedelta
+
+    if not holdings or len(holdings) == 0:
+        return {}
+
+    RFR = 0.07  # India 10Y govt bond rate — TODO: fetch dynamically via get_web_context
+    result = {}
+
+    total_value = sum(h.get("current_value", 0) or h.get("sip_amount_inr", 0) or 0 for h in holdings)
+    if total_value <= 0:
+        return {}
+
+    # ── 1. Portfolio Beta = Σ wi × βi (Ch 7) ──
+    weighted_beta = 0.0
+    beta_available = 0
+    for h in holdings:
+        ticker = h.get("ticker", "")
+        weight = (h.get("current_value", 0) or h.get("sip_amount_inr", 0) or 0) / total_value
+        beta = None
+        # Try universe CSV first (faster)
+        if universe_df is not None and not universe_df.empty:
+            row = universe_df[universe_df["ticker"] == ticker]
+            if not row.empty and "beta" in row.columns:
+                beta = row.iloc[0].get("beta")
+        # Fallback to yfinance
+        if beta is None or (hasattr(beta, '__float__') and str(beta) == 'nan'):
+            try:
+                info = yf.Ticker(ticker).info
+                beta = info.get("beta")
+            except Exception:
+                pass
+        if beta is not None and str(beta) != 'nan':
+            weighted_beta += weight * float(beta)
+            beta_available += 1
+
+    if beta_available > 0:
+        result["portfolio_beta"] = round(weighted_beta, 3)
+
+    # ── 2. Portfolio returns from price history (1 year) ──
+    try:
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=365)
+        tickers = [h["ticker"] for h in holdings]
+        weights = [(h.get("current_value", 0) or h.get("sip_amount_inr", 0) or 0) / total_value for h in holdings]
+
+        # Fetch daily returns
+        hist = yf.download(tickers, start=start_date.strftime("%Y-%m-%d"),
+                           end=end_date.strftime("%Y-%m-%d"), progress=False)
+        if hist.empty:
+            return result
+
+        # Handle single vs multiple tickers
+        if len(tickers) == 1:
+            daily_prices = hist["Close"].to_frame(tickers[0])
+        else:
+            daily_prices = hist["Close"]
+
+        daily_returns = daily_prices.pct_change().dropna()
+        if daily_returns.empty:
+            return result
+
+        # Portfolio daily returns (weighted)
+        port_returns = None
+        for i, ticker in enumerate(tickers):
+            if ticker in daily_returns.columns:
+                col = daily_returns[ticker] * weights[i]
+                port_returns = col if port_returns is None else port_returns + col
+
+        if port_returns is None:
+            return result
+
+        # Annualize
+        trading_days = 252
+        port_annual_return = port_returns.mean() * trading_days
+        port_annual_std = port_returns.std() * (trading_days ** 0.5)
+
+        result["annual_return"] = round(port_annual_return, 4)
+        result["annual_std"] = round(port_annual_std, 4)
+
+        # ── 3. Sharpe Ratio = (Rp - RFR) / σp (Ch 18) ──
+        if port_annual_std > 0:
+            result["sharpe_ratio"] = round((port_annual_return - RFR) / port_annual_std, 3)
+
+        # ── 4. Treynor Ratio = (Rp - RFR) / βp (Ch 18) ──
+        if "portfolio_beta" in result and result["portfolio_beta"] != 0:
+            result["treynor_ratio"] = round((port_annual_return - RFR) / result["portfolio_beta"], 4)
+
+        # ── 5. Jensen's Alpha = Rp - RFR - β(Rm - RFR) (Ch 18) ──
+        # Need market return (Nifty 50)
+        try:
+            nifty = yf.download("^NSEI", start=start_date.strftime("%Y-%m-%d"),
+                                end=end_date.strftime("%Y-%m-%d"), progress=False)
+            if not nifty.empty:
+                nifty_returns = nifty["Close"].pct_change().dropna()
+                market_annual_return = nifty_returns.mean() * trading_days
+                result["market_return"] = round(market_annual_return, 4)
+
+                if "portfolio_beta" in result:
+                    alpha = port_annual_return - RFR - result["portfolio_beta"] * (market_annual_return - RFR)
+                    result["jensen_alpha"] = round(alpha, 4)
+
+                # ── 6. Information Ratio = (Rp - Rb) / σ(Rp - Rb) (Ch 18) ──
+                # Align dates
+                aligned = port_returns.to_frame("port").join(nifty_returns.to_frame("nifty"), how="inner")
+                if not aligned.empty:
+                    tracking_diff = aligned["port"] - aligned["nifty"]
+                    tracking_error = tracking_diff.std() * (trading_days ** 0.5)
+                    if tracking_error > 0:
+                        ir = (port_annual_return - market_annual_return) / tracking_error
+                        result["information_ratio"] = round(ir, 3)
+        except Exception:
+            pass
+
+        # ── 7. Sortino Ratio = (Rp - τ) / DRp (Ch 18) ──
+        # τ = target return, use RFR; DR = downside deviation
+        daily_rfr = RFR / trading_days
+        downside = port_returns[port_returns < daily_rfr]
+        if len(downside) > 0:
+            downside_dev = ((downside - daily_rfr) ** 2).mean() ** 0.5 * (trading_days ** 0.5)
+            if downside_dev > 0:
+                result["sortino_ratio"] = round((port_annual_return - RFR) / downside_dev, 3)
+
+        # ── 8. Semi-deviation (Ch 6) ──
+        below_mean = port_returns[port_returns < port_returns.mean()]
+        if len(below_mean) > 0:
+            semi_dev = below_mean.std() * (trading_days ** 0.5)
+            result["semi_deviation"] = round(semi_dev, 4)
+
+        # ── 9. Max drawdown ──
+        cumulative = (1 + port_returns).cumprod()
+        peak = cumulative.cummax()
+        drawdown = (cumulative - peak) / peak
+        result["max_drawdown"] = round(drawdown.min(), 4)
+
+        # ── 10. CAPM expected return = RFR + β(Rm - RFR) (Ch 7) ──
+        if "portfolio_beta" in result and "market_return" in result:
+            expected = RFR + result["portfolio_beta"] * (result["market_return"] - RFR)
+            result["capm_expected_return"] = round(expected, 4)
+
+    except Exception as e:
+        print(f"  Risk metrics computation error (non-blocking): {e}")
+
+    return result
  
 def run_daily_tracker():
     print("Initiating Kordent Daily Portfolio Audit...")
@@ -458,6 +608,24 @@ def run_daily_tracker():
 
         _div_label = "🟢" if _div_score >= 70 else "🟡" if _div_score >= 40 else "🔴"
         print(f"Updated [{port['name']}]: Value {current_total_value:,.2f} | Return {return_pct:+.2f}%{_xirr_str} | Div {_div_label}{_div_score}")
+        # Sprint 11: Portfolio risk & performance metrics (Reilly & Brown Ch 7, 18)
+        try:
+            _risk = compute_portfolio_risk_metrics(port_holdings, universe_df)
+            if _risk:
+                _risk_update = {}
+                for k in ["portfolio_beta", "sharpe_ratio", "sortino_ratio", "jensen_alpha",
+                           "treynor_ratio", "information_ratio", "max_drawdown",
+                           "capm_expected_return", "semi_deviation", "annual_return", "annual_std"]:
+                    if k in _risk:
+                        _risk_update[k] = _risk[k]
+                if _risk_update:
+                    supabase.table("portfolios").update(_risk_update).eq("id", port_id).execute()
+                _beta_str = f" | β={_risk.get('portfolio_beta', '?')}"
+                _sharpe_str = f" | Sharpe={_risk.get('sharpe_ratio', '?')}"
+                _alpha_str = f" | α={_risk.get('jensen_alpha', '?')}"
+                print(f"  Risk metrics: {_beta_str}{_sharpe_str}{_alpha_str}")
+        except Exception as e:
+            print(f"  Risk metrics failed (non-blocking): {e}")
         _port_values[port_id] = (round(current_total_value, 2), round(return_pct, 2), _p_xirr, _n_xirr)
 
         # ── SIP budget management (30% cap for mid-cycle opportunities) ──
