@@ -4685,7 +4685,7 @@ PHASE 2: FINALIZE & REGISTER (TRIGGERED ONLY AFTER USER REPLIES)
 1. When the user answers your questions, finalize the stock selection.
 2. Output the final portfolio table. NOW you may explain the quantitative reasoning using book philosophies (Graham/Greenblatt/Dorsey) to educate them on why these picks were made.
 3. CRITICAL: Generate this textual explanation FIRST.
-4. Call register_portfolio with all fields including portfolio_profile, target_amount, and target_date. CRITICAL: Use the `decision_context` parameter to summarize the user's answers to your Phase 1 questions so the system remembers their accepted trade-offs (e.g. "User accepted volatility in Industrials for higher growth"). Do not ask for permission to save, just call the tool.
+4. Call register_portfolio with all fields including portfolio_profile, target_amount, and target_date. CRITICAL: Use the `decision_context` parameter to summarize the user's answers to your Phase 1 questions so the system remembers their accepted trade-offs (e.g. "User accepted volatility in Industrials for higher growth"). Do not ask for permission to save, just call the tool. YOU MUST CALL THE register_portfolio TOOL — do not just write text saying "portfolio saved." The save button ONLY appears when the tool is called. If you skip the tool call, the user CANNOT save their portfolio.
 
 If someone asks to build a portfolio WITHOUT a [BUILDER_PROFILE] prefix, direct them to click the 🏗️ Build Portfolio button in the sidebar. If they insist or provide enough info inline, you may proceed by mapping their inputs to the profile parameters.
 
@@ -5410,6 +5410,45 @@ if st.session_state.sb_view_mode == "chat":
                     if st.session_state.get("pending_portfolio"):
                         st.info("⬆️ Scroll up to review and save your portfolio.")
                         st.rerun()
+
+                    # Sprint 11: Safety net — detect when LLM presented a portfolio table
+                    # but DIDN'T call register_portfolio (common with weaker models)
+                    _bp = st.session_state.get("builder_profile")
+                    if _bp and not st.session_state.get("pending_portfolio"):
+                        # Check if the response contains ticker patterns (X.NS) suggesting a portfolio was presented
+                        import re
+                        _ticker_matches = re.findall(r'[A-Z]{2,20}\.NS', answer or "")
+                        if len(_ticker_matches) >= 5:
+                            st.warning("⚠️ Portfolio was presented but not saved to the system. Retrying registration...")
+                            # Build stocks list from the tickers found in the response
+                            _found_tickers = list(dict.fromkeys(_ticker_matches))  # deduplicate, preserve order
+                            _auto_stocks = []
+                            _equal_pct = round(100 / len(_found_tickers), 1)
+                            for _ft in _found_tickers:
+                                _row = universe_df[universe_df["ticker"] == _ft]
+                                _auto_stocks.append({
+                                    "ticker": _ft,
+                                    "name": str(_row.iloc[0].get("name", _ft)) if not _row.empty else _ft,
+                                    "sector": str(_row.iloc[0].get("sector", "Unknown")) if not _row.empty else "Unknown",
+                                    "allocation_pct": _equal_pct,
+                                })
+                            _auto_result = register_portfolio(
+                                portfolio_name=f"{_bp.get('investor_type', 'Growth').title()} SIP {datetime.date.today().strftime('%b %Y')}",
+                                investor_type=_bp.get("investor_type", "balanced"),
+                                sip_amount=_bp.get("sip_amount", 5000),
+                                time_horizon=_bp.get("time_horizon", "medium"),
+                                review_days=_bp.get("review_days", 90),
+                                stocks_json=json.dumps(_auto_stocks),
+                                portfolio_profile=json.dumps(_bp),
+                                target_amount=_bp.get("target_amount", 0) or 0,
+                                target_date=_bp.get("target_date", "") or "",
+                                decision_context="Auto-extracted from LLM response (model failed to call register_portfolio tool)."
+                            )
+                            if st.session_state.get("pending_portfolio"):
+                                st.info("✅ Portfolio captured. Scroll up to review and save.")
+                                st.rerun()
+                            elif isinstance(_auto_result, dict) and _auto_result.get("error"):
+                                st.warning(f"Auto-save blocked: {_auto_result.get('error')} — {', '.join(_auto_result.get('violations', []))}")
 
                     if st.session_state.get("_pending_navigate"):
                         st.session_state.sb_view_mode = st.session_state._pending_navigate
