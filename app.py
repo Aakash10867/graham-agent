@@ -102,17 +102,35 @@ def get_supabase():
     return client
 
 def allocate_shares(stocks, sip_amount, existing_shares=None):
-    """Progressive diversification allocation (Reilly & Brown Ch 6).
+    """Breadth-then-depth share allocation (Reilly & Brown Ch 6).
 
-    existing_shares: dict of {ticker: portfolio_shares} for deploy/SIP cycles.
-                     None for initial portfolio creation.
+    existing_shares: {ticker: portfolio_shares} for deploy/SIP cycles.
+                     None for initial portfolio creation (all start at 0).
 
-    Phase 1 — Buy 1 share of each stock, cheapest first.
-    Phase 2 — Priority to stocks with 0 PORTFOLIO-LEVEL shares (cheapest first).
-              These are the holdings that need funding most urgently to reduce
-              unsystematic risk across cycles.
-    Phase 3 — Gap-based fill: remaining budget goes to the stock whose
-              actual allocation is furthest below its target allocation.
+    One invariant governs every rupee: a security with 0 shares is never
+    skipped so another security can buy a 2nd share. Breadth dominates depth
+    until every security holds at least one share.
+
+    Each cycle resolves to one of two states:
+
+    STATE BROAD — at least one security still has 0 total shares.
+      Step 1: buy 1 share of each unfunded security, cheapest first, until the
+              next-cheapest unfunded one is unaffordable.
+      Step 2: mop up leftover into ALREADY-FUNDED, still-under-target securities.
+              Filter to (total shares >= 1) AND (gap > 0); sort by price ascending;
+              fill each with shares one at a time until its actual meets-or-crosses
+              its target (stop at the first crossing share — no further overshoot),
+              then advance. 0-share securities are untouchable here (unaffordable
+              by definition this cycle) — their claim rolls to next cycle's larger
+              pooled budget.
+
+    STATE DEEP — every security already holds >= 1 share.
+      Pure gap-fill: largest (target - actual) first, as many shares as budget
+      allows, descending.
+
+    `target`/`gap` are computed against this deployment's `sip_amount` and the
+    shares bought THIS cycle — i.e. "of this money, who is furthest under their
+    intended slice." Existing holdings set breadth state but not the gap math.
     """
     _existing = existing_shares or {}
     result = []
@@ -122,53 +140,52 @@ def allocate_shares(stocks, sip_amount, existing_shares=None):
 
     remaining = sip_amount
 
-    # ── Phase 1: one share per stock, cheapest first ──
-    zero_stocks = sorted(
-        [s for s in result if s["price"] > 0],
-        key=lambda x: x["price"],
-    )
-    for s in zero_stocks:
-        if s["price"] <= remaining:
-            s["shares"] = 1
-            s["actual_amount"] = s["price"]
-            remaining = sip_amount - sum(x["actual_amount"] for x in result)
+    def _total(s):
+        return s["_portfolio_shares"] + s["shares"]
 
-    # ── Phase 2 + 3: portfolio-zero priority, then gap-fill ──
+    def _target(s):
+        return sip_amount * s.get("allocation_pct", 0) / 100.0
+
+    def _buy(s):
+        nonlocal remaining
+        s["shares"] += 1
+        s["actual_amount"] = s["shares"] * s["price"]
+        remaining = round(sip_amount - sum(x["actual_amount"] for x in result), 2)
+
+    # ── Breadth Step 1: one share of each unfunded security, cheapest first ──
+    for s in sorted(result, key=lambda x: x["price"]):
+        if _total(s) == 0 and 0 < s["price"] <= remaining:
+            _buy(s)
+
+    # Re-evaluate AFTER Step 1 buys — if Step 1 funded the last name, go DEEP.
+    _any_unfunded = any(_total(s) == 0 and s["price"] > 0 for s in result)
+
+    if _any_unfunded:
+        # ── Breadth Step 2: mop leftover into funded, under-target names ──
+        # Cheapest-first; fill each until it meets-or-crosses target, then move on.
+        for s in sorted(result, key=lambda x: x["price"]):
+            if _total(s) < 1:
+                continue  # never touch a 0-share security here
+            while (s["actual_amount"] < _target(s)
+                   and 0 < s["price"] <= remaining):
+                _buy(s)
+        return result, round(remaining, 2)
+
+    # ── STATE DEEP: every security funded — pure gap-fill by largest gap ──
     _max_iter = len(result) * 200
     _iter = 0
     while remaining > 0 and _iter < _max_iter:
         _iter += 1
         best = None
-
-        # Priority 1: stocks with 0 shares in the PORTFOLIO even after Phase 1
-        # (new_shares from Phase 1 but portfolio still at 0 means this is first cycle)
-        _portfolio_zeros = [s for s in result
-                           if s["_portfolio_shares"] + s["shares"] <= 0
-                           and 0 < s["price"] <= remaining]
-        if _portfolio_zeros:
-            _portfolio_zeros.sort(key=lambda x: x["price"])
-            best = _portfolio_zeros[0]
-        else:
-            # Priority 2: stocks with 0 NEW shares that ARE in portfolio
-            _new_zeros = [s for s in result if s["shares"] == 0 and 0 < s["price"] <= remaining]
-            if _new_zeros:
-                _new_zeros.sort(key=lambda x: x["price"])
-                best = _new_zeros[0]
-            else:
-                # Priority 3: largest (target - actual) gap
-                best_gap = -float("inf")
-                for s in result:
-                    target = sip_amount * s["allocation_pct"] / 100
-                    gap = target - s["actual_amount"]
-                    if s["price"] > 0 and s["price"] <= remaining and gap > best_gap:
-                        best = s
-                        best_gap = gap
-
+        best_gap = -float("inf")
+        for s in result:
+            gap = _target(s) - s["actual_amount"]
+            if s["price"] > 0 and s["price"] <= remaining and gap > best_gap:
+                best = s
+                best_gap = gap
         if best is None:
             break
-        best["shares"] += 1
-        best["actual_amount"] = best["shares"] * best["price"]
-        remaining = sip_amount - sum(s["actual_amount"] for s in result)
+        _buy(best)
 
     return result, round(remaining, 2)
 
