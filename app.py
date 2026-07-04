@@ -871,7 +871,8 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
             _metrics_text += f"CAPM expected return: {_capm*100:.1f}% p.a. "
         if _jensen is not None:
             _sign = "+" if _jensen >= 0 else ""
-            _metrics_text += f"Jensen's Alpha: {_sign}{_jensen*100:.1f}% ({"outperforming" if _jensen >= 0 else "underperforming"} risk-adjusted expectation). "
+            _alpha_label = "outperforming" if _jensen >= 0 else "underperforming"
+            _metrics_text += f"Jensen's Alpha: {_sign}{_jensen*100:.1f}% ({_alpha_label} risk-adjusted expectation). "
         if _sortino is not None:
             _metrics_text += f"Sortino ratio: {_sortino:.2f} (downside-risk-adjusted). "
         if _treynor is not None:
