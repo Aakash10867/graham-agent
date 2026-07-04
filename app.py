@@ -111,26 +111,31 @@ def allocate_shares(stocks, sip_amount, existing_shares=None):
     skipped so another security can buy a 2nd share. Breadth dominates depth
     until every security holds at least one share.
 
+    TARGET BASIS — mark-to-market, portfolio-level. A stock's target is its
+    allocation_pct of the WHOLE portfolio's current value (existing holdings
+    at current price + this cycle's new money). "On target" means
+    current_holding_value / total_portfolio_value == allocation_pct. This is
+    the only basis consistent with minimising *present* unsystematic risk:
+    concentration is about today's exposure, not cost basis.
+
+    NOTE: allocation_pct must be the TRUE target weight, NOT a this-cycle
+    deficit weight. Callers must pass raw holdings with real targets and let
+    this function own all deficit/gap logic.
+
     Each cycle resolves to one of two states:
 
     STATE BROAD — at least one security still has 0 total shares.
       Step 1: buy 1 share of each unfunded security, cheapest first, until the
               next-cheapest unfunded one is unaffordable.
-      Step 2: mop up leftover into ALREADY-FUNDED, still-under-target securities.
-              Filter to (total shares >= 1) AND (gap > 0); sort by price ascending;
-              fill each with shares one at a time until its actual meets-or-crosses
-              its target (stop at the first crossing share — no further overshoot),
-              then advance. 0-share securities are untouchable here (unaffordable
-              by definition this cycle) — their claim rolls to next cycle's larger
-              pooled budget.
+      Step 2: mop leftover into ALREADY-FUNDED, still-under-target names.
+              Cheapest-first; buy one share at a time until that name's
+              portfolio value meets-or-crosses its target (stop at the first
+              crossing share), then advance. 0-share names are untouchable
+              here — their claim rolls to next cycle's larger pooled budget.
 
-    STATE DEEP — every security already holds >= 1 share.
-      Pure gap-fill: largest (target - actual) first, as many shares as budget
-      allows, descending.
-
-    `target`/`gap` are computed against this deployment's `sip_amount` and the
-    shares bought THIS cycle — i.e. "of this money, who is furthest under their
-    intended slice." Existing holdings set breadth state but not the gap math.
+    STATE DEEP — every security holds >= 1 share.
+      Pure gap-fill: largest (target_value - current_value) first, as many
+      shares as budget allows, descending.
     """
     _existing = existing_shares or {}
     result = []
@@ -143,8 +148,16 @@ def allocate_shares(stocks, sip_amount, existing_shares=None):
     def _total(s):
         return s["_portfolio_shares"] + s["shares"]
 
-    def _target(s):
-        return sip_amount * s.get("allocation_pct", 0) / 100.0
+    def _value(s):
+        # Current mark-to-market value: existing holding + shares bought this cycle
+        return _total(s) * s["price"]
+
+    def _portfolio_after():
+        # Total portfolio value once this cycle's money is deployed
+        return sum(_value(x) for x in result) + remaining
+
+    def _target_value(s):
+        return _portfolio_after() * s.get("allocation_pct", 0) / 100.0
 
     def _buy(s):
         nonlocal remaining
@@ -157,21 +170,22 @@ def allocate_shares(stocks, sip_amount, existing_shares=None):
         if _total(s) == 0 and 0 < s["price"] <= remaining:
             _buy(s)
 
-    # Re-evaluate AFTER Step 1 buys — if Step 1 funded the last name, go DEEP.
+    # Re-evaluate AFTER Step 1 — if Step 1 funded the last name, go DEEP.
     _any_unfunded = any(_total(s) == 0 and s["price"] > 0 for s in result)
 
     if _any_unfunded:
         # ── Breadth Step 2: mop leftover into funded, under-target names ──
-        # Cheapest-first; fill each until it meets-or-crosses target, then move on.
+        # Cheapest-first; fill each until its portfolio value meets-or-crosses
+        # its portfolio-level target, then move on. Never touch a 0-share name.
         for s in sorted(result, key=lambda x: x["price"]):
             if _total(s) < 1:
-                continue  # never touch a 0-share security here
-            while (s["actual_amount"] < _target(s)
+                continue
+            while (_value(s) < _target_value(s)
                    and 0 < s["price"] <= remaining):
                 _buy(s)
         return result, round(remaining, 2)
 
-    # ── STATE DEEP: every security funded — pure gap-fill by largest gap ──
+    # ── STATE DEEP: every security funded — gap-fill by largest value gap ──
     _max_iter = len(result) * 200
     _iter = 0
     while remaining > 0 and _iter < _max_iter:
@@ -179,7 +193,7 @@ def allocate_shares(stocks, sip_amount, existing_shares=None):
         best = None
         best_gap = -float("inf")
         for s in result:
-            gap = _target(s) - s["actual_amount"]
+            gap = _target_value(s) - _value(s)
             if s["price"] > 0 and s["price"] <= remaining and gap > best_gap:
                 best = s
                 best_gap = gap
@@ -8141,40 +8155,24 @@ elif st.session_state.sb_view_mode == "portfolios":
                                         st.rerun()
 
                                 if exec_amount > 0:
+                                    # Hand raw holdings with TRUE target weights to
+                                    # allocate_shares — it owns all breadth/gap logic.
+                                    # No pre-chewing: no deficit weighting, no filtering
+                                    # of on-target names (breadth rule must see them all).
                                     sip_stocks = []
-                                    total_current_value = sum(h.get("current_value", 0) for h in display_holdings)
-                                    total_after_sip = total_current_value + exec_amount
-
                                     for h in display_holdings:
-                                        target_pct = h.get("allocation_pct", 0)
-                                        if target_pct <= 0:
+                                        if h.get("allocation_pct", 0) <= 0:
                                             continue
-                                        target_value = total_after_sip * target_pct / 100
-                                        current_value = h.get("current_value", 0)
-                                        deficit = max(0, target_value - current_value)
                                         sip_stocks.append({
                                             "ticker": h["ticker"],
                                             "name": h.get("name", h["ticker"]),
-                                            "allocation_pct": 0,
+                                            "allocation_pct": h.get("allocation_pct", 0),
                                             "price": h.get("current_price", h.get("price_at_entry", 1)),
                                             "id": h["id"],
                                             "old_shares": h["shares"],
                                             "old_entry": h.get("price_at_entry", 1),
-                                            "_deficit": deficit,
                                         })
 
-                                    # Rebalancing weights: underweight stocks get more, overweight get less
-                                    total_deficit = sum(s["_deficit"] for s in sip_stocks)
-                                    if total_deficit > 0:
-                                        sip_stocks = [s for s in sip_stocks if s["_deficit"] > 0]
-                                        for s in sip_stocks:
-                                            s["allocation_pct"] = round(s["_deficit"] / total_deficit * 100, 1)
-                                    elif sip_stocks:
-                                        # All at or above target — equal weight so SIP still deploys
-                                        equal_pct = round(100 / len(sip_stocks), 1)
-                                        for s in sip_stocks:
-                                            s["allocation_pct"] = equal_pct
-                                    
                                     if sip_stocks:
                                         _existing = {h["ticker"]: h["shares"] for h in display_holdings}
                                         allocated, _ = allocate_shares(sip_stocks, exec_amount, existing_shares=_existing)
