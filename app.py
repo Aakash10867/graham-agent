@@ -133,13 +133,16 @@ def allocate_shares(stocks, sip_amount):
             remaining = sip_amount - sum(x["actual_amount"] for x in result)
 
     # ── Phase 2: fill toward target allocation, largest gap first ──
-    while remaining > 0:
+    _max_iter = len(result) * 200  # safety cap
+    _iter = 0
+    while remaining > 0 and _iter < _max_iter:
+        _iter += 1
         best = None
         best_gap = -float("inf")
         for s in result:
             target = sip_amount * s["allocation_pct"] / 100
             gap = target - s["actual_amount"]
-            if s["price"] <= remaining and gap > best_gap:
+            if s["price"] > 0 and s["price"] <= remaining and gap > best_gap:
                 best = s
                 best_gap = gap
         if best is None:
