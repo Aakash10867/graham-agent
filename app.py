@@ -4586,6 +4586,38 @@ def get_web_context(query: str) -> dict:
         query: A specific search query (e.g. "Infosys recent news regulatory actions 2026",
                "India pharma sector headwinds 2026", "India CPI inflation RBI outlook 2026").
     """
+    import requests as _req
+
+    # ── Primary: Google Custom Search (no LLM, no Gemini quota) ──
+    _gcs_key = st.secrets.get("GOOGLE_SEARCH_API_KEY")
+    _gcs_cx = st.secrets.get("GOOGLE_CSE_ID")
+
+    if _gcs_key and _gcs_cx:
+        try:
+            resp = _req.get(
+                "https://www.googleapis.com/customsearch/v1",
+                params={"key": _gcs_key, "cx": _gcs_cx, "q": query, "num": 5},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                items = resp.json().get("items", [])
+                if items:
+                    snippets = []
+                    for item in items:
+                        source = item.get("displayLink", "")
+                        title = item.get("title", "")
+                        snippet = item.get("snippet", "").replace("\n", " ")
+                        snippets.append(f"• {title} ({source}): {snippet}")
+                    return {"query": query, "context": "\n".join(snippets)}
+                return {"query": query, "context": "No material recent developments found."}
+            # 429 = daily quota exhausted → fall through to Gemini fallback
+            if resp.status_code != 429:
+                return {"query": query, "error": f"Search API returned {resp.status_code}"}
+        except Exception:
+            pass  # fall through to Gemini fallback
+
+    # ── Fallback: Gemini google_search grounding (only search-capable models) ──
+    SEARCH_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro"]
     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
     search_prompt = f'''Search the web and provide a concise summary of the most recent and material information for this query:
@@ -4604,14 +4636,11 @@ Rules:
 - Keep the summary to 5-8 bullet points maximum
 - Cite source names (e.g. "per Economic Times", "per SEBI filing") where possible'''
 
-    last_good = st.session_state.get("last_working_model")
-    if last_good and last_good in FREE_MODELS:
-        models_to_try = [last_good] + [m for m in FREE_MODELS if m != last_good]
-    else:
-        models_to_try = FREE_MODELS
-
-    for model_name in models_to_try:
+    import time as _time
+    for i, model_name in enumerate(SEARCH_MODELS):
         try:
+            if i > 0:
+                _time.sleep(2)
             response = client.models.generate_content(
                 model=model_name,
                 contents=search_prompt,
@@ -4619,7 +4648,6 @@ Rules:
                     tools=[types.Tool(google_search=types.GoogleSearch())],
                 ),
             )
-            st.session_state["last_working_model"] = model_name
             summary = ""
             try:
                 summary = response.text or ""
@@ -4633,11 +4661,10 @@ Rules:
             if not summary.strip():
                 return {"query": query, "context": "No material recent developments found."}
             return {"query": query, "context": summary.strip()}
-        except Exception as e:
-            # Sprint 11: Try next model on ANY error — some models don't support google_search
+        except Exception:
             continue
 
-    return {"query": query, "error": "All models exhausted — web search unavailable this turn."}
+    return {"query": query, "error": "Web search unavailable — all methods exhausted."}
 
 TOOL_STATUS_MESSAGES = {
     "resolve_stock": "🔍 Resolving company name...",
