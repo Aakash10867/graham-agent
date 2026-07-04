@@ -23,6 +23,7 @@ from collections import defaultdict
 import pandas as pd
 import yfinance as yf
 from google import genai
+from google.genai import types
 from supabase import create_client, Client
 import requests as _requests
 
@@ -51,6 +52,33 @@ GEMINI_MODELS = [
     "gemini-2.5-pro",
     "gemini-3.1-pro-preview",
 ]
+
+def get_macro_context(gemini_key):
+    """Fetch current macro environment for portfolio management overlay.
+    Reilly & Brown Ch 9: leading indicators, yield curve, sector rotation."""
+    client = genai.Client(api_key=gemini_key)
+    queries = [
+        "India RBI repo rate monetary policy stance inflation outlook July 2026",
+        "India 10 year government bond yield curve shape recession signal 2026",
+        "India stock market sector rotation which sectors outperforming underperforming 2026",
+    ]
+    results = []
+    for q in queries:
+        for model in GEMINI_MODELS:
+            try:
+                response = client.models.generate_content(
+                    model=model,
+                    contents=f"Provide a concise 3-4 bullet summary of: {q}",
+                    config=types.GenerateContentConfig(
+                        tools=[types.Tool(google_search=types.GoogleSearch())],
+                    ),
+                )
+                if response.text:
+                    results.append(response.text.strip())
+                    break
+            except Exception:
+                continue
+    return "\n\n".join(results) if results else ""
 
 
 # ──────────────────────────────────────────────
@@ -335,7 +363,7 @@ def get_portfolio_summaries(ports, supabase, nifty_weekly_pct):
     return summaries
 
 
-def build_gemini_prompt(name, summaries, alerts, recommendations=None):
+def build_gemini_prompt(name, summaries, alerts, recommendations=None, macro_context=""):
     """
     Build the LLM prompt for the weekly email.
     Book passages come from the alerts themselves — no book loading needed.
@@ -431,6 +459,9 @@ TODAY: {date.today().strftime('%A, %B %d, %Y')}
 PORTFOLIO DATA:
 {port_block}
 
+MACRO ENVIRONMENT (Reilly & Brown Ch 9 — use this to contextualize portfolio advice):
+{macro_context if macro_context else "Macro data unavailable this week."}
+
 THIS WEEK'S ALERTS:
 {alerts_block}
 THIS WEEK'S PICKS:
@@ -444,9 +475,10 @@ Write a warm, personal weekly email. Rules:
 4. If there are weekly picks, present them as a curated buy list — mention each stock briefly with why it fits their profile. These expire in 24 hours so convey gentle urgency.
 5. If a goal is set, give a one-line status: on track, behind, or ahead.
 6. If a portfolio is marked "Paper", note it's a watchlist portfolio — tracking performance without real money. Be encouraging about what they're learning from the simulation.
-7. End with a patience reminder — one sentence, not preachy. Vary it each week.
-8. Include the portfolio link(s) so they can take action.
-9. Sign off as "Kordent"
+7. MACRO AWARENESS (Reilly & Brown Ch 9): If macro data is available, open with a 1-2 sentence market environment read. Mention which sectors the current business cycle phase favors. If the yield curve or RBI policy signals caution, say so — a fund manager who ignores macro is irresponsible. But keep it brief and actionable, not academic.
+8. End with a patience reminder — one sentence, not preachy. Vary it each week.
+9. Include the portfolio link(s) so they can take action.
+10. Sign off as "Kordent"
 
 TONE: You're a wise friend who happens to be great with money. Not a robot, not a salesperson, not a professor. Use simple language. If you must use a financial term, define it in parentheses.
 LENGTH: Under 400 words. Shorter is better.
@@ -692,7 +724,16 @@ def run_weekly_mentor():
 
         body = None
         if gemini_key:
-            prompt = build_gemini_prompt(name, summaries, final_alerts, user_recs)
+            # Sprint 11: Macro overlay for portfolio management (Ch 9)
+            macro_env = ""
+            try:
+                macro_env = get_macro_context(gemini_key)
+                if macro_env:
+                    print(f"  Macro context fetched ({len(macro_env)} chars)")
+            except Exception as e:
+                print(f"  Macro fetch failed (non-blocking): {e}")
+
+            prompt = build_gemini_prompt(name, summaries, final_alerts, user_recs, macro_context=macro_env)
             body = call_gemini(prompt, gemini_key)
             if body:
                 print(f"  LLM narrative generated ({len(body)} chars)")
