@@ -684,7 +684,7 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
             f"Risk tolerance: {_ips.get('risk_tolerance', '—').title()}. "
             f"Life cycle: {_ips.get('life_cycle_phase', '—').replace('_', ' ').title()} (age {_ips.get('age', '—')}). "
             f"Benchmark: {_ips.get('benchmark', '—')}. "
-            f"Target stocks: {_sizing.get('actual', '—')} (book minimum: {_sizing.get('book_minimum', 12)}). "
+            f"Target stocks: {_sizing.get('actual', '—')} (budget supports up to {_sizing.get('affordable', '—')}, book minimum: {_sizing.get('book_minimum', 12)}). "
             f"Diversification status: {_sizing.get('diversification_status', '—').replace('_', ' ').title()}. "
             f"Constraints — max single stock: {_alloc.get('max_single_stock_pct', '—')}%, "
             f"max sector: {_alloc.get('max_sector_pct', '—')}%, "
@@ -3960,7 +3960,7 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
     # A stock is affordable if ≥1 share can be bought at equal weight across target count.
     # Prefer lower-priced stocks: more shares = finer rebalancing + lower per-unit risk.
     if "price" in df.columns:
-        _affordable_count = max(3, sip_amount // 500)  # How many stocks SIP can support
+        _affordable_count = max(3, sip_amount // 250)  # Progressive diversification floor
         _ips_target = max(12, _affordable_count)        # Book minimum is 12
         _actual_target = min(_affordable_count, _ips_target)
         _max_price = sip_amount / max(5, _actual_target)
