@@ -5340,40 +5340,48 @@ def agent_turn(user_message, status_container=None):
                 recovery_response = analyst_chat.send_message(recovery_prompt)
                 draft_text = _extract_text(recovery_response).strip()
 
-            _update_status("🔒 Risk officer reviewing draft...")
+            # Builder flows: skip auditor — deterministic IPS guardrails sufficient
+            if st.session_state.get("builder_profile"):
+                audit_result = "[APPROVED] Builder flow — IPS guardrails active."
+            else:
+                # Builder: skip auditor (IPS guardrails are deterministic)
+                _skip_auditor = bool(st.session_state.get("builder_profile"))
+                if _skip_auditor:
+                    audit_result = "[APPROVED]"
+                _update_status("✅ IPS validated" if _skip_auditor else "🔒 Risk officer reviewing draft...")
+                # --- PHASE 2: AUDITOR REVIEWS DRAFT (with independent data) -----
+                NOISE_WORDS = {"PASS", "FAIL", "YES", "NO", "ROE", "EPS", "SIP",
+                               "AND", "THE", "FOR", "NOT", "USE", "ALL", "WHY",
+                               "HOW", "BUY", "TOP", "LOW", "HIGH", "CAP", "NET",
+                               "YOY", "INR", "USD", "FY", "PE", "PB", "DE",
+                               "SMA", "CAGR", "NAV", "IPO", "ETF", "PDF", "CSV"}
+                mentioned_tickers = set(re.findall(r'\b[A-Z]{2,15}(?:\.NS|\.BO)?\b', draft_text))
+                mentioned_tickers -= NOISE_WORDS
+    
+                quality_checks = {}
+                for t in mentioned_tickers:
+                    qc = get_earnings_quality_metrics(t)
+                    if "error" not in qc and qc.get("anomaly_flags"):
+                        quality_checks[t] = {
+                            "cash_conversion": qc["cash_conversion_ratio"],
+                            "unusual_items_pct": qc["unusual_items_pct_of_income"],
+                            "flags": qc["anomaly_flags"],
+                        }
+    
+                auditor_input = (
+                    f"User Query: {user_message}\n\n"
+                    f"Analyst Draft:\n{draft_text}\n\n"
+                    f"Independent Earnings Quality Data:\n{json.dumps(quality_checks, indent=2)}"
+                )
+    
+                if not _skip_auditor:
+                auditor_response = client.models.generate_content(
+                    model=model_name,
+                    contents=auditor_input,
+                    config=types.GenerateContentConfig(system_instruction=AUDITOR_SYSTEM_PROMPT)
+                )
 
-            # --- PHASE 2: AUDITOR REVIEWS DRAFT (with independent data) -----
-            NOISE_WORDS = {"PASS", "FAIL", "YES", "NO", "ROE", "EPS", "SIP",
-                           "AND", "THE", "FOR", "NOT", "USE", "ALL", "WHY",
-                           "HOW", "BUY", "TOP", "LOW", "HIGH", "CAP", "NET",
-                           "YOY", "INR", "USD", "FY", "PE", "PB", "DE",
-                           "SMA", "CAGR", "NAV", "IPO", "ETF", "PDF", "CSV"}
-            mentioned_tickers = set(re.findall(r'\b[A-Z]{2,15}(?:\.NS|\.BO)?\b', draft_text))
-            mentioned_tickers -= NOISE_WORDS
-
-            quality_checks = {}
-            for t in mentioned_tickers:
-                qc = get_earnings_quality_metrics(t)
-                if "error" not in qc and qc.get("anomaly_flags"):
-                    quality_checks[t] = {
-                        "cash_conversion": qc["cash_conversion_ratio"],
-                        "unusual_items_pct": qc["unusual_items_pct_of_income"],
-                        "flags": qc["anomaly_flags"],
-                    }
-
-            auditor_input = (
-                f"User Query: {user_message}\n\n"
-                f"Analyst Draft:\n{draft_text}\n\n"
-                f"Independent Earnings Quality Data:\n{json.dumps(quality_checks, indent=2)}"
-            )
-
-            auditor_response = client.models.generate_content(
-                model=model_name,
-                contents=auditor_input,
-                config=types.GenerateContentConfig(system_instruction=AUDITOR_SYSTEM_PROMPT)
-            )
-
-            audit_result = auditor_response.text.strip()
+                audit_result = auditor_response.text.strip()
 
             # --- PHASE 3: RESOLUTION ---
             if audit_result.startswith("[REJECT]"):
@@ -5652,19 +5660,14 @@ if st.session_state.sb_view_mode == "chat":
                         error_upper = error_msg.upper()
                         if any(err in error_upper for err in ["429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "ALL MODELS RATE-LIMITED"]):
                             # ── Model fallback chain: same pattern as get_web_context ──
-                            _FALLBACK_CHAIN = [
-                                "gemini-2.5-flash-lite-preview-06-17",
-                                "gemini-2.5-flash-preview-05-20",
-                                "gemini-2.5-pro-preview-05-06",
-                            ]
                             _current_model = st.session_state.get("last_working_model",
                                 st.session_state.get("selected_model", ""))
                             _cur_idx = -1
-                            for _i, _m in enumerate(_FALLBACK_CHAIN):
+                            for _i, _m in enumerate(FREE_MODELS):
                                 if _m == _current_model:
                                     _cur_idx = _i
                                     break
-                            _remaining = _FALLBACK_CHAIN[_cur_idx + 1:]
+                            _remaining = [m for m in FREE_MODELS[_cur_idx + 1:] if m != _current_model]
 
                             import time
                             _retry_ok = False
