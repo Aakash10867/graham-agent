@@ -5231,6 +5231,62 @@ def agent_turn(user_message, status_container=None):
             clean_parts = [p.strip() for p in all_text_parts if p.strip()]
             draft_text = "\n\n".join(clean_parts).strip()
 
+            # ── Builder Phase 2 continuation: force tool execution ──
+            # Weak models sometimes narrate intent ("I will re-scan...") without
+            # actually calling tools. If builder is active, this ISN'T the initial
+            # [BUILDER_PROFILE] message, and no portfolio was registered, force it.
+            _bp_active = st.session_state.get("builder_profile")
+            if (_bp_active
+                and not user_message.strip().startswith("[BUILDER_PROFILE]")
+                and not st.session_state.get("pending_portfolio")):
+                _draft_tickers = set(re.findall(r'[A-Z]{2,20}\.NS', draft_text))
+                if len(_draft_tickers) < 5:
+                    _update_status("🏗️ Finalizing portfolio selection...")
+                    _force_prompt = (
+                        "SYSTEM OVERRIDE: You are in PHASE 2 of portfolio building. "
+                        "The user answered your questions but you STOPPED without "
+                        "calling register_portfolio. This is not acceptable. "
+                        "You already have the candidate pool from Phase 1. "
+                        "RIGHT NOW in this turn: "
+                        "(1) Pick the final stocks from your existing candidates, "
+                        "(2) Assign allocation_pct to each, "
+                        "(3) Output the portfolio table with reasoning, "
+                        "(4) Call register_portfolio. "
+                        "Do NOT say you will do it later. Execute NOW."
+                    )
+                    _forced = analyst_chat.send_message(_force_prompt)
+
+                    while analyst_response.function_calls:
+                        # dummy — this loop won't run, it's for the _forced loop below
+                        break
+                    while True:
+                        _fc_list = []
+                        try:
+                            _fc_list = _forced.function_calls or []
+                        except (AttributeError, TypeError):
+                            _fc_list = []
+                        if not _fc_list:
+                            break
+                        _fchunk = _extract_text(_forced)
+                        if _fchunk:
+                            all_text_parts.append(_fchunk)
+                        _fresp = []
+                        for fc in _fc_list:
+                            _update_status(TOOL_STATUS_MESSAGES.get(fc.name, f"⚙️ Running {fc.name}..."))
+                            if fc.name in tool_functions:
+                                _fraw = tool_functions[fc.name](**fc.args)
+                                _fres = _sanitize_for_json(_fraw)
+                            else:
+                                _fres = {"error": f"Unknown tool: {fc.name}"}
+                            _fresp.append(types.Part.from_function_response(name=fc.name, response=_fres))
+                        _forced = analyst_chat.send_message(_fresp)
+
+                    _ffinal = _extract_text(_forced)
+                    if _ffinal:
+                        all_text_parts.append(_ffinal)
+                    clean_parts = [p.strip() for p in all_text_parts if p.strip()]
+                    draft_text = "\n\n".join(clean_parts).strip()
+
             if not draft_text:
                 recovery_prompt = (
                     "You successfully executed the register_portfolio tool, but you provided zero text to the user. "
