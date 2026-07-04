@@ -4027,6 +4027,105 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
 
     candidates = _sanitize(candidates)
 
+    # ══════════════════════════════════════════════════════════════════
+    # Sprint 11: Correlation-based diversification ranking (Reilly & Brown Ch 6)
+    # Portfolio risk = f(covariance between holdings), NOT f(individual variance)
+    # Compute actual correlations from 1-year daily returns, then rank candidates
+    # by diversification contribution using greedy minimum-variance selection.
+    # ══════════════════════════════════════════════════════════════════
+    try:
+        from datetime import datetime, timedelta
+        _tickers = [c["ticker"] for c in candidates if c.get("ticker")]
+        if len(_tickers) >= 5:
+            _end = datetime.now()
+            _start = _end - timedelta(days=365)
+            _hist = yf.download(_tickers, start=_start.strftime("%Y-%m-%d"),
+                                end=_end.strftime("%Y-%m-%d"), progress=False)
+            if not _hist.empty:
+                _prices = _hist["Close"] if len(_tickers) > 1 else _hist["Close"].to_frame(_tickers[0])
+                _returns = _prices.pct_change().dropna()
+                _corr = _returns.corr()
+                _std = _returns.std()  # daily volatility per stock
+
+                # ── Greedy minimum-variance portfolio construction ──
+                # Start with highest-scoring stock, iteratively add the stock
+                # that REDUCES portfolio variance the most (Ch 6, Eq 6.7)
+                _selected = []
+                _remaining = [t for t in _corr.columns]
+                _score_map = {c["ticker"]: c.get("score", 0) for c in candidates}
+                _price_map = {c["ticker"]: c.get("price", 99999) for c in candidates}
+                _sector_map = {c["ticker"]: c.get("sector", "Unknown") for c in candidates}
+
+                # Seed with highest-scoring stock
+                _remaining.sort(key=lambda t: (-_score_map.get(t, 0), _price_map.get(t, 99999)))
+                if _remaining:
+                    _selected.append(_remaining.pop(0))
+
+                while _remaining and len(_selected) < len(_tickers):
+                    best_t = None
+                    best_portfolio_var = float("inf")
+
+                    for t in _remaining:
+                        if t not in _corr.columns:
+                            continue
+                        # Simulate adding t to selected: compute portfolio variance (equal weight)
+                        _trial = _selected + [t]
+                        n = len(_trial)
+                        w = 1.0 / n
+                        # σ²_port = Σ wi²σi² + ΣΣ wi*wj*σi*σj*ρij (Ch 6)
+                        port_var = 0.0
+                        for i, ti in enumerate(_trial):
+                            if ti not in _std.index:
+                                continue
+                            for j, tj in enumerate(_trial):
+                                if tj not in _std.index:
+                                    continue
+                                if i == j:
+                                    port_var += (w ** 2) * (_std[ti] ** 2)
+                                else:
+                                    _rij = _corr.loc[ti, tj] if ti in _corr.index and tj in _corr.columns else 0.5
+                                    port_var += (w ** 2) * _std[ti] * _std[tj] * _rij
+
+                        # Penalize if this stock is in a sector we already have 2 of
+                        _trial_sectors = [_sector_map.get(s, "?") for s in _trial]
+                        _sec_count = _trial_sectors.count(_sector_map.get(t, "?"))
+                        if _sec_count > 2:
+                            port_var *= 1.5  # Penalty: sector concentration
+
+                        if port_var < best_portfolio_var:
+                            best_portfolio_var = port_var
+                            best_t = t
+
+                    if best_t:
+                        _selected.append(best_t)
+                        _remaining.remove(best_t)
+                    else:
+                        break
+
+                # ── Inject diversification data into each candidate ──
+                for c in candidates:
+                    t = c["ticker"]
+                    if t in _selected:
+                        c["diversification_rank"] = _selected.index(t) + 1
+                    else:
+                        c["diversification_rank"] = len(_selected) + 1
+
+                    if t in _corr.columns:
+                        # Avg correlation with the top-5 picks
+                        _top5 = [s for s in _selected[:5] if s != t and s in _corr.columns]
+                        c["avg_corr_with_top5"] = round(float(_corr.loc[t, _top5].mean()), 3) if _top5 else None
+                        c["annual_volatility"] = round(float(_std[t]) * (252 ** 0.5), 4) if t in _std.index else None
+                    else:
+                        c["avg_corr_with_top5"] = None
+                        c["annual_volatility"] = None
+
+                # Re-sort: diversification rank is primary ordering
+                candidates.sort(key=lambda c: c.get("diversification_rank", 999))
+
+    except Exception as e:
+        # Non-blocking: if correlation fails, candidates keep their score-based order
+        print(f"Correlation computation failed (non-blocking): {e}")
+
     # Sprint 11: Book-standard sizing (Reilly & Brown Ch 6)
     # Book minimum: 12 stocks. System adapts to book, not reverse.
     _affordable_count = max(3, sip_amount // 500)
@@ -4589,6 +4688,57 @@ PHASE 2: FINALIZE & REGISTER (TRIGGERED ONLY AFTER USER REPLIES)
 4. Call register_portfolio with all fields including portfolio_profile, target_amount, and target_date. CRITICAL: Use the `decision_context` parameter to summarize the user's answers to your Phase 1 questions so the system remembers their accepted trade-offs (e.g. "User accepted volatility in Industrials for higher growth"). Do not ask for permission to save, just call the tool.
 
 If someone asks to build a portfolio WITHOUT a [BUILDER_PROFILE] prefix, direct them to click the 🏗️ Build Portfolio button in the sidebar. If they insist or provide enough info inline, you may proceed by mapping their inputs to the profile parameters.
+
+INVESTMENT ANALYSIS FRAMEWORK (Reilly & Brown — Investment Analysis & Portfolio Management):
+When analyzing any individual stock, follow the top-down approach (Ch 9):
+
+Step 1 — MACRO ENVIRONMENT:
+  Call get_web_context for macro context FIRST ("India GDP growth inflation RBI monetary policy 2026").
+  Assess: What is the current business cycle phase? (recovery → expansion → peak → contraction)
+  What are interest rates doing? (rising = headwind for growth stocks, falling = tailwind)
+  Is the yield curve normal, flat, or inverted? (inverted = recession warning within 12-18 months)
+
+Step 2 — SECTOR ASSESSMENT:
+  Where is this industry in its life cycle? (Ch 9: pioneering → rapid growth → mature → decline)
+  Porter's Five Forces: rivalry intensity, entry barriers, substitutes, supplier power, buyer power.
+  Call get_web_context for sector-specific outlook.
+  Sector rotation: does the current business cycle phase favor or hurt this sector?
+  (End of recession → financials. Recovery → consumer durables. Expansion → capital goods. Pre-downturn → consumer staples.)
+
+Step 3 — COMPANY ANALYSIS:
+  Apply the 5 scoring frameworks + quality gate (deterministic, already computed).
+  Cross-check valuation using Ch 8 methods where data permits:
+  - Is the PE justified by growth rate? (PEG ratio — Lynch dimension)
+  - How does ROE compare to cost of equity? (If ROE < cost of equity, the company destroys value regardless of growth)
+  - Is the company a "growth company" or a "growth STOCK"? (Ch 5: a great company at a bad price is a bad investment)
+  - Check owner earnings (Buffett: net income + depreciation - capex) vs reported earnings
+
+Step 4 — BEHAVIORAL BIAS SELF-AUDIT (Ch 5):
+  Before finalizing your thesis, explicitly check:
+  - ANCHORING: Am I fixated on a past price, analyst target, or initial impression?
+  - CONFIRMATION BIAS: Did I only seek evidence supporting my thesis? What contradicts it?
+  - REPRESENTATIVENESS: Am I confusing "good company" with "good stock"?
+  - HERDING: Is this a consensus favorite? If so, the edge is already priced in.
+  - OVERCONFIDENCE: What is the single biggest risk to this thesis? State it clearly.
+  - THE CONSENSUS TEST (Ch 5): Superior analysis requires being BOTH correct AND different from consensus.
+    If your view matches what every analyst already thinks, there is no informational advantage.
+
+SIP PORTFOLIO CONSTRUCTION — CORRELATION-AWARE (Reilly & Brown Ch 6):
+Candidates now include diversification_rank and avg_corr_with_top5 computed from actual 1-year return correlations.
+- diversification_rank = order in which stocks should be added for MAXIMUM portfolio variance reduction
+  (greedy minimum-variance selection using the full covariance matrix, Ch 6 Eq 6.7)
+- avg_corr_with_top5 = average return correlation with the 5 highest-priority picks (lower = more diversification benefit)
+- annual_volatility = annualized standard deviation of daily returns
+
+PORTFOLIO CONSTRUCTION PRIORITIES (in this order):
+1. MINIMIZE UNSYSTEMATIC RISK: Select stocks with LOW inter-correlation. A score-3 stock with 0.15 avg correlation adds MORE value than a score-5 stock with 0.85 correlation. Follow the diversification_rank ordering.
+2. MAXIMIZE QUALITY: Within the diversification constraint, prefer higher-scoring stocks.
+3. PRICE PREFERENCE: When two candidates have similar diversification value and quality, prefer the lower-priced stock (more shares per SIP = finer rebalancing granularity).
+4. RESPECT IPS CONSTRAINTS: The ALLOCATION POLICY in [BUILDER_PROFILE] contains hard limits. Never violate them.
+
+The math: adding stock i to a portfolio reduces risk when ρ(i, portfolio) < σ(i)/σ(portfolio).
+The lower the correlation, the greater the diversification benefit. Same-sector stocks typically have ρ > 0.6.
+Cross-sector stocks typically have ρ = 0.2-0.4. THIS is why sector diversification matters — not as a rule of thumb, but because same-sector returns are genuinely correlated.
 
 TOOL SELECTION RULES:
 - TICKER RESOLUTION: If the client uses a company name (not a full .NS/.BO ticker), call resolve_stock FIRST. If it returns "ambiguous", stop and wait — the client will pick from buttons. If it returns "resolved", proceed with the resolved ticker. If they already gave a ticker like RELIANCE.NS, skip resolve_stock.
