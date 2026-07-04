@@ -5162,6 +5162,58 @@ def agent_turn(user_message, status_container=None):
                     if fc.name in tool_functions:
                         # Execute the tool function, then immediately sanitize the dictionary output
                         raw_tool_output = tool_functions[fc.name](**fc.args)
+
+                        # ── Deterministic web grounding for portfolio builder ──
+                        # Reilly & Brown Step 2: "Examine current/projected conditions
+                        # (financial, economic, political, social)" — fires EVERY time,
+                        # not an LLM decision. Covers: inflation, RBI policy, LTCG/STCG
+                        # tax rates, sector outlook, business cycle positioning.
+                        if fc.name == "get_sip_candidates" and isinstance(raw_tool_output, dict):
+                            _web_grounding = {}
+                            _update_status("🌐 Fetching macro & tax context...")
+                            try:
+                                _macro = get_web_context(
+                                    "India macroeconomic outlook 2026 CPI inflation rate "
+                                    "RBI repo rate monetary policy LTCG STCG capital gains "
+                                    "tax rate equity holding period"
+                                )
+                                _web_grounding["macro_and_tax"] = _macro.get(
+                                    "context", _macro.get("error", "Unavailable"))
+                            except Exception:
+                                _web_grounding["macro_and_tax"] = "Web search unavailable."
+
+                            _top_sectors = list(dict.fromkeys(
+                                c.get("sector", "")
+                                for c in raw_tool_output.get("candidates", [])
+                                if c.get("sector") and c.get("sector") != "N/A"
+                            ))[:5]
+                            if _top_sectors:
+                                _update_status("🌐 Checking sector outlook...")
+                                try:
+                                    _sec = get_web_context(
+                                        f"India stock market sector outlook 2026 "
+                                        f"{' '.join(_top_sectors)} headwinds tailwinds "
+                                        f"recent developments"
+                                    )
+                                    _web_grounding["sector_outlook"] = _sec.get(
+                                        "context", _sec.get("error", "Unavailable"))
+                                except Exception:
+                                    _web_grounding["sector_outlook"] = "Web search unavailable."
+
+                            raw_tool_output["web_grounding"] = _web_grounding
+                            raw_tool_output["web_grounding_instruction"] = (
+                                "MANDATORY — Reilly & Brown Step 2 data above. "
+                                "You MUST use this in your portfolio rationale: "
+                                "(1) State the current inflation rate and compute "
+                                "real expected return (nominal minus inflation). "
+                                "(2) State current LTCG/STCG rates and mention "
+                                "holding period implications. "
+                                "(3) Factor sector outlook into selection — flag "
+                                "headwinds/tailwinds per stock. "
+                                "(4) Reference business cycle positioning if data "
+                                "indicates a clear phase."
+                            )
+
                         result = _sanitize_for_json(raw_tool_output)
                     else:
                         result = {"error": f"Unknown tool: {fc.name}"}
