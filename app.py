@@ -102,18 +102,40 @@ def get_supabase():
     return client
 
 def allocate_shares(stocks, sip_amount):
+    """Progressive diversification allocation (Reilly & Brown Ch 6).
+
+    Phase 1 — Diversification priority: buy 1 share of each stock starting
+              with the cheapest.  This maximises the number of distinct
+              holdings per SIP cycle and reduces unsystematic risk fastest.
+    Phase 2 — Gap-based fill: remaining budget goes to the stock whose
+              actual allocation is furthest below its target allocation.
+
+    Across multiple SIP cycles this means:
+      Cycle 1 → cheapest zero-share stocks get funded first
+      Cycle 2 → remaining zero-share stocks get funded
+      Cycle 3+ → rebalancing toward target allocation
+    """
     result = []
     for s in stocks:
-        price = s["price"]
-        target = sip_amount * s["allocation_pct"] / 100
-        shares = int(target // price) if price > 0 else 0
-        result.append({**s, "shares": shares, "actual_amount": shares * price})
+        result.append({**s, "shares": 0, "actual_amount": 0})
 
-    remaining = sip_amount - sum(s["actual_amount"] for s in result)
+    remaining = sip_amount
 
+    # ── Phase 1: one share per stock, cheapest first ──
+    zero_stocks = sorted(
+        [s for s in result if s["price"] > 0],
+        key=lambda x: x["price"],
+    )
+    for s in zero_stocks:
+        if s["price"] <= remaining:
+            s["shares"] = 1
+            s["actual_amount"] = s["price"]
+            remaining = sip_amount - sum(x["actual_amount"] for x in result)
+
+    # ── Phase 2: fill toward target allocation, largest gap first ──
     while remaining > 0:
         best = None
-        best_gap = -1
+        best_gap = -float("inf")
         for s in result:
             target = sip_amount * s["allocation_pct"] / 100
             gap = target - s["actual_amount"]
@@ -4551,9 +4573,12 @@ Rules:
             try:
                 summary = response.text or ""
             except Exception:
-                for part in response.candidates[0].content.parts:
-                    if hasattr(part, 'text') and part.text:
-                        summary += part.text
+                try:
+                    for part in (response.candidates[0].content.parts or []):
+                        if hasattr(part, 'text') and part.text:
+                            summary += part.text
+                except (AttributeError, IndexError, TypeError):
+                    pass
             if not summary.strip():
                 return {"query": query, "context": "No material recent developments found."}
             return {"query": query, "context": summary.strip()}
@@ -5112,20 +5137,27 @@ def agent_turn(user_message, status_container=None):
                     for part in resp.candidates[0].content.parts:
                         if hasattr(part, 'text') and part.text:
                             return part.text
-                except (AttributeError, IndexError):
+                except (AttributeError, IndexError, TypeError):
                     pass
                 try:
                     return resp.text or ""
                 except Exception:
                     return ""
 
-            while analyst_response.function_calls:
+            def _safe_function_calls(resp):
+                """Extract function calls safely — returns [] if parts is None."""
+                try:
+                    return resp.function_calls or []
+                except (AttributeError, TypeError):
+                    return []
+
+            while _safe_function_calls(analyst_response):
                 text_chunk = _extract_text(analyst_response)
                 if text_chunk:
                     all_text_parts.append(text_chunk)
                     
                 function_responses = []
-                for fc in analyst_response.function_calls:
+                for fc in _safe_function_calls(analyst_response):
                     _update_status(TOOL_STATUS_MESSAGES.get(fc.name, f"⚙️ Running {fc.name}..."))
                     if fc.name in tool_functions:
                         # Execute the tool function, then immediately sanitize the dictionary output
@@ -5138,6 +5170,7 @@ def agent_turn(user_message, status_container=None):
                         types.Part.from_function_response(name=fc.name, response=result)
                     )
                 # Send the sanitized parameters back to the chat manager
+                _update_status("🧠 Analyst synthesizing results...")
                 analyst_response = analyst_chat.send_message(function_responses)
 
             final_chunk = _extract_text(analyst_response)
@@ -5200,13 +5233,13 @@ def agent_turn(user_message, status_container=None):
                 
                 # --- FIX: We must process tool calls during the correction phase too! ---
                 corr_text_parts = []
-                while final_response.function_calls:
+                while _safe_function_calls(final_response):
                     text_chunk = _extract_text(final_response)
                     if text_chunk:
                         corr_text_parts.append(text_chunk)
                         
                     function_responses = []
-                    for fc in final_response.function_calls:
+                    for fc in _safe_function_calls(final_response):
                         _update_status(TOOL_STATUS_MESSAGES.get(fc.name, f"⚙️ Running {fc.name}..."))
                         if fc.name in tool_functions:
                             raw_tool_output = tool_functions[fc.name](**fc.args)
@@ -5217,6 +5250,7 @@ def agent_turn(user_message, status_container=None):
                         function_responses.append(
                             types.Part.from_function_response(name=fc.name, response=result)
                         )
+                    _update_status("🧠 Analyst synthesizing results...")
                     final_response = analyst_chat.send_message(function_responses)
 
                 final_chunk = _extract_text(final_response)
@@ -5263,12 +5297,15 @@ AGENT_AVATAR = "logo.svg"
 
 def _render_verdict_badge(text=None, stored_tier=None):
     """Render a colored verdict badge. Uses stored_tier (from tool call) when available.
-    Falls back to text scanning ONLY if the text also contains a ticker pattern,
-    which prevents false positives on meta-responses like 'I provide STRONG BUY verdicts'."""
+    Falls back to text scanning ONLY if the text contains exactly ONE ticker pattern,
+    which prevents false positives on builder responses (many tickers) and
+    meta-responses like 'I provide STRONG BUY verdicts'."""
     tier = stored_tier
     if not tier and text:
-        # Fallback for old messages without stored tier — require a ticker pattern
-        if re.search(r'\b[A-Z]{2,15}\.(?:NS|BO)\b', text):
+        # Fallback for old messages without stored tier — require EXACTLY one ticker
+        # (multi-ticker responses are builder/screener output, not single-stock verdicts)
+        _ticker_hits = re.findall(r'\b[A-Z]{2,15}\.(?:NS|BO)\b', text)
+        if len(set(_ticker_hits)) == 1:
             _upper = text.upper()
             for t in ["STRONG BUY", "CONDITIONAL BUY", "BUY", "WATCH", "AVOID", "SELL"]:
                 if t in _upper:
@@ -5477,7 +5514,7 @@ if st.session_state.sb_view_mode == "chat":
                             st.session_state.pending_retry = prompt
                 if answer:
                     _vt = st.session_state.pop("_last_verdict_tier", None)
-                    if _vt:
+                    if _vt and not st.session_state.get("builder_profile"):
                         _render_verdict_badge(stored_tier=_vt)
                     response_placeholder.markdown(answer)
                     st.caption(f"⚡ {model_used}")
@@ -5533,18 +5570,19 @@ if st.session_state.sb_view_mode == "chat":
                     if st.session_state.get("pending_disambiguation"):
                         st.rerun()
 
-                    # ── Score History Chart (single-stock analysis) ──
-                    _sh_chat_tickers = set(re.findall(r'\b[A-Z][A-Z0-9&]+\.(?:NS|BO)\b', answer))
-                    _sh_disambig = re.search(r'ticker:\s*([A-Z][A-Z0-9&]+\.(?:NS|BO))', prompt)
-                    _sh_chat_target = None
-                    if _sh_disambig:
-                        _sh_chat_target = _sh_disambig.group(1)
-                    elif len(_sh_chat_tickers) == 1:
-                        _sh_chat_target = list(_sh_chat_tickers)[0]
-                    if _sh_chat_target:
-                        with st.expander("📊 Score Trend"):
-                            render_score_history_chart(get_supabase(), _sh_chat_target,
-                                chart_key=f"sh_chat_{_sh_chat_target}")
+                    # ── Score History Chart (single-stock analysis only — skip during builder) ──
+                    if not st.session_state.get("builder_profile"):
+                        _sh_chat_tickers = set(re.findall(r'\b[A-Z][A-Z0-9&]+\.(?:NS|BO)\b', answer))
+                        _sh_disambig = re.search(r'ticker:\s*([A-Z][A-Z0-9&]+\.(?:NS|BO))', prompt)
+                        _sh_chat_target = None
+                        if _sh_disambig:
+                            _sh_chat_target = _sh_disambig.group(1)
+                        elif len(_sh_chat_tickers) == 1:
+                            _sh_chat_target = list(_sh_chat_tickers)[0]
+                        if _sh_chat_target:
+                            with st.expander("📊 Score Trend"):
+                                render_score_history_chart(get_supabase(), _sh_chat_target,
+                                    chart_key=f"sh_chat_{_sh_chat_target}")
 
                     # ── Chat → Watchlist bridge: store positive-verdict tickers for buttons ──
                     _positive_verdicts = {"STRONG BUY", "BUY", "CONDITIONAL BUY"}
