@@ -4345,6 +4345,100 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
     # Fires EVERY time at the data layer. Macro, tax, sector context
     # baked into candidates so all downstream decisions are grounded.
     st.session_state._last_candidates = candidates
+
+    # ── Build IPS-compliant portfolio deterministically (Reilly & Brown Ch 18) ──
+    # Security selection follows from IPS constraints. The system builds the
+    # portfolio; the LLM explains it. Not the other way around.
+    _bp = st.session_state.get("builder_profile") or {}
+    _ips = _bp.get("ips_policy", {})
+    _alloc_policy = _ips.get("allocation_policy", {})
+    _sizing = _ips.get("portfolio_sizing", {})
+    _target_n = _sizing.get("actual", _sizing.get("ips_target", min_stocks))
+
+    _max_same_sec = _alloc_policy.get("max_same_sector", 2)
+    _max_sec_pct = _alloc_policy.get("max_sector_pct", 25)
+    _small_cap_max = _alloc_policy.get("small_cap_max_pct", 10)
+    _large_cap_min = _alloc_policy.get("large_cap_min_pct", 50)
+
+    from collections import Counter as _Counter
+    _rp_selected = []
+    _rp_sector_counts = _Counter()
+    _rp_small = 0
+    _rp_large = 0
+
+    # Candidates already sorted by diversification_rank (greedy min-variance)
+    for _c in candidates:
+        if len(_rp_selected) >= _target_n:
+            break
+
+        _sec = _c.get("sector", "Unknown")
+        _tier = _c.get("risk_tier", "Unknown")
+        _n_so_far = len(_rp_selected) + 1
+
+        # Constraint 1: max same-sector stocks
+        if _rp_sector_counts[_sec] >= _max_same_sec:
+            continue
+
+        # Constraint 2: max sector %
+        _sec_weight_after = (_rp_sector_counts[_sec] + 1) / _n_so_far * 100
+        if _sec_weight_after > _max_sec_pct:
+            continue
+
+        # Constraint 3: small-cap cap
+        if _tier == "Small":
+            if ((_rp_small + 1) / _n_so_far) * 100 > _small_cap_max:
+                continue
+
+        _rp_selected.append(_c)
+        _rp_sector_counts[_sec] += 1
+        if _tier == "Small":
+            _rp_small += 1
+        if _tier in ("Large", "Mega"):
+            _rp_large += 1
+
+    # Check large-cap minimum — if under, swap lowest-scored non-large for best available large
+    if _rp_selected:
+        _large_pct = (_rp_large / len(_rp_selected)) * 100
+        if _large_pct < _large_cap_min:
+            _current_tickers = {s["ticker"] for s in _rp_selected}
+            _large_avail = [c for c in candidates
+                           if c["ticker"] not in _current_tickers
+                           and c.get("risk_tier") in ("Large", "Mega")
+                           and _rp_sector_counts.get(c.get("sector", "?"), 0) < _max_same_sec]
+            _non_large = [s for s in _rp_selected if s.get("risk_tier") not in ("Large", "Mega")]
+            _non_large.sort(key=lambda x: x.get("score", 0) if isinstance(x.get("score"), (int, float)) else 0)
+
+            while _large_pct < _large_cap_min and _non_large and _large_avail:
+                _drop = _non_large.pop(0)
+                _add = _large_avail.pop(0)
+                _rp_selected.remove(_drop)
+                _rp_sector_counts[_drop.get("sector", "?")] -= 1
+                if _drop.get("risk_tier") == "Small":
+                    _rp_small -= 1
+
+                _rp_selected.append(_add)
+                _rp_sector_counts[_add.get("sector", "?")] += 1
+                _rp_large += 1
+                _large_pct = (_rp_large / len(_rp_selected)) * 100
+
+    # Equal weight
+    _rp_pct = round(100 / max(len(_rp_selected), 1), 1)
+    recommended_portfolio = []
+    for _s in _rp_selected:
+        recommended_portfolio.append({
+            "ticker": _s["ticker"],
+            "name": _s.get("name", ""),
+            "sector": _s.get("sector", "Unknown"),
+            "score": _s.get("score", 0),
+            "price": _s.get("price", 0),
+            "risk_tier": _s.get("risk_tier", "Unknown"),
+            "allocation_pct": _rp_pct,
+            "diversification_rank": _s.get("diversification_rank", 999),
+            "pe": _s.get("pe", "N/A"),
+            "roe_pct": _s.get("roe_pct", "N/A"),
+            "beta": _s.get("beta", "N/A"),
+        })
+    st.session_state._last_candidates = candidates  # keep full pool for backfill
     web_grounding = {}
     _ts = st.session_state.get("_tool_status")
     try:
@@ -4399,6 +4493,18 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
         "candidates_count": len(candidates),
         "candidates": candidates,
         "fringe_candidates": fringe_candidates,
+        "recommended_portfolio": recommended_portfolio,
+        "recommended_portfolio_instruction": (
+            "CRITICAL: The 'recommended_portfolio' above is a DETERMINISTIC, IPS-COMPLIANT "
+            "portfolio built by the system using greedy minimum-variance optimization (Reilly & Brown Ch 6). "
+            "It satisfies ALL allocation policy constraints: sector caps, small-cap limits, large-cap minimums, "
+            "and stock count targets. "
+            "In PHASE 2 (after the user answers your questions): "
+            "You MUST call register_portfolio with EXACTLY the stocks in recommended_portfolio. "
+            "Do NOT add stocks. Do NOT remove stocks. Do NOT change allocation_pct. "
+            "Your job is to EXPLAIN why each stock was chosen, using the candidate data, web grounding, "
+            "and book philosophy. The system builds the portfolio; you sell it to the investor."
+        ),
         "web_grounding": web_grounding,
         "web_grounding_instruction": (
             "MANDATORY — Reilly & Brown Step 2 data above. "
@@ -4413,36 +4519,16 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
             "indicates a clear phase."
         ),
         "selection_instruction": (
-            f"You have {len(candidates)} pre-filtered candidates. "
-            f"Pick between {min_stocks} and {max_stocks} stocks. "
-            f"BOOK STANDARD (Reilly & Brown Ch 6): 12 stocks minimum for 90% diversification benefit. "
-            f"Below 12, the portfolio carries meaningful unsystematic risk — state this honestly if SIP constrains you below 12. "
-            f"Target: pick {min_stocks}-{min(max_stocks, 20)} stocks. Never pad with mediocre picks, but do not under-diversify when good candidates exist. "
-            f"Use search_book to pull Graham/Greenblatt/Dorsey wisdom relevant to this {investor_type} profile with {time_horizon}-term horizon. "
-            f"Use pe_vs_avg to check if a stock is cheap relative to its own history (negative = discount, positive = premium). "
-            f"Use pct_from_high to spot stocks near 52-week lows (potential value) vs near highs (potential overvaluation). "
-            f"Use revenue_cagr_3y and ni_cagr_3y to assess growth trajectory beyond single-year noise. "
-            f"Use beta to assess how much each stock moves with the market — relevant for portfolio-level risk. "
-            f"Apply qualitative moat assessment (Dorsey) — check ROE trends to see if moat is stable or eroding. "
-            f"Enforce sector limits from the ALLOCATION POLICY in [BUILDER_PROFILE] (max same-sector stocks, max sector %). "
-            f"Each candidate has a risk_tier (Large/Mid/Small) and liquidity_flag. "
-            f"Small-cap stocks are capped at {int({'defensive': 10, 'balanced': 20, 'enterprising': 30}.get(investor_type, 20))}% "
-            f"for this {investor_type} profile. Illiquid stocks (avg volume < 50k/day) are excluded. "
-            f"If including a Small-cap, note the higher volatility risk in your explanation. "
-            f"Before finalizing, compute: (1) how many sectors you cover — aim for at least 4, "
-            f"(2) whether any single sector exceeds 30% allocation — if so, rebalance, "
-            f"(3) whether the portfolio beta is balanced — avoid loading up on all high-beta or all low-beta stocks. "
-            f"If the portfolio fails these checks, revise your selection before outputting. "
-            f"IMPORTANT: The [BUILDER_PROFILE] message contains an ALLOCATION POLICY section with hard constraints "
-            f"derived from Reilly & Brown IPS theory (max single stock %, max sector %, min sectors, cap distribution). "
-            f"Your final portfolio MUST satisfy ALL of them. If you cannot find enough qualifying stocks to meet "
-            f"min sector requirements, pick the best available from under-represented sectors even at lower scores. "
-            f"PRICE PREFERENCE: When two candidates have similar scores/quality, prefer the lower-priced stock. "
-            f"Lower price = more shares per SIP cycle = finer rebalancing granularity = lower per-unit risk. "
-            f"A ₹100 stock where you buy 5 shares is better for portfolio management than a ₹2000 stock where you buy 1. "
-            f"Allocate the monthly SIP of INR {sip_amount} across selected stocks. "
-            f"For each pick, be prepared to explain WHY it fits this investor using book philosophy. "
-            f"CRITICAL: If the user's message started with [BUILDER_PROFILE], you are in PHASE 1. DO NOT output the portfolio table yet. DO NOT call register_portfolio. Use this data ONLY to formulate your 1-3 clarification questions."
+            f"You have {len(candidates)} pre-filtered candidates and a READY-TO-REGISTER "
+            f"'recommended_portfolio' of {len(recommended_portfolio)} stocks built by the system. "
+            f"PHASE 1 (message starts with [BUILDER_PROFILE]): Do NOT output a portfolio table. "
+            f"Review the recommended_portfolio and ask the user 1-3 clarification questions. "
+            f"Questions must NEVER offer options that violate the ALLOCATION POLICY. "
+            f"PHASE 2 (user answers your questions): Present the recommended_portfolio with a "
+            f"brief explanation per stock (2-3 sentences each, layman-friendly). "
+            f"Then call register_portfolio with EXACTLY the recommended_portfolio stocks. "
+            f"Do NOT modify the stock list — the system built it to satisfy all IPS constraints. "
+            f"Use web_grounding data to ground your explanations in current macro/sector context."
         ),
     }
 
