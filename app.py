@@ -5165,9 +5165,8 @@ def agent_turn(user_message, status_container=None):
 
                         # ── Deterministic web grounding for portfolio builder ──
                         # Reilly & Brown Step 2: "Examine current/projected conditions
-                        # (financial, economic, political, social)" — fires EVERY time,
-                        # not an LLM decision. Covers: inflation, RBI policy, LTCG/STCG
-                        # tax rates, sector outlook, business cycle positioning.
+                        # (financial, economic, political, social)" — fires EVERY time
+                        # get_sip_candidates runs. Not an LLM decision.
                         if fc.name == "get_sip_candidates" and isinstance(raw_tool_output, dict):
                             _web_grounding = {}
                             _update_status("🌐 Fetching macro & tax context...")
