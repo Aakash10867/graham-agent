@@ -5604,14 +5604,38 @@ if st.session_state.sb_view_mode == "chat":
                         error_msg = str(e)
                         error_upper = error_msg.upper()
                         if any(err in error_upper for err in ["429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "ALL MODELS RATE-LIMITED"]):
+                            # ── Model fallback chain: same pattern as get_web_context ──
+                            _FALLBACK_CHAIN = [
+                                "gemini-2.5-flash-lite-preview-06-17",
+                                "gemini-2.5-flash-preview-05-20",
+                                "gemini-2.5-pro-preview-05-06",
+                            ]
+                            _current_model = st.session_state.get("last_working_model",
+                                st.session_state.get("selected_model", ""))
+                            _cur_idx = -1
+                            for _i, _m in enumerate(_FALLBACK_CHAIN):
+                                if _m == _current_model:
+                                    _cur_idx = _i
+                                    break
+                            _remaining = _FALLBACK_CHAIN[_cur_idx + 1:]
+
                             import time
-                            st.warning("API busy — retrying in 3 seconds...")
-                            time.sleep(3)
-                            try:
-                                answer, model_used = agent_turn(prompt, status_container=status)
-                                status.update(label="✅ Analysis complete (retry)", state="complete")
-                            except Exception:
-                                st.warning("Still busy. Click below to try again.")
+                            _retry_ok = False
+                            for _fallback in _remaining:
+                                st.session_state["last_working_model"] = _fallback
+                                st.warning(f"Rate limited — switching to `{_fallback}` ...")
+                                time.sleep(3)
+                                try:
+                                    answer, model_used = agent_turn(prompt, status_container=status)
+                                    status.update(label="✅ Analysis complete", state="complete")
+                                    _retry_ok = True
+                                    break
+                                except Exception:
+                                    continue
+
+                            if not _retry_ok:
+                                st.warning("All models busy. Click below to try again.")
+                                st.session_state.pop("last_working_model", None)
                                 st.session_state.pending_retry = prompt
                                 if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
                                     st.session_state.messages.pop()
