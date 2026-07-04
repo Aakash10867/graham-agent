@@ -618,6 +618,20 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
     kpi_data = [kpi_row1]
     if kpi_row2:
         kpi_data.append(kpi_row2)
+
+    # Sprint 11: Row 3 — Risk metrics from Reilly & Brown
+    _beta = portfolio.get("portfolio_beta")
+    _sharpe = portfolio.get("sharpe_ratio")
+    _div_score = portfolio.get("diversification_score")
+    if _beta is not None or _sharpe is not None or _div_score is not None:
+        _div_hex = "#16A34A" if _div_score and _div_score >= 70 else "#F59E0B" if _div_score and _div_score >= 40 else "#DC2626"
+        _sharpe_hex = "#16A34A" if _sharpe and _sharpe > 0 else "#DC2626"
+        kpi_row3 = [
+            _kpi("Portfolio Beta (β)", f"{_beta:.2f}" if _beta is not None else "—"),
+            _kpi("Sharpe Ratio", f"{_sharpe:.2f}" if _sharpe is not None else "—", _sharpe_hex if _sharpe is not None else "#0F172A"),
+            _kpi("Diversification", f"{_div_score}/100" if _div_score is not None else "—", _div_hex if _div_score is not None else "#0F172A"),
+        ]
+        kpi_data.append(kpi_row3)
  
     kpi_table = Table(kpi_data, colWidths=[kpi_col] * 3)
     kpi_table.setStyle(TableStyle([
@@ -633,6 +647,27 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
     ]))
     story.append(kpi_table)
     story.append(Spacer(1, 4*mm))
+
+    # Sprint 11: IPS Policy Summary
+    _ips = (portfolio.get("portfolio_profile") or {}).get("ips_policy")
+    if _ips:
+        story.append(Paragraph("Investment Policy Statement", s_heading))
+        _alloc = _ips.get("allocation_policy", {})
+        _sizing = _ips.get("portfolio_sizing", {})
+        _ips_text = (
+            f"Return objective: {_ips.get('return_objective', '—').replace('_', ' ').title()}. "
+            f"Risk tolerance: {_ips.get('risk_tolerance', '—').title()}. "
+            f"Life cycle: {_ips.get('life_cycle_phase', '—').replace('_', ' ').title()} (age {_ips.get('age', '—')}). "
+            f"Benchmark: {_ips.get('benchmark', '—')}. "
+            f"Target stocks: {_sizing.get('actual', '—')} (book minimum: {_sizing.get('book_minimum', 12)}). "
+            f"Diversification status: {_sizing.get('diversification_status', '—').replace('_', ' ').title()}. "
+            f"Constraints — max single stock: {_alloc.get('max_single_stock_pct', '—')}%, "
+            f"max sector: {_alloc.get('max_sector_pct', '—')}%, "
+            f"min sectors: {_alloc.get('min_sectors', '—')}, "
+            f"large-cap floor: {_alloc.get('large_cap_min_pct', '—')}%."
+        )
+        story.append(Paragraph(_ips_text, s_body))
+        story.append(Spacer(1, 4*mm))
  
     # Meta row: SIP / Type / Horizon / Review
     _inv_type = str(portfolio.get("investor_type", "—")).title()
@@ -820,6 +855,33 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
             alert_section.append(Paragraph(f"{icon}  {safe_hl}", s_body))
         alert_section.append(Spacer(1, 4*mm))
         story.append(KeepTogether(alert_section))
+
+    # Sprint 11: Risk & Performance Metrics (Reilly & Brown Ch 7, 18)
+    _sortino = portfolio.get("sortino_ratio")
+    _treynor = portfolio.get("treynor_ratio")
+    _jensen = portfolio.get("jensen_alpha")
+    _ir = portfolio.get("information_ratio")
+    _drawdown = portfolio.get("max_drawdown")
+    _capm = portfolio.get("capm_expected_return")
+
+    if any(v is not None for v in [_sortino, _treynor, _jensen, _ir, _drawdown, _capm]):
+        story.append(Paragraph("Risk & Performance Metrics", s_heading))
+        _metrics_text = ""
+        if _capm is not None:
+            _metrics_text += f"CAPM expected return: {_capm*100:.1f}% p.a. "
+        if _jensen is not None:
+            _sign = "+" if _jensen >= 0 else ""
+            _metrics_text += f"Jensen's Alpha: {_sign}{_jensen*100:.1f}% ({"outperforming" if _jensen >= 0 else "underperforming"} risk-adjusted expectation). "
+        if _sortino is not None:
+            _metrics_text += f"Sortino ratio: {_sortino:.2f} (downside-risk-adjusted). "
+        if _treynor is not None:
+            _metrics_text += f"Treynor ratio: {_treynor:.4f}. "
+        if _ir is not None:
+            _metrics_text += f"Information ratio: {_ir:.2f}. "
+        if _drawdown is not None:
+            _metrics_text += f"Maximum drawdown: {_drawdown*100:.1f}%."
+        story.append(Paragraph(_metrics_text, s_body))
+        story.append(Spacer(1, 4*mm))
  
     # ══════════════════════════════════════
     # INVESTMENT ANALYSIS (narrative)
@@ -4687,6 +4749,18 @@ PHASE 2: FINALIZE & REGISTER (TRIGGERED ONLY AFTER USER REPLIES)
 3. CRITICAL: Generate this textual explanation FIRST.
 4. Call register_portfolio with all fields including portfolio_profile, target_amount, and target_date. CRITICAL: Use the `decision_context` parameter to summarize the user's answers to your Phase 1 questions so the system remembers their accepted trade-offs (e.g. "User accepted volatility in Industrials for higher growth"). Do not ask for permission to save, just call the tool. YOU MUST CALL THE register_portfolio TOOL — do not just write text saying "portfolio saved." The save button ONLY appears when the tool is called. If you skip the tool call, the user CANNOT save their portfolio.
 
+PORTFOLIO EXPANSION PROTOCOL:
+When you receive a message starting with [EXPANSION], a user has increased their SIP and needs more stocks added to an existing portfolio:
+1. Call get_sip_candidates with their profile parameters.
+2. Filter OUT all tickers already in the portfolio (listed in the message).
+3. From remaining candidates, prioritize stocks that:
+   a. Are from sectors NOT already in the portfolio (maximum diversification benefit)
+   b. Have LOW avg_corr_with_top5 (if available) — low correlation with existing holdings
+   c. Meet the IPS allocation policy constraints
+4. Present the expansion candidates with a brief explanation of how each REDUCES portfolio risk.
+5. Call register_portfolio with the FULL stock list (existing + new) to update the portfolio.
+   Use the existing portfolio name. The system will handle the update.
+
 If someone asks to build a portfolio WITHOUT a [BUILDER_PROFILE] prefix, direct them to click the 🏗️ Build Portfolio button in the sidebar. If they insist or provide enough info inline, you may proceed by mapping their inputs to the profile parameters.
 
 INVESTMENT ANALYSIS FRAMEWORK (Reilly & Brown — Investment Analysis & Portfolio Management):
@@ -6766,10 +6840,40 @@ elif st.session_state.sb_view_mode == "portfolios":
                         )
                     with col2:
                         if st.button("💾 Save", key=f"save_sip_{port['id']}", width="stretch"):
+                            old_sip = int(port.get('sip_amount', 0))
                             try:
                                 sb.table("portfolios").update({"sip_amount": new_sip}).eq("id", port["id"]).execute()
                                 st.session_state[f"edit_sip_{port['id']}"] = False
-                                st.success("Updated!")
+
+                                # Sprint 11: SIP expansion check (Reilly & Brown Ch 6)
+                                _profile = port.get("portfolio_profile") or {}
+                                _ips = _profile.get("ips_policy") or {}
+                                _old_affordable = max(3, old_sip // 500)
+                                _new_affordable = max(3, new_sip // 500)
+                                _current_count = len([h for h in sb.table("holdings").select("id").eq("portfolio_id", port["id"]).execute().data])
+                                BOOK_MIN = 12
+
+                                if new_sip > old_sip and _new_affordable > _current_count and _current_count < BOOK_MIN:
+                                    # SIP increased AND can now support more stocks AND portfolio is under-diversified
+                                    _can_add = min(_new_affordable, BOOK_MIN) - _current_count
+                                    st.success(f"SIP updated to ₹{new_sip:,}/mo!")
+                                    st.info(
+                                        f"📈 **Portfolio expansion recommended.** Your portfolio has {_current_count} stocks. "
+                                        f"With ₹{new_sip:,}/mo, you can support up to {min(_new_affordable, BOOK_MIN)} stocks "
+                                        f"(book minimum: {BOOK_MIN} for adequate diversification). "
+                                        f"Adding {_can_add} diversifying stocks would reduce your unsystematic risk."
+                                    )
+                                    # Set flag for expansion flow
+                                    st.session_state[f"expand_portfolio_{port['id']}"] = {
+                                        "current_count": _current_count,
+                                        "target_count": min(_new_affordable, BOOK_MIN),
+                                        "can_add": _can_add,
+                                        "new_sip": new_sip,
+                                    }
+                                elif new_sip > old_sip:
+                                    st.success(f"SIP updated to ₹{new_sip:,}/mo! Extra capital will be distributed proportionally.")
+                                else:
+                                    st.success("Updated!")
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Failed: {e}")
@@ -6802,6 +6906,47 @@ elif st.session_state.sb_view_mode == "portfolios":
                         if st.button("✏️", key=f"trigger_edit_sip_{port['id']}", help="Edit SIP Amount"):
                             st.session_state[f"edit_sip_{port['id']}"] = True
                             st.rerun()
+
+                # Sprint 11: Portfolio expansion flow
+                _expand = st.session_state.get(f"expand_portfolio_{port['id']}")
+                if _expand:
+                    with st.container(border=True):
+                        st.markdown(f"### 🌱 Portfolio Expansion")
+                        st.write(
+                            f"Your portfolio has **{_expand['current_count']}** stocks. "
+                            f"The book recommends at least **12** for meaningful diversification. "
+                            f"We can add **{_expand['can_add']}** stocks from under-represented sectors "
+                            f"to reduce unsystematic risk."
+                        )
+                        col_go, col_skip = st.columns(2)
+                        with col_go:
+                            if st.button("🔍 Review Expansion Candidates", key=f"expand_go_{port['id']}", use_container_width=True):
+                                # Trigger expansion via chat — send a builder-like prompt
+                                _held_tickers = [h["ticker"] for h in sb.table("holdings").select("ticker, sector").eq("portfolio_id", port["id"]).execute().data]
+                                _held_sectors = [h.get("sector", "") for h in sb.table("holdings").select("ticker, sector").eq("portfolio_id", port["id"]).execute().data]
+                                _sector_counts = {}
+                                for _s in _held_sectors:
+                                    _sector_counts[_s] = _sector_counts.get(_s, 0) + 1
+
+                                _expand_prompt = (
+                                    f"[EXPANSION] My portfolio '{port['name']}' currently has {_expand['current_count']} stocks "
+                                    f"across these sectors: {dict(_sector_counts)}. "
+                                    f"I just increased my SIP to ₹{_expand['new_sip']:,}/mo. "
+                                    f"I need {_expand['can_add']} MORE stocks to reach the book minimum of 12. "
+                                    f"The portfolio philosophy is {port.get('investor_type', 'balanced')}. "
+                                    f"CRITICAL: New stocks MUST be from sectors NOT already heavily represented. "
+                                    f"Existing tickers (do NOT duplicate): {_held_tickers}. "
+                                    f"Use get_sip_candidates to find candidates, then filter for LOW correlation "
+                                    f"with existing holdings. Present the expansion candidates with diversification rationale."
+                                )
+                                st.session_state.pending_prompt = _expand_prompt
+                                st.session_state.sb_view_mode = "chat"
+                                st.session_state.pop(f"expand_portfolio_{port['id']}", None)
+                                st.rerun()
+                        with col_skip:
+                            if st.button("Skip — distribute proportionally", key=f"expand_skip_{port['id']}", use_container_width=True):
+                                st.session_state.pop(f"expand_portfolio_{port['id']}", None)
+                                st.rerun()
 
                 try:
                     hold_resp = sb.table("holdings").select("*").eq("portfolio_id", port["id"]).execute()
