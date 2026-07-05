@@ -4459,10 +4459,12 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
         if _rp_sector_counts[_sec] >= _max_same_sec:
             continue
 
-        # Constraint 2: max sector %
-        _sec_weight_after = (_rp_sector_counts[_sec] + 1) / _n_so_far * 100
-        if _sec_weight_after > _max_sec_pct:
-            continue
+        # Constraint 2: max sector % — NOT checked per-stock. A sector's final
+        # weight is only knowable once the portfolio is full; checking it
+        # incrementally rejects every stock (the first stock in any sector is
+        # 100% of a then-1-stock portfolio). The max_same_sector COUNT cap
+        # (Constraint 1) bounds concentration deterministically. The %-cap is
+        # validated post-selection by validate_portfolio_ips.
 
         # Constraint 3: small-cap cap
         if _tier == "Small":
