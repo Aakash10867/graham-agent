@@ -1674,6 +1674,28 @@ def generate_review_recommendations(enriched_holdings, investor_type, time_horiz
     if _profile.get("decision_context"):
         user_context = f"\nUSER DECISION CONTEXT:\n{_profile.get('decision_context')}\n(CRITICAL: Honor these preferences. Do not recommend selling a stock solely for a trait the user explicitly accepted, such as sector volatility.)\n"
 
+    # ── Macro shift context (review-diff) — enters as a CONSTRAINED, asymmetric input ──
+    macro_context = ""
+    _mdiff = _profile.get("_pending_macro_diff") or {}
+    if _mdiff:
+        _mtext = _render_macro_diff(_mdiff)
+        if _mtext and "No material macro shift" not in _mtext:
+            macro_context = (
+                f"\nMACRO SHIFT SINCE LAST REVIEW:\n{_mtext}\n"
+                f"(RULES for using this — asymmetric, buy-only philosophy:\n"
+                f" - Inflation projection UP raises the real-return hurdle: it may DEMOTE a "
+                f"marginal BUY MORE to HOLD. It must NEVER promote anything toward SELL — you "
+                f"do not sell a quality compounder because forward inflation rose; you starve it "
+                f"of new money instead.\n"
+                f" - LTCG/STCG UP raises the cost of realizing gains: it should make you MORE "
+                f"reluctant on DISCRETIONARY sells (moat-erosion SELL HALF). It does NOT change "
+                f"conviction exits — a red flag or score=0 is still SELL ALL regardless of tax.\n"
+                f" - Sector deterioration is CONTEXT to weigh, not a sell trigger. Per Marks, "
+                f"sector pessimism is often already priced in; selling into it locks the loss.\n"
+                f" The macro shift may cool BUY MORE and cool discretionary SELLs. It must NEVER "
+                f"CREATE sell pressure that a broken thesis did not already justify.)\n"
+            )
+
     review_prompt = (
         f"You are the Kordent Investment Committee reviewing a {investor_type} investor's "
         f"portfolio with a {time_horizon}-term horizon.\n\n"
@@ -1690,6 +1712,8 @@ def generate_review_recommendations(enriched_holdings, investor_type, time_horiz
         f"6. OVERVALUATION: If stock gained >30% and score dropped, recommend HOLD but note reduced margin of safety.\n"
         f"7. INVESTOR PROFILE: "
         f"{'Be conservative. Prefer HOLD over BUY MORE, SELL sooner on red flags.' if investor_type == 'defensive' else 'Balance risk and reward.' if investor_type == 'balanced' else 'Tolerate volatility. HOLD through short-term drops if moat is intact.'}\n\n"
+        f"{user_context}"
+        f"{macro_context}"
         f"{holdings_text}\n\n"
         f"Respond ONLY with a JSON array (no markdown, no backticks, no preamble). Each element:\n"
         f'{{"ticker": "TICKER.NS", "action": "HOLD", "sell_qty": 0, "reasoning": "2-3 sentences grounded in Graham/Greenblatt/Dorsey.", "confidence": "high"}}\n'
@@ -8512,6 +8536,10 @@ elif st.session_state.sb_view_mode == "portfolios":
                                     sb.table("portfolios").update(
                                         {"portfolio_profile": _prof}).eq("id", port["id"]).execute()
                                     st.session_state[f"_macro_diff_{port['id']}"] = _macro_diff
+                                    # Bridge the diff into the recommendation engine (in-memory only)
+                                    _prof_for_rec = dict(_prof)
+                                    _prof_for_rec["_pending_macro_diff"] = _macro_diff
+                                    port["portfolio_profile"] = _prof_for_rec
                                 except Exception:
                                     st.session_state[f"_macro_diff_{port['id']}"] = {}
 
