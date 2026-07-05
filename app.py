@@ -2149,6 +2149,101 @@ def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int,
     return {"status": f"Portfolio '{portfolio_name}' registered with {len(stocks)} stocks. Review every {review_days} days.{_warn_str}"}
 
 
+def _commit_portfolio(portfolio: dict) -> dict:
+    """Single source of truth for committing a staged portfolio to the DB.
+    Called by BOTH the chat save button and the deterministic build_result view.
+    Fixes the row-before-assignment price bug; returns a structured result
+    instead of doing UI, so callers render as they wish.
+
+    Returns {ok, portfolio_id, invested, unallocated, allocated, stale_priced, error}.
+    """
+    try:
+        sb = get_supabase()
+        review_days = portfolio.get("review_days", 90)
+        next_review = (datetime.date.today() + datetime.timedelta(days=review_days)).isoformat()
+        next_sip = (datetime.date.today() + datetime.timedelta(days=30)).isoformat()
+
+        port_resp = sb.table("portfolios").insert({
+            "user_id": st.session_state.sb_user_id,
+            "name": portfolio["name"],
+            "investor_type": portfolio["investor_type"],
+            "sip_amount": portfolio["sip_amount"],
+            "time_horizon": portfolio["time_horizon"],
+            "review_freq": str(review_days),
+            "next_review_date": next_review,
+            "next_sip_date": next_sip,
+            "is_paper": portfolio.get("is_paper", False),
+            "portfolio_profile": portfolio.get("portfolio_profile", {})
+        }).execute()
+        portfolio_id = port_resp.data[0]["id"]
+
+        stocks_for_alloc = []
+        _stale = []
+        for stock in portfolio["stocks"]:
+            ticker = stock["ticker"]
+            # Universe row FIRST (fixes row-before-assignment bug)
+            row = universe_df[universe_df["ticker"] == ticker]
+            _uni_close = None
+            if len(row) and "close" in row.columns and pd.notna(row["close"].iloc[0]):
+                _uni_close = float(row["close"].iloc[0])
+
+            price = 0
+            _max_tries = 2 if _uni_close is None else 1
+            for _attempt in range(_max_tries):
+                try:
+                    info = yf.Ticker(ticker).info
+                    price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
+                except Exception:
+                    price = 0
+                if price and price > 0:
+                    break
+                if _attempt < _max_tries - 1:
+                    import time as _t
+                    _t.sleep(1.5)
+
+            if price <= 0 and _uni_close and _uni_close > 0:
+                price = _uni_close
+                _stale.append(ticker)
+
+            pe = float(row["pe"].iloc[0]) if len(row) and pd.notna(row["pe"].iloc[0]) else None
+            roe = float(row["roe_y0"].iloc[0]) if len(row) and "roe_y0" in row.columns and pd.notna(row["roe_y0"].iloc[0]) else None
+            score = int(row["score"].iloc[0]) if len(row) and pd.notna(row["score"].iloc[0]) else None
+            sector = stock.get("sector", "") or (str(row["sector"].iloc[0]) if len(row) and "sector" in row.columns and pd.notna(row["sector"].iloc[0]) else "")
+
+            if price <= 0:
+                # unpriceable (delisted/renamed) — skip rather than store a phantom
+                continue
+
+            stocks_for_alloc.append({
+                "ticker": ticker, "name": stock.get("name", ""), "sector": sector,
+                "allocation_pct": stock.get("allocation_pct", 0), "price": price,
+                "pe": pe, "roe": roe, "score": score,
+            })
+
+        if not stocks_for_alloc:
+            return {"ok": False, "error": "No stocks could be priced — portfolio not saved."}
+
+        allocated, unallocated = allocate_shares(stocks_for_alloc, portfolio["sip_amount"])
+        _nifty_c = None
+        for s in allocated:
+            sb.table("holdings").insert({
+                "portfolio_id": portfolio_id, "ticker": s["ticker"], "name": s["name"],
+                "sector": s["sector"], "allocation_pct": s["allocation_pct"], "shares": s["shares"],
+                "sip_amount_inr": s["actual_amount"], "price_at_entry": s["price"],
+                "pe_at_entry": s["pe"], "roe_at_entry": s["roe"], "score_at_entry": s["score"],
+            }).execute()
+            _nifty_c = record_transaction(sb, portfolio_id, st.session_state.sb_user_id,
+                s["ticker"], s["shares"], s["price"], s["actual_amount"], "buy", _nifty_c)
+
+        st.session_state.pending_portfolio = None
+        return {"ok": True, "portfolio_id": portfolio_id,
+                "invested": portfolio["sip_amount"] - unallocated,
+                "unallocated": unallocated, "allocated": allocated,
+                "stale_priced": _stale}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 # ──────────────────────────────────────────────
 # TICKER ALIAS MAP
 # ──────────────────────────────────────────────
@@ -4461,10 +4556,9 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
 
         # Constraint 2: max sector % — NOT checked per-stock. A sector's final
         # weight is only knowable once the portfolio is full; checking it
-        # incrementally rejects every stock (the first stock in any sector is
-        # 100% of a then-1-stock portfolio). The max_same_sector COUNT cap
-        # (Constraint 1) bounds concentration deterministically. The %-cap is
-        # validated post-selection by validate_portfolio_ips.
+        # incrementally rejects every stock (first stock in any sector is 100%
+        # of a then-1-stock portfolio). The max_same_sector COUNT cap bounds
+        # concentration; the %-cap is validated post-selection.
 
         # Constraint 3: small-cap cap
         if _tier == "Small":
@@ -4472,6 +4566,18 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
                 continue
 
         _rp_selected.append(_c)
+        # ── Reason trace: true-by-construction facts at admission ──
+        _c["_trace"] = {
+            "score": _c.get("score"),
+            "div_rank": _c.get("diversification_rank", 999),
+            "sector": _sec,
+            "sector_role": f"{_rp_sector_counts[_sec] + 1} of max {_max_same_sec} in {_sec}",
+            "tier": _tier,
+            "position": _n_so_far,
+            "role": ("core holding" if _c.get("diversification_rank", 999) <= max(1, _target_n // 3)
+                     else "diversifier" if _c.get("diversification_rank", 999) <= _target_n
+                     else "breadth filler"),
+        }
         _rp_sector_counts[_sec] += 1
         if _tier == "Small":
             _rp_small += 1
@@ -4498,6 +4604,13 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
                 if _drop.get("risk_tier") == "Small":
                     _rp_small -= 1
 
+                _add["_trace"] = {
+                    "score": _add.get("score"), "div_rank": _add.get("diversification_rank", 999),
+                    "sector": _add.get("sector", "?"),
+                    "sector_role": f"in {_add.get('sector', '?')}",
+                    "tier": _add.get("risk_tier", "?"), "position": None,
+                    "role": f"added to meet {_large_cap_min}% large-cap floor (replaced {_drop.get('ticker')})",
+                }
                 _rp_selected.append(_add)
                 _rp_sector_counts[_add.get("sector", "?")] += 1
                 _rp_large += 1
@@ -4529,6 +4642,12 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
                     _rp_sector_counts[_bad_sec] -= 1
                     _sel_tickers.discard(_bad["ticker"])
                     if _repl:
+                        _repl["_trace"] = {
+                            "score": _repl.get("score"), "div_rank": _repl.get("diversification_rank", 999),
+                            "sector": _repl.get("sector", "?"), "sector_role": f"in {_repl.get('sector', '?')}",
+                            "tier": _repl.get("risk_tier", "?"), "position": None,
+                            "role": f"replaced {_bad.get('name', _bad.get('ticker'))} (flagged for distress)",
+                        }
                         _rp_selected.append(_repl)
                         _rp_sector_counts[_repl.get("sector", "?")] += 1
                         _sel_tickers.add(_repl["ticker"])
@@ -4553,6 +4672,7 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
             "pe": _s.get("pe", "N/A"),
             "roe_pct": _s.get("roe_pct", "N/A"),
             "beta": _s.get("beta", "N/A"),
+            "_trace": _s.get("_trace", {}),
         })
     st.session_state._last_candidates = candidates  # keep full pool for backfill
 
@@ -5314,6 +5434,83 @@ def _detect_firm_distress(firm_names: list, min_confidence: str = "high") -> dic
     return _out
 
 
+def _explain_portfolio(recommended_portfolio: list, web_grounding: dict = None) -> dict:
+    """LLM-as-TRANSLATOR: phrase each stock's deterministic reason-trace into
+    plain English + one portfolio-level paragraph. The model is handed the
+    facts (score, rank, sector role, why-chosen) and may ONLY phrase them.
+    It cannot invent a reason or alter selection — the trace is authoritative.
+
+    Returns {ticker: one_line_explanation, "_portfolio": paragraph}.
+    Fail-safe: on any error, returns trace-derived template strings (no LLM),
+    so an explanation always exists and is always true even if the model fails.
+    """
+    def _template(s):
+        t = s.get("_trace", {}) or {}
+        role = t.get("role", "selected by the quality screen")
+        sr = t.get("sector_role", s.get("sector", ""))
+        sc = t.get("score", s.get("score", "?"))
+        return f"Score {sc}/5, {sr} — {role}."
+
+    # Always-true fallback first
+    out = {s["ticker"]: _template(s) for s in recommended_portfolio}
+    out["_portfolio"] = (
+        f"This {len(recommended_portfolio)}-stock portfolio was built deterministically to "
+        f"satisfy your IPS constraints — sector caps, small-cap limit, large-cap floor, and "
+        f"stock-count target — while maximising diversification (minimum-variance ranking)."
+    )
+
+    # Build the facts payload for the translator
+    _facts = []
+    for s in recommended_portfolio:
+        t = s.get("_trace", {}) or {}
+        _facts.append({
+            "ticker": s["ticker"], "name": s.get("name", ""),
+            "score": t.get("score"), "div_rank": t.get("div_rank"),
+            "sector_role": t.get("sector_role"), "role": t.get("role"),
+            "pe": s.get("pe"), "roe_pct": s.get("roe_pct"),
+        })
+
+    _sector_ctx = ""
+    if web_grounding and web_grounding.get("sector_outlook"):
+        _sector_ctx = f"\nSECTOR CONTEXT (for flavour only, do not contradict the facts):\n{web_grounding.get('sector_outlook')}"
+
+    _prompt = (
+        "You are a TRANSLATOR, not an analyst. Below are FACTS about why a deterministic "
+        "engine selected each stock. Phrase each into ONE plain-English sentence a layman "
+        "understands. You MUST NOT invent reasons, add opinions, or contradict the facts — "
+        "only rephrase what is given. Then write ONE short paragraph (2-3 sentences) on how "
+        "the set works together as a diversified whole.\n\n"
+        f"FACTS:\n{json.dumps(_facts, indent=1)}{_sector_ctx}\n\n"
+        'Respond ONLY as JSON (no markdown): {"explanations": {"<ticker>": "<one sentence>", ...}, '
+        '"portfolio": "<paragraph>"}. Every ticker in FACTS must appear in explanations.'
+    )
+
+    try:
+        client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+        _raw = None
+        for _m in FREE_MODELS:
+            try:
+                _resp = client.models.generate_content(model=_m, contents=_prompt)
+                _raw = (_resp.text or "").strip()
+                if _raw:
+                    break
+            except Exception:
+                continue
+        if not _raw:
+            return out
+        _raw = _raw.replace("```json", "").replace("```", "").strip()
+        _parsed = json.loads(_raw)
+        _exp = _parsed.get("explanations", {})
+        for s in recommended_portfolio:
+            if s["ticker"] in _exp and _exp[s["ticker"]]:
+                out[s["ticker"]] = str(_exp[s["ticker"]])
+        if _parsed.get("portfolio"):
+            out["_portfolio"] = str(_parsed["portfolio"])
+    except Exception:
+        pass  # keep the always-true templates
+    return out
+
+
 TOOL_STATUS_MESSAGES = {
     "resolve_stock": "🔍 Resolving company name...",
     "get_stock_data": "📊 Fetching live market data...",
@@ -5909,62 +6106,6 @@ def agent_turn(user_message, status_container=None):
             clean_parts = [p.strip() for p in all_text_parts if p.strip()]
             draft_text = "\n\n".join(clean_parts).strip()
 
-            # ── Builder Phase 2 continuation: force tool execution ──
-            # Weak models sometimes narrate intent ("I will re-scan...") without
-            # actually calling tools. If builder is active, this ISN'T the initial
-            # [BUILDER_PROFILE] message, and no portfolio was registered, force it.
-            _bp_active = st.session_state.get("builder_profile")
-            if (_bp_active
-                and not user_message.strip().startswith("[BUILDER_PROFILE]")
-                and not st.session_state.get("pending_portfolio")):
-                _draft_tickers = set(re.findall(r'[A-Z]{2,20}\.NS', draft_text))
-                if len(_draft_tickers) < 5:
-                    _update_status("🏗️ Finalizing portfolio selection...")
-                    _force_prompt = (
-                        "SYSTEM OVERRIDE: You are in PHASE 2 of portfolio building. "
-                        "The user answered your questions but you STOPPED without "
-                        "calling register_portfolio. This is not acceptable. "
-                        "You already have the candidate pool from Phase 1. "
-                        "RIGHT NOW in this turn: "
-                        "(1) Pick the final stocks from your existing candidates, "
-                        "(2) Assign allocation_pct to each, "
-                        "(3) Output the portfolio table with reasoning, "
-                        "(4) Call register_portfolio. "
-                        "Do NOT say you will do it later. Execute NOW."
-                    )
-                    _forced = analyst_chat.send_message(_force_prompt)
-
-                    while analyst_response.function_calls:
-                        # dummy — this loop won't run, it's for the _forced loop below
-                        break
-                    while True:
-                        _fc_list = []
-                        try:
-                            _fc_list = _forced.function_calls or []
-                        except (AttributeError, TypeError):
-                            _fc_list = []
-                        if not _fc_list:
-                            break
-                        _fchunk = _extract_text(_forced)
-                        if _fchunk:
-                            all_text_parts.append(_fchunk)
-                        _fresp = []
-                        for fc in _fc_list:
-                            _update_status(TOOL_STATUS_MESSAGES.get(fc.name, f"⚙️ Running {fc.name}..."))
-                            if fc.name in tool_functions:
-                                _fraw = tool_functions[fc.name](**fc.args)
-                                _fres = _sanitize_for_json(_fraw)
-                            else:
-                                _fres = {"error": f"Unknown tool: {fc.name}"}
-                            _fresp.append(types.Part.from_function_response(name=fc.name, response=_fres))
-                        _forced = analyst_chat.send_message(_fresp)
-
-                    _ffinal = _extract_text(_forced)
-                    if _ffinal:
-                        all_text_parts.append(_ffinal)
-                    clean_parts = [p.strip() for p in all_text_parts if p.strip()]
-                    draft_text = "\n\n".join(clean_parts).strip()
-
             if not draft_text:
                 recovery_prompt = (
                     "You successfully executed the register_portfolio tool, but you provided zero text to the user. "
@@ -6184,74 +6325,27 @@ if st.session_state.sb_view_mode == "chat":
                 if _custom_name and _custom_name.strip():
                     portfolio["name"] = _custom_name.strip()
                 if st.button("💾 Save Portfolio", width="stretch"):
-                    try:
-                        sb = get_supabase()
-                        review_days = portfolio.get("review_days", 90)
-                        next_review = (datetime.date.today() + datetime.timedelta(days=review_days)).isoformat()
-                        next_sip = (datetime.date.today() + datetime.timedelta(days=30)).isoformat()
-                        
-                        port_resp = sb.table("portfolios").insert({
-                            "user_id": st.session_state.sb_user_id,
-                            "name": portfolio["name"],
-                            "investor_type": portfolio["investor_type"],
-                            "sip_amount": portfolio["sip_amount"],
-                            "time_horizon": portfolio["time_horizon"],
-                            "review_freq": str(review_days),
-                            "next_review_date": next_review,
-                            "next_sip_date": next_sip,
-                            "is_paper": portfolio.get("is_paper", False),
-                            "portfolio_profile": portfolio.get("portfolio_profile", {})
-                        }).execute()
-                        portfolio_id = port_resp.data[0]["id"]
-                        stocks_for_alloc = []
-                        for stock in portfolio["stocks"]:
-                            ticker = stock["ticker"]
-                            try:
-                                info = yf.Ticker(ticker).info
-                                price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
-                            except Exception:
-                                price = 0
-                            # Fallback: universe price if yfinance failed
-                            if price <= 0 and len(row):
-                                price = float(row["close"].iloc[0]) if "close" in row.columns and pd.notna(row["close"].iloc[0]) else 0
-                            row = universe_df[universe_df["ticker"] == ticker]
-                            pe = float(row["pe"].iloc[0]) if len(row) and pd.notna(row["pe"].iloc[0]) else None
-                            roe = float(row["roe_y0"].iloc[0]) if len(row) and "roe_y0" in row.columns and pd.notna(row["roe_y0"].iloc[0]) else None
-                            score = int(row["score"].iloc[0]) if len(row) and pd.notna(row["score"].iloc[0]) else None
-                            sector = stock.get("sector", "") or (str(row["sector"].iloc[0]) if len(row) and "sector" in row.columns and pd.notna(row["sector"].iloc[0]) else "")
-                            stocks_for_alloc.append({
-                                "ticker": ticker, "name": stock.get("name", ""), "sector": sector,
-                                "allocation_pct": stock.get("allocation_pct", 0), "price": price,
-                                "pe": pe, "roe": roe, "score": score,
-                            })
-                        allocated, unallocated = allocate_shares(stocks_for_alloc, portfolio["sip_amount"])
-                        _nifty_c = None
-                        for s in allocated:
-                            sb.table("holdings").insert({
-                                "portfolio_id": portfolio_id, "ticker": s["ticker"], "name": s["name"],
-                                "sector": s["sector"], "allocation_pct": s["allocation_pct"], "shares": s["shares"],
-                                "sip_amount_inr": s["actual_amount"], "price_at_entry": s["price"],
-                                "pe_at_entry": s["pe"], "roe_at_entry": s["roe"], "score_at_entry": s["score"],
-                            }).execute()
-                            _nifty_c = record_transaction(sb, portfolio_id, st.session_state.sb_user_id, s["ticker"], s["shares"], s["price"], s["actual_amount"], "buy", _nifty_c)
-                        st.success(f"Portfolio saved! Invested ₹{portfolio['sip_amount'] - unallocated:,.0f} of ₹{portfolio['sip_amount']:,}.")
-                        if unallocated > 0:
-                            st.info(f"₹{unallocated:,.0f} unallocated (not enough for another share of any holding).")
+                    _r = _commit_portfolio(portfolio)
+                    if not _r.get("ok"):
+                        st.error(f"Save failed: {_r.get('error')}")
+                    else:
+                        st.success(f"Portfolio saved! Invested ₹{_r['invested']:,.0f} of ₹{portfolio['sip_amount']:,}.")
+                        if _r["unallocated"] > 0:
+                            st.info(f"₹{_r['unallocated']:,.0f} unallocated (not enough for another share of any holding).")
+                        if _r.get("stale_priced"):
+                            st.warning(f"⚠️ Live price unavailable for {', '.join(_r['stale_priced'])} — used last known close. Verify on Kite before paying.")
                         breakdown_data = []
-                        for s in allocated:
+                        for s in _r["allocated"]:
                             breakdown_data.append({
                                 "Stock": s["name"] or s["ticker"], "Price": f"₹{s['price']:,.2f}",
                                 "Shares": s["shares"], "Invested": f"₹{s['actual_amount']:,.0f}",
                                 "Target": f"₹{portfolio['sip_amount'] * s['allocation_pct'] / 100:,.0f}",
                             })
                         st.dataframe(pd.DataFrame(breakdown_data), hide_index=True, width="stretch")
-                        st.session_state.pending_portfolio = None
                         if portfolio.get("is_paper"):
                             st.session_state._paper_just_saved = True
                             st.session_state.sb_view_mode = "watchlist"
-                            st.rerun()
-                    except Exception as e:
-                        st.error(f"Save failed: {e}")
+                        st.rerun()
 
         # ── Disambiguation UI (shown when awaiting user's pick) ──
         if not prompt and st.session_state.get("pending_disambiguation"):
@@ -6817,7 +6911,7 @@ elif st.session_state.sb_view_mode == "watchlist":
                                 _confirm_label = "Step 2: Confirm conversion" if KITE_ENABLED else "Yes, make it real"
                                 if st.button(f"✅ {_confirm_label}", key=f"real_yes_{_pp['id']}", use_container_width=True):
                                     try:
-                                        _conv_today = date.today().isoformat()
+                                        _conv_today = datetime.date.today().isoformat()
                                         # Reset holdings to current market prices
                                         for _rh in _pp_holdings:
                                             try:
@@ -7385,50 +7479,112 @@ elif st.session_state.sb_view_mode == "builder":
             _b_profile["age"] = _calc_age
             st.session_state.builder_profile = _b_profile
 
-            # ── Build the chat prompt that triggers stock selection ──
-            _horizon_label = f"{_calc_years} years"
-            _goal_line = f"\n- Goal: ₹{_b_target_amt:,.0f} by {_b_target_dt.isoformat()}" if _b_target_amt else ""
-            _avoid_line = f"\n- Avoid sectors: {', '.join(_b_avoid)}" if _b_avoid else ""
-            _paper_line = "\n- Mode: Paper portfolio (watch only)" if _b_is_paper else ""
-
-            st.session_state.pending_prompt = (
-                f"[BUILDER_PROFILE]\n"
-                f"Build me a portfolio with these preferences:\n"
-                f"- Monthly SIP: ₹{_calc_sip:,}\n"
-                f"- Time horizon: {_b_time} ({_horizon_label})\n"
-                f"- Expected return: {_calc_return}% p.a.\n"
-                f"- Investor type: {_b_inv_type}\n"
-                f"- Risk tolerance: {_b_risk}\n"
-                f"- Preference: {_b_pref}\n"
-                f"- Philosophy: {_b_philosophy_val}\n"
-                f"- Minimum score: {_b_min_score}/5\n"
-                f"- Acceptable trade-off: {_b_tradeoff_val}\n"
-                f"- Framework weights: {_framework_weights.get(_b_philosophy_val, {})}\n"
-                f"- Review: every {_b_rev_days} days ({_b_rev_freq})\n"
-                f"- Age: {_calc_age} | Life cycle: {_b_ips['life_cycle_phase']}\n"
-                f"- Return objective: {_b_ips['return_objective']}\n"
-                f"- Benchmark: {_b_ips['benchmark']}\n"
-                f"- Diversification: {_b_ips['portfolio_sizing']['diversification_status']} "
-                f"(can afford {_b_ips['portfolio_sizing']['affordable']} stocks, "
-                f"book minimum {_b_ips['portfolio_sizing']['book_minimum']}, "
-                f"IPS target {_b_ips['portfolio_sizing']['ips_target']})\n"
-                f"- ALLOCATION POLICY (hard constraints from Reilly & Brown IPS — do not violate):\n"
-                f"  Target stocks: {_b_ips['portfolio_sizing']['actual']}\n"
-                f"  Max single stock: {_b_ips['allocation_policy']['max_single_stock_pct']}%\n"
-                f"  Max single sector: {_b_ips['allocation_policy']['max_sector_pct']}%\n"
-                f"  Max same-sector stocks: {_b_ips['allocation_policy']['max_same_sector']}\n"
-                f"  Min distinct sectors: {_b_ips['allocation_policy']['min_sectors']}\n"
-                f"  Large cap minimum: {_b_ips['allocation_policy']['large_cap_min_pct']}%\n"
-                f"  Small cap maximum: {_b_ips['allocation_policy']['small_cap_max_pct']}%\n"
-                f"  PRICE PREFERENCE: When two candidates have similar scores and quality, prefer the lower-priced stock — "
-                f"it gives more shares per SIP cycle, enabling finer rebalancing and lower per-unit risk."
-                f"{_goal_line}{_avoid_line}{_paper_line}"
+            # ── DETERMINISTIC BUILD — no LLM in construction ──
+            # The system builds the portfolio from universe_scored + IPS.
+            # No chat, no clarification questions, no LLM stock-picking.
+            import json as _json
+            _cand_result = get_sip_candidates(
+                sip_amount=_calc_sip,
+                time_horizon=_b_time,
+                investor_type=_b_inv_type,
+                review_freq=_b_rev_freq,
+                avoid_sectors=_json.dumps(_b_avoid or []),
             )
-            st.session_state.sb_view_mode = "chat"
+            st.session_state._built_portfolio = _cand_result.get("recommended_portfolio", [])
+            st.session_state._built_web_grounding = _cand_result.get("web_grounding", {})
+            st.session_state._built_is_paper = _b_is_paper
+            st.session_state.sb_view_mode = "build_result"
             st.rerun()
 
+elif st.session_state.sb_view_mode == "build_result":
+    st.markdown("### \U0001F4CA Your Portfolio")
+    _built = st.session_state.get("_built_portfolio", [])
+    _bwg = st.session_state.get("_built_web_grounding", {})
+    _bprof = st.session_state.get("builder_profile", {}) or {}
+
+    if not _built:
+        st.error("The deterministic builder returned no stocks. This usually means the "
+                 "universe filters were too strict for your constraints. Try a lower minimum "
+                 "score or a broader risk profile.")
+        if st.button("\u2190 Back to Builder"):
+            st.session_state.builder_profile = None
+            st.session_state.sb_view_mode = "builder"
+            st.rerun()
+    else:
+        # Distress drops (if any) surfaced honestly
+        _dropped = st.session_state.get("_distress_dropped", {})
+        if _dropped:
+            _dl = "; ".join(f"{n} ({r})" for n, r in _dropped.items())
+            st.warning(f"\u26A0\uFE0F Removed for distress signals and replaced: {_dl}")
+
+        # Translator: phrase the deterministic reason-traces (LLM = translator only)
+        with st.spinner("Preparing explanations..."):
+            _expl = _explain_portfolio(_built, _bwg)
+
+        st.markdown(f"_{_expl.get('_portfolio', '')}_")
+
+        import pandas as _pd
+        _rows = []
+        for _s in _built:
+            _rows.append({
+                "Stock": _s.get("name", _s["ticker"]),
+                "Ticker": _s["ticker"],
+                "Sector": _s.get("sector", ""),
+                "Score": _s.get("score", ""),
+                "Alloc %": _s.get("allocation_pct", ""),
+                "Why": _expl.get(_s["ticker"], ""),
+            })
+        st.dataframe(_pd.DataFrame(_rows), width="stretch", hide_index=True)
+
+        _pname = st.text_input("Portfolio name",
+            value=f"{_bprof.get('philosophy', 'Quality')} SIP - {datetime.date.today().strftime('%B %Y')}")
+
+        _c1, _c2 = st.columns(2)
+        with _c1:
+            if st.button("\U0001F4BE Save Portfolio", width="stretch", type="primary"):
+                # register_portfolio validates IPS + auto-fixes + stages pending_portfolio
+                _reg = register_portfolio(
+                    portfolio_name=_pname,
+                    investor_type=_bprof.get("investor_type", "balanced"),
+                    sip_amount=_bprof.get("sip_amount", 5000),
+                    time_horizon=_bprof.get("time_horizon", "long"),
+                    review_days=_bprof.get("review_days", 180),
+                    stocks_json=json.dumps([
+                        {"ticker": s["ticker"], "name": s.get("name", ""),
+                         "sector": s.get("sector", ""), "allocation_pct": s.get("allocation_pct", 0)}
+                        for s in _built
+                    ]),
+                    portfolio_profile=json.dumps(_bprof),
+                )
+                if _reg.get("error"):
+                    st.error(f"Save blocked: {_reg['error']}")
+                else:
+                    # register_portfolio staged pending_portfolio; commit it
+                    _pending = st.session_state.get("pending_portfolio")
+                    if not _pending:
+                        st.error("Internal error: portfolio was not staged for save.")
+                    else:
+                        _pending["is_paper"] = st.session_state.get("_built_is_paper", False)
+                        _res = _commit_portfolio(_pending)
+                        if not _res.get("ok"):
+                            st.error(f"Save failed: {_res.get('error')}")
+                        else:
+                            st.success(f"Portfolio saved! Invested ₹{_res['invested']:,.0f} of ₹{_bprof.get('sip_amount', 5000):,}.")
+                            if _res.get("stale_priced"):
+                                st.warning(f"⚠️ Live price unavailable for {', '.join(_res['stale_priced'])} — used last known close. Verify on Kite before paying.")
+                            st.session_state.builder_profile = None
+                            for _k in ("_built_portfolio", "_built_web_grounding", "_built_is_paper", "_distress_dropped"):
+                                st.session_state.pop(_k, None)
+                            st.session_state.sb_view_mode = "portfolios"
+                            st.rerun()
+        with _c2:
+            if st.button("\u2190 Rebuild", width="stretch"):
+                st.session_state.builder_profile = None
+                st.session_state.sb_view_mode = "builder"
+                st.rerun()
+
 elif st.session_state.sb_view_mode == "portfolios":
-    st.markdown("### 📁 My Portfolios")
+    st.markdown("### \U0001F4C1 My Portfolios")
     sb = get_supabase()
     try:
         port_resp = sb.table("portfolios").select("*").eq(
