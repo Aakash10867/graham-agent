@@ -1979,6 +1979,24 @@ def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int,
     if not stocks:
         return {"error": "No stocks provided."}
 
+    # ── Universe-membership guard ──
+    # Every ticker MUST exist in universe_scored. The LLM can hallucinate
+    # tickers (e.g. HDFC.NS, delisted 2023) that never came from the
+    # deterministic selector. Drop anything not in our vetted universe.
+    try:
+        _valid_tickers = set(universe_df["ticker"].astype(str))
+        _before = len(stocks)
+        _dropped = [s.get("ticker", "?") for s in stocks
+                    if s.get("ticker", "") not in _valid_tickers]
+        stocks = [s for s in stocks if s.get("ticker", "") in _valid_tickers]
+        if _dropped:
+            st.session_state._universe_dropped = _dropped
+        if not stocks:
+            return {"error": f"None of the submitted tickers exist in the universe: {_dropped}. "
+                             f"Re-select stocks from get_sip_candidates output only."}
+    except Exception:
+        pass  # if universe unavailable, don't block save
+
     _profile = st.session_state.get("builder_profile") or {}
     
     if decision_context:
@@ -4103,6 +4121,10 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
     df = df[df["years_of_data"] >= 2]
     df = df[pd.notna(df["pe"]) & pd.notna(df["roe_pct"]) & pd.notna(df["de"])]
     df = df[df["pe"] > 0]  # Exclude negative P/E (loss-making)
+    # Valid-price guard: a stock with no/zero price is unbuyable and often
+    # signals a delisted or data-broken ticker. Exclude from selection.
+    if "price" in df.columns:
+        df = df[pd.notna(df["price"]) & (df["price"] > 0)]
     # ── Affordability filter (Sprint 11: IPS-aware, book standard) ──
     # Book says 12-20 stocks minimum. Price filter must support that.
     # A stock is affordable if ≥1 share can be bought at equal weight across target count.
