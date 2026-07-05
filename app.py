@@ -1979,24 +1979,6 @@ def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int,
     if not stocks:
         return {"error": "No stocks provided."}
 
-    # ── Universe-membership guard ──
-    # Every ticker MUST exist in universe_scored. The LLM can hallucinate
-    # tickers (e.g. HDFC.NS, delisted 2023) that never came from the
-    # deterministic selector. Drop anything not in our vetted universe.
-    try:
-        _valid_tickers = set(universe_df["ticker"].astype(str))
-        _before = len(stocks)
-        _dropped = [s.get("ticker", "?") for s in stocks
-                    if s.get("ticker", "") not in _valid_tickers]
-        stocks = [s for s in stocks if s.get("ticker", "") in _valid_tickers]
-        if _dropped:
-            st.session_state._universe_dropped = _dropped
-        if not stocks:
-            return {"error": f"None of the submitted tickers exist in the universe: {_dropped}. "
-                             f"Re-select stocks from get_sip_candidates output only."}
-    except Exception:
-        pass  # if universe unavailable, don't block save
-
     _profile = st.session_state.get("builder_profile") or {}
     
     if decision_context:
@@ -2114,6 +2096,14 @@ def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int,
                 }
             if _fixes_applied:
                 st.session_state._ips_auto_fixes = _fixes_applied
+
+    # Weld the macro snapshot (built during get_sip_candidates) onto the profile
+    # so it persists as a build-time checkpoint for later review-diffing.
+    _snap = st.session_state.get("_macro_snapshot")
+    if _snap:
+        if _profile is None:
+            _profile = {}
+        _profile["macro_snapshot"] = _snap
 
     st.session_state.pending_portfolio = {
         "name": portfolio_name,
@@ -4121,10 +4111,6 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
     df = df[df["years_of_data"] >= 2]
     df = df[pd.notna(df["pe"]) & pd.notna(df["roe_pct"]) & pd.notna(df["de"])]
     df = df[df["pe"] > 0]  # Exclude negative P/E (loss-making)
-    # Valid-price guard: a stock with no/zero price is unbuyable and often
-    # signals a delisted or data-broken ticker. Exclude from selection.
-    if "price" in df.columns:
-        df = df[pd.notna(df["price"]) & (df["price"] > 0)]
     # ── Affordability filter (Sprint 11: IPS-aware, book standard) ──
     # Book says 12-20 stocks minimum. Price filter must support that.
     # A stock is affordable if ≥1 share can be bought at equal weight across target count.
@@ -4511,44 +4497,76 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
             "beta": _s.get("beta", "N/A"),
         })
     st.session_state._last_candidates = candidates  # keep full pool for backfill
+
+    # ── Web grounding: THREE separate searches (tax / inflation / sector) ──
+    # Separated by half-life and purpose. Each failure is isolated so a tax
+    # timeout never nulls the inflation scalar. B-mode: prose + extracted
+    # scalar per field, assembled into a machine-comparable macro_snapshot.
+    from datetime import date as _date
     web_grounding = {}
     _ts = st.session_state.get("_tool_status")
+
+    def _status(msg):
+        try:
+            if _ts:
+                _ts.update(label=msg, state="running")
+        except Exception:
+            pass
+
+    # 1) TAX — structural (LTCG/STCG, holding period, exemption)
+    _tax_ctx, _tax_scalar = "Web search unavailable.", {}
     try:
-        if _ts:
-            _ts.update(label="🌐 Fetching macro & tax context...", state="running")
+        _status("🌐 Fetching capital-gains tax rules...")
+        _r = get_web_context(
+            "India equity capital gains tax LTCG STCG rate "
+            "holding period exemption limit latest"
+        )
+        _tax_ctx = _r.get("context", _r.get("error", "Unavailable"))
+        _tax_scalar = _extract_macro_scalar(_tax_ctx, "tax")
     except Exception:
         pass
-    try:
-        _macro = get_web_context(
-            "India macroeconomic outlook 2026 CPI inflation rate "
-            "RBI repo rate monetary policy LTCG STCG capital gains "
-            "tax rate equity holding period"
-        )
-        web_grounding["macro_and_tax"] = _macro.get(
-            "context", _macro.get("error", "Unavailable"))
-    except Exception:
-        web_grounding["macro_and_tax"] = "Web search unavailable."
+    web_grounding["tax"] = _tax_ctx
 
+    # 2) INFLATION — RBI forward CPI PROJECTION (not spot print)
+    _inf_ctx, _inf_scalar = "Web search unavailable.", {}
+    try:
+        _status("🌐 Fetching RBI inflation projection...")
+        _r = get_web_context(
+            "RBI monetary policy CPI inflation projection forward estimate "
+            "next fiscal year FY2027 outlook"
+        )
+        _inf_ctx = _r.get("context", _r.get("error", "Unavailable"))
+        _inf_scalar = _extract_macro_scalar(_inf_ctx, "inflation")
+    except Exception:
+        pass
+    web_grounding["inflation"] = _inf_ctx
+
+    # 3) SECTOR — outlook for the sectors we are allocating into
     _top_sectors = list(dict.fromkeys(
         c.get("sector", "") for c in candidates
         if c.get("sector") and c.get("sector") != "N/A"
     ))[:5]
+    _sec_ctx = ""
     if _top_sectors:
         try:
-            try:
-                if _ts:
-                    _ts.update(label="🌐 Checking sector outlook...", state="running")
-            except Exception:
-                pass
-            _sec = get_web_context(
+            _status("🌐 Checking sector outlook...")
+            _r = get_web_context(
                 f"India stock market sector outlook 2026 "
                 f"{' '.join(_top_sectors)} headwinds tailwinds "
                 f"recent developments"
             )
-            web_grounding["sector_outlook"] = _sec.get(
-                "context", _sec.get("error", "Unavailable"))
+            _sec_ctx = _r.get("context", _r.get("error", "Unavailable"))
         except Exception:
-            web_grounding["sector_outlook"] = "Web search unavailable."
+            _sec_ctx = "Web search unavailable."
+    web_grounding["sector_outlook"] = _sec_ctx
+
+    # ── Assemble structured snapshot; park for register_portfolio to persist ──
+    st.session_state._macro_snapshot = {
+        "as_of": _date.today().isoformat(),
+        "tax": {"context": _tax_ctx, **_tax_scalar},
+        "inflation": {"context": _inf_ctx, **_inf_scalar},
+        "sector_outlook": {"context": _sec_ctx, "sectors": _top_sectors},
+    }
 
     return {
         "investor_profile": {
@@ -4937,6 +4955,90 @@ Rules:
             continue
 
     return {"query": query, "error": "Web search unavailable — all methods exhausted."}
+
+
+def _extract_macro_scalar(context_text: str, field: str) -> dict:
+    """Extract ONE structured number from web-grounding prose. B-mode.
+
+    field: 'tax' -> {ltcg_pct, stcg_pct, ltcg_holding_months, ltcg_exemption_inr}
+           'inflation' -> {rbi_cpi_projection_pct, target_fy}
+
+    Range-validated: out-of-range values are rejected as None (a parse failure
+    is safer than a confidently-wrong number feeding the review-diff).
+    Returns {} on any failure — null is a first-class value, never fabricate.
+    """
+    if not context_text or context_text.strip() in (
+        "No material recent developments found.", "Web search unavailable.", "Unavailable"):
+        return {}
+
+    if field == "tax":
+        schema_prompt = (
+            "From the text below, extract India equity capital-gains tax facts as JSON. "
+            "Keys (use null if a value is not clearly stated): "
+            "ltcg_pct (long-term capital gains rate as a percentage number, e.g. 12.5), "
+            "stcg_pct (short-term rate as a percentage number, e.g. 20.0), "
+            "ltcg_holding_months (months to qualify as long-term, e.g. 12), "
+            "ltcg_exemption_inr (annual LTCG exemption in rupees, e.g. 125000). "
+            "Output ONLY the JSON object, no prose, no markdown.\n\nTEXT:\n" + context_text
+        )
+    elif field == "inflation":
+        schema_prompt = (
+            "From the text below, extract the RBI CPI inflation PROJECTION as JSON. "
+            "Keys (use null if not clearly stated): "
+            "rbi_cpi_projection_pct (the projected CPI inflation as a percentage number, "
+            "e.g. 4.5 — NOT a fraction like 0.045), "
+            "target_fy (the fiscal year the projection targets, e.g. 'FY2027'). "
+            "Prefer RBI's official forward projection over a spot/current print. "
+            "Output ONLY the JSON object, no prose, no markdown.\n\nTEXT:\n" + context_text
+        )
+    else:
+        return {}
+
+    try:
+        client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+        raw = None
+        for model_name in FREE_MODELS:
+            try:
+                resp = client.models.generate_content(model=model_name, contents=schema_prompt)
+                raw = (resp.text or "").strip()
+                if raw:
+                    break
+            except Exception:
+                continue
+        if not raw:
+            return {}
+        raw = raw.replace("```json", "").replace("```", "").strip()
+        parsed = json.loads(raw)
+    except Exception:
+        return {}
+
+    # ── Range validation — reject garbage as None ──
+    def _num(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    out = {}
+    if field == "tax":
+        ltcg = _num(parsed.get("ltcg_pct"))
+        stcg = _num(parsed.get("stcg_pct"))
+        hold = _num(parsed.get("ltcg_holding_months"))
+        exem = _num(parsed.get("ltcg_exemption_inr"))
+        out["ltcg_pct"] = ltcg if (ltcg is not None and 0 <= ltcg <= 40) else None
+        out["stcg_pct"] = stcg if (stcg is not None and 0 <= stcg <= 40) else None
+        out["ltcg_holding_months"] = int(hold) if (hold is not None and 0 < hold <= 60) else None
+        out["ltcg_exemption_inr"] = exem if (exem is not None and 0 <= exem <= 10_000_000) else None
+    elif field == "inflation":
+        cpi = _num(parsed.get("rbi_cpi_projection_pct"))
+        # If the model returned a fraction (0.045), lift to percent
+        if cpi is not None and 0 < cpi < 1:
+            cpi = cpi * 100
+        out["rbi_cpi_projection_pct"] = cpi if (cpi is not None and 0 <= cpi <= 15) else None
+        fy = parsed.get("target_fy")
+        out["target_fy"] = str(fy) if fy else None
+    return out
+
 
 TOOL_STATUS_MESSAGES = {
     "resolve_stock": "🔍 Resolving company name...",
@@ -5827,53 +5929,26 @@ if st.session_state.sb_view_mode == "chat":
                             "portfolio_profile": portfolio.get("portfolio_profile", {})
                         }).execute()
                         portfolio_id = port_resp.data[0]["id"]
-                        import time as _t
                         stocks_for_alloc = []
-                        _stale_priced = []   # tickers priced from stale universe close
                         for stock in portfolio["stocks"]:
                             ticker = stock["ticker"]
-                            # Universe row FIRST — needed as fallback + metadata
+                            try:
+                                info = yf.Ticker(ticker).info
+                                price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
+                            except Exception:
+                                price = 0
+                            # Fallback: universe price if yfinance failed
+                            if price <= 0 and len(row):
+                                price = float(row["close"].iloc[0]) if "close" in row.columns and pd.notna(row["close"].iloc[0]) else 0
                             row = universe_df[universe_df["ticker"] == ticker]
-                            _uni_close = None
-                            if len(row) and "close" in row.columns and pd.notna(row["close"].iloc[0]):
-                                _uni_close = float(row["close"].iloc[0])
-
-                            # Live price with capped retry — but only retry if we have
-                            # NO fallback close (never wait on a stock we can already price).
-                            price = 0
-                            _max_tries = 2 if _uni_close is None else 1
-                            for _attempt in range(_max_tries):
-                                try:
-                                    info = yf.Ticker(ticker).info
-                                    price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
-                                except Exception:
-                                    price = 0
-                                if price and price > 0:
-                                    break
-                                if _attempt < _max_tries - 1:
-                                    _t.sleep(1.5)  # transient throttle — back off once
-
-                            # Fallback to universe close if live fetch failed
-                            _is_stale = False
-                            if price <= 0 and _uni_close and _uni_close > 0:
-                                price = _uni_close
-                                _is_stale = True
-                                _stale_priced.append(ticker)
-
                             pe = float(row["pe"].iloc[0]) if len(row) and pd.notna(row["pe"].iloc[0]) else None
                             roe = float(row["roe_y0"].iloc[0]) if len(row) and "roe_y0" in row.columns and pd.notna(row["roe_y0"].iloc[0]) else None
                             score = int(row["score"].iloc[0]) if len(row) and pd.notna(row["score"].iloc[0]) else None
                             sector = stock.get("sector", "") or (str(row["sector"].iloc[0]) if len(row) and "sector" in row.columns and pd.notna(row["sector"].iloc[0]) else "")
-
-                            # Still unpriceable after live + fallback → skip (dead ticker)
-                            if price <= 0:
-                                st.warning(f"⚠️ {ticker} could not be priced (may be delisted/renamed). Excluded from this portfolio.")
-                                continue
-
                             stocks_for_alloc.append({
                                 "ticker": ticker, "name": stock.get("name", ""), "sector": sector,
                                 "allocation_pct": stock.get("allocation_pct", 0), "price": price,
-                                "pe": pe, "roe": roe, "score": score, "_stale_price": _is_stale,
+                                "pe": pe, "roe": roe, "score": score,
                             })
                         allocated, unallocated = allocate_shares(stocks_for_alloc, portfolio["sip_amount"])
                         _nifty_c = None
@@ -5888,9 +5963,6 @@ if st.session_state.sb_view_mode == "chat":
                         st.success(f"Portfolio saved! Invested ₹{portfolio['sip_amount'] - unallocated:,.0f} of ₹{portfolio['sip_amount']:,}.")
                         if unallocated > 0:
                             st.info(f"₹{unallocated:,.0f} unallocated (not enough for another share of any holding).")
-                        if _stale_priced:
-                            st.warning(f"⚠️ Live price unavailable for {', '.join(_stale_priced)} — used last known close. "
-                                       f"Verify the current price on Kite before paying.")
                         breakdown_data = []
                         for s in allocated:
                             breakdown_data.append({
