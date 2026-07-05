@@ -4248,37 +4248,29 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
     except (json.JSONDecodeError, TypeError):
         pass
 
-    # ── Profile-specific filtering ──
+    # ── Profile-specific RANKING PREFERENCE (not filtering) ──
+    # Three-tier hierarchy (per Reilly & Brown + roadmap 3B):
+    #   Tier 1 (existence floor, already applied above): quality_pass,
+    #     years_of_data>=2, real pe/price — a stock failing these is
+    #     UNINVESTABLE/UNASSESSABLE, not merely low quality.
+    #   Tier 2 (book structure): stock count, sector caps, cap-tier limits —
+    #     enforced by the deterministic selector downstream. These are the
+    #     hard constraints that MUST be satisfied.
+    #   Tier 3 (analysis preferences): graham/score/greenblatt/dorsey/dividend
+    #     — these RANK candidates via the composite below; they NEVER exclude.
+    # Analysis quality is a preference; the book's 15-stock diversification
+    # mandate is the law. So score/graham are demoted from gates to sort weights.
     if investor_type == "defensive":
-        # Graham-focused: strict value, prefer dividends
-        df = df[df["score"] >= 3]
-        df = df[df["graham_pass"] == True]
-        # Prefer dividend payers but don't exclude non-payers if pool is small
+        # Prefer dividend payers (soft): only narrow if it leaves a deep pool.
         div_payers = df[pd.notna(df["dividend_yield_pct"]) & (df["dividend_yield_pct"] > 0)]
-        if len(div_payers) >= 15:
+        if len(div_payers) >= 40:
             df = div_payers
-        target_count = 50  # Sprint 11: larger pool for book-standard 12-15 stock picks
-
+        target_count = 60
     elif investor_type == "balanced":
-        # Quality + value balance
-        df = df[df["score"] >= 2]
-        # Prefer stocks passing at least Greenblatt or Dorsey (quality signal)
-        quality = df[(df["greenblatt_pass"] == True) | (df["dorsey_pass"] == True)]
-        if len(quality) >= 20:
-            df = quality
-        target_count = 60  # Sprint 11: larger pool for book-standard 12-20 stock picks
-
+        target_count = 60
     elif investor_type == "enterprising":
-        # Growth-tilted: Greenblatt + Trajectory preferred
-        df = df[df["score"] >= 2]
-        # Prefer stocks with positive trajectory
-        growers = df[df["trajectory_pass"] == True]
-        if len(growers) >= 20:
-            df = growers
-        target_count = 60  # Sprint 11: larger pool for book-standard 12+ stock picks
-
+        target_count = 60
     else:
-        df = df[df["score"] >= 2]
         target_count = 60
 
     # ── Risk tier caps: limit small-cap exposure by profile ──
