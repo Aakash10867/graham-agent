@@ -2,7 +2,9 @@
 Kordent
 ========================
 Quantitative Multi-Agent Investment Committee.
-Operating on Graham, Greenblatt, Dorsey, and Trajectory frameworks.
+Operating on Graham, Greenblatt, Dorsey, Trajectory, and Lynch frameworks.
+Portfolio management formalized on Reilly & Brown: IPS, correlation-based
+construction, systematic risk minimization, and macro-aware monitoring.
 
 Streamlit web app with Gemini LLM, ChromaDB RAG, and yfinance tools.
 """
