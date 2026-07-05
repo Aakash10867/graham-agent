@@ -6,6 +6,7 @@ Reads alerts written by the daily engine, validates, deduplicates,
 synthesizes via Gemini into one mentor-style email per user.
 
 Zero alerts are generated here. This script only consumes.
+Adds a macro overlay (RBI policy, yield curve, sector rotation) per Reilly & Brown.
 
 Usage:  python weekly_mentor.py
 Cron:   '30 3 * * 1'
