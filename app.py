@@ -5827,26 +5827,53 @@ if st.session_state.sb_view_mode == "chat":
                             "portfolio_profile": portfolio.get("portfolio_profile", {})
                         }).execute()
                         portfolio_id = port_resp.data[0]["id"]
+                        import time as _t
                         stocks_for_alloc = []
+                        _stale_priced = []   # tickers priced from stale universe close
                         for stock in portfolio["stocks"]:
                             ticker = stock["ticker"]
-                            try:
-                                info = yf.Ticker(ticker).info
-                                price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
-                            except Exception:
-                                price = 0
-                            # Fallback: universe price if yfinance failed
-                            if price <= 0 and len(row):
-                                price = float(row["close"].iloc[0]) if "close" in row.columns and pd.notna(row["close"].iloc[0]) else 0
+                            # Universe row FIRST — needed as fallback + metadata
                             row = universe_df[universe_df["ticker"] == ticker]
+                            _uni_close = None
+                            if len(row) and "close" in row.columns and pd.notna(row["close"].iloc[0]):
+                                _uni_close = float(row["close"].iloc[0])
+
+                            # Live price with capped retry — but only retry if we have
+                            # NO fallback close (never wait on a stock we can already price).
+                            price = 0
+                            _max_tries = 2 if _uni_close is None else 1
+                            for _attempt in range(_max_tries):
+                                try:
+                                    info = yf.Ticker(ticker).info
+                                    price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
+                                except Exception:
+                                    price = 0
+                                if price and price > 0:
+                                    break
+                                if _attempt < _max_tries - 1:
+                                    _t.sleep(1.5)  # transient throttle — back off once
+
+                            # Fallback to universe close if live fetch failed
+                            _is_stale = False
+                            if price <= 0 and _uni_close and _uni_close > 0:
+                                price = _uni_close
+                                _is_stale = True
+                                _stale_priced.append(ticker)
+
                             pe = float(row["pe"].iloc[0]) if len(row) and pd.notna(row["pe"].iloc[0]) else None
                             roe = float(row["roe_y0"].iloc[0]) if len(row) and "roe_y0" in row.columns and pd.notna(row["roe_y0"].iloc[0]) else None
                             score = int(row["score"].iloc[0]) if len(row) and pd.notna(row["score"].iloc[0]) else None
                             sector = stock.get("sector", "") or (str(row["sector"].iloc[0]) if len(row) and "sector" in row.columns and pd.notna(row["sector"].iloc[0]) else "")
+
+                            # Still unpriceable after live + fallback → skip (dead ticker)
+                            if price <= 0:
+                                st.warning(f"⚠️ {ticker} could not be priced (may be delisted/renamed). Excluded from this portfolio.")
+                                continue
+
                             stocks_for_alloc.append({
                                 "ticker": ticker, "name": stock.get("name", ""), "sector": sector,
                                 "allocation_pct": stock.get("allocation_pct", 0), "price": price,
-                                "pe": pe, "roe": roe, "score": score,
+                                "pe": pe, "roe": roe, "score": score, "_stale_price": _is_stale,
                             })
                         allocated, unallocated = allocate_shares(stocks_for_alloc, portfolio["sip_amount"])
                         _nifty_c = None
@@ -5861,6 +5888,9 @@ if st.session_state.sb_view_mode == "chat":
                         st.success(f"Portfolio saved! Invested ₹{portfolio['sip_amount'] - unallocated:,.0f} of ₹{portfolio['sip_amount']:,}.")
                         if unallocated > 0:
                             st.info(f"₹{unallocated:,.0f} unallocated (not enough for another share of any holding).")
+                        if _stale_priced:
+                            st.warning(f"⚠️ Live price unavailable for {', '.join(_stale_priced)} — used last known close. "
+                                       f"Verify the current price on Kite before paying.")
                         breakdown_data = []
                         for s in allocated:
                             breakdown_data.append({
