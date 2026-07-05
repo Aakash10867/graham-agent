@@ -4501,6 +4501,40 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
                 _rp_large += 1
                 _large_pct = (_rp_large / len(_rp_selected)) * 100
 
+    # ── Firm-distress gate (build time): drop distressed candidates, replace from pool ──
+    # min_confidence="medium" — dropping a candidate is cheap, so err toward caution.
+    if _rp_selected:
+        try:
+            _sel_names = [s.get("name", "") for s in _rp_selected if s.get("name")]
+            _distressed = _detect_firm_distress(_sel_names, min_confidence="medium")
+            if _distressed:
+                _sel_tickers = {s["ticker"] for s in _rp_selected}
+                for _bad in [s for s in _rp_selected if s.get("name") in _distressed]:
+                    # Find a clean replacement from the pool that keeps constraints
+                    _bad_sec = _bad.get("sector", "Unknown")
+                    _repl = None
+                    for _c in candidates:
+                        if _c["ticker"] in _sel_tickers:
+                            continue
+                        if _c.get("name", "") in _distressed:
+                            continue
+                        # keep same-sector count legal after swap
+                        if _c.get("sector") == _bad_sec or \
+                           _rp_sector_counts.get(_c.get("sector", "?"), 0) < _max_same_sec:
+                            _repl = _c
+                            break
+                    _rp_selected.remove(_bad)
+                    _rp_sector_counts[_bad_sec] -= 1
+                    _sel_tickers.discard(_bad["ticker"])
+                    if _repl:
+                        _rp_selected.append(_repl)
+                        _rp_sector_counts[_repl.get("sector", "?")] += 1
+                        _sel_tickers.add(_repl["ticker"])
+                st.session_state._distress_dropped = {
+                    n: d["reason"] for n, d in _distressed.items()}
+        except Exception:
+            pass
+
     # Equal weight
     _rp_pct = round(100 / max(len(_rp_selected), 1), 1)
     recommended_portfolio = []
@@ -5187,6 +5221,95 @@ def _refresh_macro_snapshot(holdings: list) -> dict:
         "inflation": {"context": _inf_ctx, **_inf_scalar},
         "sector_outlook": {"context": _sec_ctx, "sectors": _secs},
     }
+
+
+def _detect_firm_distress(firm_names: list, min_confidence: str = "high") -> dict:
+    """Batched, specificity-first firm-distress detection.
+
+    ONE CSE query for the whole basket asking only about HARD distress signals
+    (SEBI/RBI enforcement, auditor resignation, default, insolvency, fraud
+    charge, rating downgrade to default). The LLM then judges MATERIALITY and
+    CONFIDENCE per firm. Returns {firm_name: {reason, confidence}} filtered to
+    firms actually in the input list AND confidence >= min_confidence.
+
+    Asymmetric use:
+      - candidate drop-replace at build  -> min_confidence="medium" (cheap to drop)
+      - held-position flag at review      -> min_confidence="high"   (can cause a real sell)
+
+    Fail-safe: any parse/search failure returns {} — NEVER fabricate distress.
+    """
+    firm_names = [f for f in (firm_names or []) if f]
+    if not firm_names:
+        return {}
+
+    _basket = " OR ".join(f'"{n}"' for n in firm_names[:20])
+    _query = (
+        f"India NSE ({_basket}) SEBI action OR RBI penalty OR auditor resignation "
+        f"OR fraud charge OR insolvency OR loan default OR rating downgrade default 2026"
+    )
+    try:
+        _r = get_web_context(_query)
+        _ctx = _r.get("context", "")
+    except Exception:
+        return {}
+    if not _ctx or _ctx.strip() in (
+        "No material recent developments found.", "Web search unavailable.", "Unavailable"):
+        return {}
+
+    _valid = set(firm_names)
+    _judge_prompt = (
+        "You are a risk officer. Below are web snippets and a list of firms we hold or are "
+        "considering. Identify ONLY firms with MATERIAL, RECENT, HARD distress — specifically: "
+        "regulatory ENFORCEMENT (SEBI/RBI action or penalty), auditor resignation, fraud charges, "
+        "loan default, insolvency filing, or a credit-rating downgrade to default. "
+        "IGNORE soft signals: analyst opinions, 'concerns', 'probes' without action, price drops, "
+        "sector chatter, competitive pressure. When in doubt, DO NOT flag — a false alarm here is "
+        "worse than a miss.\n\n"
+        f"FIRMS: {', '.join(firm_names)}\n\n"
+        f"SNIPPETS:\n{_ctx}\n\n"
+        "Respond ONLY with a JSON array (no markdown). Each element: "
+        '{"firm": "<exact firm name from the list>", "reason": "<one sentence, cite the hard signal>", '
+        '"confidence": "high|medium|low"}. '
+        "Use 'high' ONLY when the snippet explicitly states an enforcement action/default/resignation. "
+        "Return [] if none qualify."
+    )
+
+    try:
+        client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+        _raw = None
+        for _m in FREE_MODELS:
+            try:
+                _resp = client.models.generate_content(model=_m, contents=_judge_prompt)
+                _raw = (_resp.text or "").strip()
+                if _raw:
+                    break
+            except Exception:
+                continue
+        if not _raw:
+            return {}
+        _raw = _raw.replace("```json", "").replace("```", "").strip()
+        if _raw.startswith("json"):
+            _raw = _raw[4:].strip()
+        _parsed = json.loads(_raw)
+    except Exception:
+        return {}
+
+    if not isinstance(_parsed, list):
+        return {}
+    _rank = {"low": 1, "medium": 2, "high": 3}
+    _threshold = _rank.get(min_confidence, 3)
+    _out = {}
+    for _item in _parsed:
+        if not isinstance(_item, dict):
+            continue
+        _nm = _item.get("firm") or _item.get("name")
+        if not _nm or _nm not in _valid:
+            continue
+        _conf = str(_item.get("confidence", "low")).lower()
+        if _rank.get(_conf, 0) < _threshold:
+            continue
+        _out[_nm] = {"reason": _item.get("reason", ""), "confidence": _conf}
+    return _out
 
 
 TOOL_STATUS_MESSAGES = {
@@ -8555,6 +8678,17 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 total_current = 0
                                 review_rows = []
 
+                                # ── Firm-distress gate (held positions): batched, ONE query ──
+                                # min_confidence="high" — this can prompt a real, tax-incurring
+                                # sell, so the bar is near-certain. Flags for HUMAN confirmation,
+                                # never auto-sells. Distinct from the deterministic red-flag override.
+                                _held_distress = {}
+                                try:
+                                    _held_names = [h.get("name", "") for h in enriched if h.get("name")]
+                                    _held_distress = _detect_firm_distress(_held_names, min_confidence="high")
+                                except Exception:
+                                    _held_distress = {}
+
                                 for h in enriched:
                                     total_entry += h["entry_price"] * h["shares"]
                                     total_current += h["now_price"] * h["shares"]
@@ -8654,6 +8788,22 @@ elif st.session_state.sb_view_mode == "portfolios":
                                                 f"exception applies. Thesis has eroded."
                                             )
                                             confidence = "high"
+
+                                    # ── FIRM-DISTRESS FLAG (human-confirmation, not auto-sell) ──
+                                    # A high-confidence hard distress signal (SEBI/RBI action,
+                                    # default, auditor exit). This is a CONVICTION-EXIT prompt for
+                                    # the human — it does NOT force a sell like the red-flag override.
+                                    _h_name = h.get("name", "")
+                                    if _h_name in _held_distress and "SELL ALL" not in action:
+                                        _dr = _held_distress[_h_name]["reason"]
+                                        action = f"⚠️ REVIEW: possible distress ({h['shares']})"
+                                        reasoning = (
+                                            f"DISTRESS SIGNAL: {_dr} "
+                                            f"This is a potential thesis-breaking event flagged for YOUR "
+                                            f"decision — not an automatic sell. If the thesis is broken, "
+                                            f"exit; if it's noise, hold. Verify before acting."
+                                        )
+                                        confidence = "review"
 
                                     
                                     mkt_note = ""
