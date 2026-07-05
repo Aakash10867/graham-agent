@@ -2098,12 +2098,10 @@ def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int,
                 st.session_state._ips_auto_fixes = _fixes_applied
 
     # Weld the macro snapshot (built during get_sip_candidates) onto the profile
-    # so it persists as a build-time checkpoint for later review-diffing.
+    # via bounded-append so a history accumulates for later review-diffing.
     _snap = st.session_state.get("_macro_snapshot")
     if _snap:
-        if _profile is None:
-            _profile = {}
-        _profile["macro_snapshot"] = _snap
+        _profile = _append_macro_snapshot(_profile, _snap, n=6)
 
     st.session_state.pending_portfolio = {
         "name": portfolio_name,
@@ -5038,6 +5036,133 @@ def _extract_macro_scalar(context_text: str, field: str) -> dict:
         fy = parsed.get("target_fy")
         out["target_fy"] = str(fy) if fy else None
     return out
+
+
+def _append_macro_snapshot(profile: dict, new_snap: dict, n: int = 6) -> dict:
+    """Append new_snap to a bounded history; keep latest as macro_snapshot."""
+    if profile is None:
+        profile = {}
+    if not new_snap:
+        return profile
+    hist = profile.get("macro_history", [])
+    if not isinstance(hist, list):
+        hist = []
+    hist.append(new_snap)
+    profile["macro_history"] = hist[-n:]
+    profile["macro_snapshot"] = new_snap
+    return profile
+
+
+def _diff_scalar(old_val, new_val):
+    """Three-case diff. None is 'no reading' — NEVER coerced to 0."""
+    op = old_val is not None
+    np_ = new_val is not None
+    if op and np_:
+        try:
+            delta = round(float(new_val) - float(old_val), 3)
+        except (TypeError, ValueError):
+            if old_val == new_val:
+                return {"status": "stable", "old": old_val, "new": new_val, "delta": None}
+            return {"status": "changed", "old": old_val, "new": new_val, "delta": None}
+        if delta == 0:
+            return {"status": "stable", "old": old_val, "new": new_val, "delta": 0}
+        return {"status": "changed", "old": old_val, "new": new_val, "delta": delta}
+    if np_ and not op:
+        return {"status": "new", "old": None, "new": new_val, "delta": None}
+    if op and not np_:
+        return {"status": "unknown_now", "old": old_val, "new": None, "delta": None}
+    return {"status": "no_reading", "old": None, "new": None, "delta": None}
+
+
+def _diff_macro_snapshots(old: dict, new: dict) -> dict:
+    """None-aware diff of two snapshots. Missing snapshot -> {}."""
+    if not old or not new:
+        return {}
+    o_tax, n_tax = (old.get("tax") or {}), (new.get("tax") or {})
+    o_inf, n_inf = (old.get("inflation") or {}), (new.get("inflation") or {})
+    return {
+        "as_of_old": old.get("as_of"),
+        "as_of_new": new.get("as_of"),
+        "inflation_projection": _diff_scalar(
+            o_inf.get("rbi_cpi_projection_pct"), n_inf.get("rbi_cpi_projection_pct")),
+        "inflation_target_fy": _diff_scalar(
+            o_inf.get("target_fy"), n_inf.get("target_fy")),
+        "ltcg_pct": _diff_scalar(o_tax.get("ltcg_pct"), n_tax.get("ltcg_pct")),
+        "stcg_pct": _diff_scalar(o_tax.get("stcg_pct"), n_tax.get("stcg_pct")),
+    }
+
+
+def _render_macro_diff(diff: dict) -> str:
+    """Signal-only delta lines. Silent when nothing moved. Empty -> ''."""
+    if not diff:
+        return ""
+    _o, _n = diff.get("as_of_old", "?"), diff.get("as_of_new", "?")
+    fields = [
+        ("RBI CPI projection", "inflation_projection", "%", True),
+        ("Projection target FY", "inflation_target_fy", "", False),
+        ("LTCG rate", "ltcg_pct", "%", True),
+        ("STCG rate", "stcg_pct", "%", True),
+    ]
+    signal_states = {"changed", "new", "unknown_now"}
+    has_signal = any(diff[k]["status"] in signal_states for _, k, _, _ in fields)
+    if not has_signal:
+        return f"_No material macro shift since last review ({_o} \u2192 {_n})._"
+    lines = []
+    for lbl, key, unit, isbp in fields:
+        d = diff[key]
+        stt = d["status"]
+        if stt == "changed":
+            if d["delta"] is None:
+                lines.append(f"- **{lbl}**: {d['old']} \u2192 {d['new']}")
+            else:
+                arrow = "\u25b2" if d["delta"] > 0 else "\u25bc"
+                sign = "+" if d["delta"] > 0 else ""
+                bp = f" ({sign}{round(d['delta']*100)}bps)" if isbp else ""
+                lines.append(f"- **{lbl}**: {d['old']}{unit} \u2192 {d['new']}{unit} {arrow}{bp}")
+        elif stt == "new":
+            lines.append(f"- **{lbl}**: now {d['new']}{unit} (no prior reading)")
+        elif stt == "unknown_now":
+            lines.append(f"- **{lbl}**: was {d['old']}{unit}, could not read this cycle \u26a0\ufe0f")
+    return f"**Macro shift since last review ({_o} \u2192 {_n}):**\n" + "\n".join(lines)
+
+
+def _refresh_macro_snapshot(holdings: list) -> dict:
+    """Standalone macro/inflation/tax refresh for review time (no builder profile).
+    Sectors derived from held stocks. Returns a fresh snapshot dict."""
+    from datetime import date as _date
+    _tax_ctx, _tax_scalar = "Web search unavailable.", {}
+    try:
+        _r = get_web_context("India equity capital gains tax LTCG STCG rate "
+                             "holding period exemption limit latest")
+        _tax_ctx = _r.get("context", _r.get("error", "Unavailable"))
+        _tax_scalar = _extract_macro_scalar(_tax_ctx, "tax")
+    except Exception:
+        pass
+    _inf_ctx, _inf_scalar = "Web search unavailable.", {}
+    try:
+        _r = get_web_context("RBI monetary policy CPI inflation projection forward estimate "
+                             "next fiscal year FY2027 outlook")
+        _inf_ctx = _r.get("context", _r.get("error", "Unavailable"))
+        _inf_scalar = _extract_macro_scalar(_inf_ctx, "inflation")
+    except Exception:
+        pass
+    _secs = list(dict.fromkeys(
+        h.get("sector", "") for h in (holdings or [])
+        if h.get("sector") and h.get("sector") != "N/A"))[:5]
+    _sec_ctx = ""
+    if _secs:
+        try:
+            _r = get_web_context(f"India stock market sector outlook 2026 {' '.join(_secs)} "
+                                f"headwinds tailwinds recent developments")
+            _sec_ctx = _r.get("context", _r.get("error", "Unavailable"))
+        except Exception:
+            _sec_ctx = "Web search unavailable."
+    return {
+        "as_of": _date.today().isoformat(),
+        "tax": {"context": _tax_ctx, **_tax_scalar},
+        "inflation": {"context": _inf_ctx, **_inf_scalar},
+        "sector_outlook": {"context": _sec_ctx, "sectors": _secs},
+    }
 
 
 TOOL_STATUS_MESSAGES = {
@@ -8377,6 +8502,19 @@ elif st.session_state.sb_view_mode == "portfolios":
 
                         if _review_clicked or _auto_run:
                             with st.spinner("Analyzing holdings with market context and book philosophy..."):
+                                # ── Macro refresh + diff (review-diff capability) ──
+                                try:
+                                    _prof = port.get("portfolio_profile") or {}
+                                    _prev_snap = _prof.get("macro_snapshot")
+                                    _new_snap = _refresh_macro_snapshot(holdings)
+                                    _macro_diff = _diff_macro_snapshots(_prev_snap, _new_snap)
+                                    _prof = _append_macro_snapshot(_prof, _new_snap, n=6)
+                                    sb.table("portfolios").update(
+                                        {"portfolio_profile": _prof}).eq("id", port["id"]).execute()
+                                    st.session_state[f"_macro_diff_{port['id']}"] = _macro_diff
+                                except Exception:
+                                    st.session_state[f"_macro_diff_{port['id']}"] = {}
+
                                 enriched = build_review_context(holdings, port)
                                 llm_recs = generate_review_recommendations(
                                     enriched, port.get("investor_type", "balanced"),
@@ -8582,6 +8720,14 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 f"ROE trend: {roe_t}</p></details>",
                                 unsafe_allow_html=True
                             )
+
+                    # ── Macro shift since last review (review-diff) ──
+                    _mdiff = st.session_state.get(f"_macro_diff_{port['id']}")
+                    if _mdiff:
+                        _mtext = _render_macro_diff(_mdiff)
+                        if _mtext:
+                            with st.container(border=True):
+                                st.markdown(_mtext)
 
                     # ── Health Check (inline during review) ──
                     hc = review_state.get("health_check")
