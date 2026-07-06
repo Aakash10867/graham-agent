@@ -1925,8 +1925,14 @@ def generate_ips(profile: dict, age: int = 30) -> dict:
     # SEBI: 10% max in single stock for mutual funds
     # Book Ch 6: same-sector = high correlation = poor diversification
     # ══════════════════════════════════════════════════════════
-    _equal_weight = round(100 / max(actual_stocks, 5), 1)
-    max_single_stock_pct = min(10.0, max(_equal_weight, 5.0))
+    # Per-stock cap must not be derived from a ROUNDED equal weight — the
+    # validator computes actual % from normalized weights, and round(100/n,1)
+    # re-normalizes back ABOVE the rounded cap (e.g. 100/12→8.3, but 8.3/99.6
+    # ×100 = 8.33 > 8.3 → false violation on every stock). Use the exact
+    # equal weight plus a small tolerance so an equal-weighted portfolio can
+    # never violate its own per-stock ceiling by float rounding alone.
+    _equal_weight = 100.0 / max(actual_stocks, 5)
+    max_single_stock_pct = round(min(10.0, max(_equal_weight, 5.0)) + 0.5, 1)
     max_sector_pct = 25.0
 
     if actual_stocks <= 10:
