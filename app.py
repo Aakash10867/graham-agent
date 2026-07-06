@@ -2159,17 +2159,54 @@ def _commit_portfolio(portfolio: dict) -> dict:
         }).execute()
         portfolio_id = port_resp.data[0]["id"]
 
+        # 4. ALLOCATE AND INSERT CHILDREN
         allocated, unallocated = allocate_shares(stocks_for_alloc, portfolio["sip_amount"])
-        _nifty_c = None
+        
+        # BULK INSERT HOLDINGS
+        holdings_data = []
         for s in allocated:
-            sb.table("holdings").insert({
+            holdings_data.append({
                 "portfolio_id": portfolio_id, "ticker": s["ticker"], "name": s["name"],
                 "sector": s["sector"], "allocation_pct": s["allocation_pct"], "shares": s["shares"],
                 "sip_amount_inr": s["actual_amount"], "price_at_entry": s["price"],
                 "pe_at_entry": s["pe"], "roe_at_entry": s["roe"], "score_at_entry": s["score"],
-            }).execute()
-            _nifty_c = record_transaction(sb, portfolio_id, st.session_state.sb_user_id,
-                s["ticker"], s["shares"], s["price"], s["actual_amount"], "buy", _nifty_c)
+            })
+            
+        if holdings_data:
+            sb.table("holdings").insert(holdings_data).execute()
+
+        # BULK INSERT TRANSACTIONS
+        nifty_px = None
+        try:
+            nifty_px = yf.Ticker("NIFTYBEES.NS").fast_info.last_price
+        except Exception:
+            pass
+            
+        txns_data = []
+        today_iso = datetime.date.today().isoformat()
+        
+        for s in allocated:
+            amt = s["actual_amount"]
+            nifty_u = round(float(amt) / nifty_px, 6) if (nifty_px and nifty_px > 0) else None
+            
+            txns_data.append({
+                "portfolio_id": str(portfolio_id),
+                "user_id": str(st.session_state.sb_user_id),
+                "ticker": s["ticker"],
+                "shares": float(s["shares"]),
+                "price": round(float(s["price"]), 2),
+                "amount_inr": round(float(amt), 2),
+                "transaction_type": "buy",
+                "transaction_date": today_iso,
+                "nifty_price": round(nifty_px, 2) if nifty_px else None,
+                "nifty_units": nifty_u,
+            })
+            
+        if txns_data:
+            try:
+                sb.table("sip_transactions").insert(txns_data).execute()
+            except Exception as e:
+                print(f"Bulk txn log failed (non-blocking): {e}")
 
         st.session_state.pending_portfolio = None
         return {"ok": True, "portfolio_id": portfolio_id,
@@ -7478,8 +7515,10 @@ elif st.session_state.sb_view_mode == "build_result":
             st.warning(f"\u26A0\uFE0F Removed for distress signals and replaced: {_dl}")
 
         # Translator: phrase the deterministic reason-traces (LLM = translator only)
-        with st.spinner("Preparing explanations..."):
-            _expl = _explain_portfolio(_built, _bwg)
+        if "_built_explanations" not in st.session_state:
+            with st.spinner("Preparing explanations..."):
+                st.session_state._built_explanations = _explain_portfolio(_built, _bwg)
+        _expl = st.session_state._built_explanations
 
         st.markdown(f"_{_expl.get('_portfolio', '')}_")
 
@@ -7550,13 +7589,14 @@ elif st.session_state.sb_view_mode == "build_result":
                             if _res.get("stale_priced"):
                                 st.warning(f"⚠️ Live price unavailable for {', '.join(_res['stale_priced'])} — used last known close. Verify on Kite before paying.")
                             st.session_state.builder_profile = None
-                            for _k in ("_built_portfolio", "_built_web_grounding", "_built_is_paper", "_distress_dropped"):
+                            for _k in ("_built_portfolio", "_built_web_grounding", "_built_is_paper", "_distress_dropped", "_built_explanations"):
                                 st.session_state.pop(_k, None)
                             st.session_state.sb_view_mode = "portfolios"
                             st.rerun()
         with _c2:
             if st.button("\u2190 Rebuild", width="stretch"):
                 st.session_state.builder_profile = None
+                st.session_state.pop("_built_explanations", None)
                 st.session_state.sb_view_mode = "builder"
                 st.rerun()
 
