@@ -4355,10 +4355,21 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
 
                 # Seed with highest-scoring stock
                 _remaining.sort(key=lambda t: (-_score_map.get(t, 0), _price_map.get(t, 99999)))
+                # ── Cap the greedy working set ──
+                # The greedy min-variance rank is O(pool^2 * selected) — at a
+                # 200-deep pool that is millions of covariance ops in pure Python
+                # (minutes; presents as "portfolio not coming"). But the selector
+                # only ever reaches ~target_n stocks; ranking positions beyond a
+                # generous working set is wasted compute. Rank the top 50 by
+                # composite; stocks below keep a default (worse) rank. Pool stays
+                # 200 for constraint headroom (cheap slice); ranking stays fast.
+                _GREEDY_WORKING_SET = 80
+                _rank_pool = _remaining[:_GREEDY_WORKING_SET]
+                _remaining = _rank_pool
                 if _remaining:
                     _selected.append(_remaining.pop(0))
 
-                while _remaining and len(_selected) < len(_tickers):
+                while _remaining and len(_selected) < len(_rank_pool):
                     best_t = None
                     best_portfolio_var = float("inf")
 
