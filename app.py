@@ -1823,11 +1823,23 @@ def validate_portfolio_ips(stocks: list, ips_policy: dict) -> dict:
 
     # ── 4. Holdings count ──
     # 4a. IPS target (hard — user paid for this many stocks)
+    # DEMOTED from violation to warning. With the pool widened to 200, a
+    # shortfall is no longer a truncation artifact — it means the universe
+    # genuinely cannot supply `ips_target` sector-legal, tier-1 names. Per
+    # Reilly & Brown the count is a PROXY for "diversified enough"; when the
+    # sector cap binds before the count, the constraint-limited maximum IS the
+    # book-compliant answer. Blocking would force padding-with-garbage (raises
+    # unsystematic risk) or breaching a sector cap (breaks diversification) —
+    # both violate the book to satisfy a proxy. So a genuinely-scarce short
+    # count SAVES, but is DISCLOSED via the warning below.
     ips_target = sizing.get("actual", sizing.get("ips_target", 0))
     if ips_target and len(stocks) < ips_target:
-        violations.append(
-            f"Portfolio has {len(stocks)} stocks — IPS requires {ips_target}. "
-            f"Backfill from fringe_candidates; never present fewer than target.")
+        warnings.append(
+            f"Portfolio has {len(stocks)} stocks vs IPS target of {ips_target}. "
+            f"Your universe cannot supply {ips_target} sector-legal, quality-passing "
+            f"names under these constraints — {len(stocks)} is the diversified maximum. "
+            f"Adding more would require breaching a sector cap or admitting "
+            f"illiquid/low-quality stocks, both of which raise unsystematic risk.")
     # 4b. Book minimum (warning — honest about under-diversification)
     book_min = sizing.get("book_minimum", 12)
     if len(stocks) < book_min:
@@ -2041,6 +2053,9 @@ def register_portfolio(portfolio_name: str, investor_type: str, sip_amount: int,
                 "instruction": "Do not retry blindly — the portfolio selector produced "
                                "non-compliant output and must be fixed at the source.",
             }
+        # Non-blocking warnings (e.g. genuine count scarcity) — stash for disclosure.
+        if _validation.get("warnings"):
+            st.session_state._ips_save_warnings = _validation["warnings"]
 
     # Weld the macro snapshot (built during get_sip_candidates) onto the profile
     # via bounded-append so a history accumulates for later review-diffing.
@@ -4185,14 +4200,14 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
         # Prefer dividend payers (soft): only narrow if it leaves a deep pool.
         div_payers = df[pd.notna(df["dividend_yield_pct"]) & (df["dividend_yield_pct"] > 0)]
         if len(div_payers) >= 40:
-            df = div_payers
-        target_count = 60
-    elif investor_type == "balanced":
-        target_count = 60
-    elif investor_type == "enterprising":
-        target_count = 60
-    else:
-        target_count = 60
+            df = df[pd.notna(df["dividend_yield_pct"]) & (df["dividend_yield_pct"] > 0)]
+    # Pool cap (NOT portfolio size). Must be large enough that truncation never
+    # binds BEFORE the book constraints do — else a short portfolio is a
+    # truncation artifact, not real scarcity. 200 gives ~13x headroom over a
+    # 15-stock target: the selector exhausts the *constraints*, not the *pool*,
+    # while staying within one batched yfinance download and a tractable
+    # O(pool^2 * n) greedy loop. Short count at this depth = REAL scarcity.
+    target_count = 200
 
     # ── Risk tier caps: limit small-cap exposure by profile ──
     if "risk_tier" in df.columns:
@@ -7469,6 +7484,23 @@ elif st.session_state.sb_view_mode == "build_result":
                 "Why": _expl.get(_s["ticker"], ""),
             })
         st.dataframe(_pd.DataFrame(_rows), width="stretch", hide_index=True)
+
+        # ── Shortfall disclosure at DECISION time (before saving) ──
+        # If the deterministic selector could not reach the IPS target even from
+        # the widened 200-deep pool, that is genuine scarcity — show WHY now, so
+        # the user decides with the tradeoff visible, not swallowed post-hoc.
+        _ips_target = ((_bprof.get("ips_policy", {}) or {}).get("portfolio_sizing", {})
+                       or {}).get("actual", 0)
+        if _ips_target and len(_built) < _ips_target:
+            st.warning(
+                f"⚠️ **{len(_built)} stocks vs your IPS target of {_ips_target}.** "
+                f"Your universe cannot supply {_ips_target} sector-legal, "
+                f"quality-passing names under these constraints — {len(_built)} is the "
+                f"diversified maximum. Reaching {_ips_target} would require breaching a "
+                f"sector cap or admitting illiquid/low-quality stocks, both of which "
+                f"*raise* unsystematic risk. Per Reilly & Brown, the constraint-limited "
+                f"count is the book-compliant answer. You may still save it below."
+            )
 
         _pname = st.text_input("Portfolio name",
             value=f"{_bprof.get('philosophy', 'Quality')} SIP - {datetime.date.today().strftime('%B %Y')}")
