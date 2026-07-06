@@ -4287,15 +4287,15 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
     df["_sort_pe"] = df["pe"].apply(lambda x: x if pd.notna(x) else 9999)
     df["_sort_roe"] = df["roe_pct"].apply(lambda x: -x if pd.notna(x) else 9999)
     df["_sort_growth"] = df["revenue_cagr_3y"].apply(lambda x: -x if pd.notna(x) else 9999)
-    # Sprint 11: Price preference — at equal quality, lower price gives more shares
-    # per SIP cycle = finer rebalancing granularity (Reilly & Brown diversification theory)
-    df["_sort_price"] = df["price"].apply(lambda x: x if pd.notna(x) else 99999)
+    # Replaced price tie-breaker with absolute quality (score) to prevent penny-stock bias 
+    # without violating the IPS cap distribution goals.
+    df["_sort_score"] = df["score"].apply(lambda x: -x if pd.notna(x) else 0)
     if investor_type == "defensive":
-        df = df.sort_values(["_composite", "_sort_pe", "_sort_roe", "_sort_price"], ascending=[False, True, True, True])
+        df = df.sort_values(["_composite", "_sort_score", "_sort_pe", "_sort_roe"], ascending=[False, True, True, True])
     elif investor_type == "enterprising":
-        df = df.sort_values(["_composite", "_sort_growth", "_sort_roe", "_sort_price"], ascending=[False, True, True, True])
+        df = df.sort_values(["_composite", "_sort_score", "_sort_growth", "_sort_roe"], ascending=[False, True, True, True])
     else:
-        df = df.sort_values(["_composite", "_sort_roe", "_sort_pe", "_sort_price"], ascending=[False, True, True, True])
+        df = df.sort_values(["_composite", "_sort_score", "_sort_roe", "_sort_pe"], ascending=[False, True, True, True])
 
     # ── Trim to target count ──
     df = df.head(target_count)
@@ -4383,11 +4383,11 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
                 _selected = []
                 _remaining = [t for t in _corr.columns]
                 _score_map = {c["ticker"]: c.get("score", 0) for c in candidates}
-                _price_map = {c["ticker"]: c.get("price", 99999) for c in candidates}
+                _global_rank_map = {c["ticker"]: i for i, c in enumerate(candidates)}
                 _sector_map = {c["ticker"]: c.get("sector", "Unknown") for c in candidates}
 
-                # Seed with highest-scoring stock
-                _remaining.sort(key=lambda t: (-_score_map.get(t, 0), _price_map.get(t, 99999)))
+                # Seed with highest-scoring stock. Tie-break using the profile-optimized global rank.
+                _remaining.sort(key=lambda t: (-_score_map.get(t, 0), _global_rank_map.get(t, 999)))
                 # ── Cap the greedy working set ──
                 # The greedy min-variance rank is O(pool^2 * selected) — at a
                 # 200-deep pool that is millions of covariance ops in pure Python
