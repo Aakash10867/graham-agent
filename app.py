@@ -2099,20 +2099,6 @@ def _commit_portfolio(portfolio: dict) -> dict:
         next_review = (datetime.date.today() + datetime.timedelta(days=review_days)).isoformat()
         next_sip = (datetime.date.today() + datetime.timedelta(days=30)).isoformat()
 
-        port_resp = sb.table("portfolios").insert({
-            "user_id": st.session_state.sb_user_id,
-            "name": portfolio["name"],
-            "investor_type": portfolio["investor_type"],
-            "sip_amount": portfolio["sip_amount"],
-            "time_horizon": portfolio["time_horizon"],
-            "review_freq": str(review_days),
-            "next_review_date": next_review,
-            "next_sip_date": next_sip,
-            "is_paper": portfolio.get("is_paper", False),
-            "portfolio_profile": portfolio.get("portfolio_profile", {})
-        }).execute()
-        portfolio_id = port_resp.data[0]["id"]
-
         stocks_for_alloc = []
         _stale = []
         for stock in portfolio["stocks"]:
@@ -2120,8 +2106,8 @@ def _commit_portfolio(portfolio: dict) -> dict:
             # Universe row FIRST (fixes row-before-assignment bug)
             row = universe_df[universe_df["ticker"] == ticker]
             _uni_close = None
-            if len(row) and "close" in row.columns and pd.notna(row["close"].iloc[0]):
-                _uni_close = float(row["close"].iloc[0])
+            if len(row) and "price" in row.columns and pd.notna(row["price"].iloc[0]):
+                _uni_close = float(row["price"].iloc[0])
 
             price = 0
             _max_tries = 2 if _uni_close is None else 1
@@ -2158,6 +2144,20 @@ def _commit_portfolio(portfolio: dict) -> dict:
 
         if not stocks_for_alloc:
             return {"ok": False, "error": "No stocks could be priced — portfolio not saved."}
+
+        port_resp = sb.table("portfolios").insert({
+            "user_id": st.session_state.sb_user_id,
+            "name": portfolio["name"],
+            "investor_type": portfolio["investor_type"],
+            "sip_amount": portfolio["sip_amount"],
+            "time_horizon": portfolio["time_horizon"],
+            "review_freq": str(review_days),
+            "next_review_date": next_review,
+            "next_sip_date": next_sip,
+            "is_paper": portfolio.get("is_paper", False),
+            "portfolio_profile": portfolio.get("portfolio_profile", {})
+        }).execute()
+        portfolio_id = port_resp.data[0]["id"]
 
         allocated, unallocated = allocate_shares(stocks_for_alloc, portfolio["sip_amount"])
         _nifty_c = None
