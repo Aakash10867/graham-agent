@@ -4467,11 +4467,18 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
         if _rp_sector_counts[_sec] >= _max_same_sec:
             continue
 
-        # Constraint 2: max sector % — NOT checked per-stock. A sector's final
-        # weight is only knowable once the portfolio is full; checking it
-        # incrementally rejects every stock (first stock in any sector is 100%
-        # of a then-1-stock portfolio). The max_same_sector COUNT cap bounds
-        # concentration; the %-cap is validated post-selection.
+        # Constraint 2: max sector % — checked against the KNOWN FINAL count.
+        # The original bug used n_so_far (transient) as denominator, making the
+        # first stock in any sector compute as 100%. The fix: project the
+        # sector's FINAL weight at the target count. A sector with k stocks
+        # finally weighs k/target_n. The COUNT cap does NOT imply this — e.g.
+        # 3 stocks/sector at n=12 is 25.0%, which the count cap allows but the
+        # %-cap forbids at the boundary. Use a small epsilon so an exact-boundary
+        # sector (25.0% vs 25.0% cap) is rejected rather than tripping the
+        # downstream validator on float noise.
+        _proj_sector_pct = ((_rp_sector_counts[_sec] + 1) / max(_target_n, 1)) * 100
+        if _proj_sector_pct > (_max_sec_pct - 0.1):
+            continue
 
         # Constraint 3: small-cap cap
         if _tier == "Small":
