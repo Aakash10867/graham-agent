@@ -1171,6 +1171,71 @@ def compute_spectrum_scores(data):
 
 # ─── 11. QUALITY GATE (rewritten) ───
 
+def compute_trajectory_score(data):
+    """Trajectory (0-10): direction of travel over three years, price-independent.
+
+    The other four frameworks all ask a question about price or structure:
+      Graham     — is it cheap and safe?
+      Greenblatt — is it cheap with high returns on capital?
+      Dorsey     — does it have a moat?
+      Lynch      — is its growth fairly priced?
+    None asks whether the business is getting better. That is Trajectory's job,
+    and its job alone.
+
+    Design notes:
+      - 3-year CAGRs, not 1-year deltas. A single year is noise.
+      - Revenue AND earnings, not either. Revenue without profit is not progress.
+      - Debt growth is measured AGAINST revenue growth, not against a constant.
+        Leverage is only a problem when it outpaces the business it funds.
+      - Missing inputs score zero. A metric we cannot measure is not a metric
+        the company passed. This is the only honest treatment of NaN.
+    """
+    ni_cagr = _sf(data.get("ni_cagr_3y"))
+    rev_cagr = _sf(data.get("revenue_cagr_3y"))
+    rev_g = _sf(data.get("rev_growth"))
+    debt_g = _sf(data.get("debt_growth"))
+    de = _sf(data.get("de"))  # percent: 89.0 == D/E 0.89x
+
+    t = 0
+
+    # 1. Earnings compounding (0-3)
+    if ni_cagr is not None:
+        if ni_cagr > 15:
+            t += 3
+        elif ni_cagr > 0:
+            t += 2
+
+    # 2. Revenue compounding (0-2)
+    if rev_cagr is not None and rev_cagr > 0:
+        t += 2
+
+    # 3. Margin expansion, y3 -> y0 (0-2). Fall back to y2 if y3 absent.
+    m_now = m_then = None
+    r0, n0 = _sf(data.get("revenue_y0")), _sf(data.get("net_income_y0"))
+    if r0 and r0 > 0 and n0 is not None:
+        m_now = n0 / r0
+    for _back in (3, 2):
+        rb = _sf(data.get(f"revenue_y{_back}"))
+        nb = _sf(data.get(f"net_income_y{_back}"))
+        if rb and rb > 0 and nb is not None:
+            m_then = nb / rb
+            break
+    if m_now is not None and m_then is not None and m_now > m_then:
+        t += 2
+
+    # 4. Growth is not debt-funded (0-2)
+    if debt_g is not None and rev_g is not None and debt_g < rev_g:
+        t += 2
+    elif debt_g is not None and debt_g < 0:
+        t += 2
+
+    # 5. Leverage sane: D/E < 1.0x (0-1)
+    if de is not None and de < 100:
+        t += 1
+
+    data["trajectory_score"] = max(0, min(10, t))
+
+
 def compute_quality_gate(data):
     """Rewritten quality gate using manipulation flags + ECM."""
     quality = True
@@ -1207,14 +1272,13 @@ def compute_framework_verdicts(data):
     greenblatt_pass = (data.get("greenblatt_score") or 0) >= 7
     dorsey_buff_pass = (data.get("dorsey_buffett_score", 0) or 0) >= 6
 
-    # Trajectory (existing logic preserved)
-    rev_g = _sf(data.get("rev_growth"))
-    ni_g = _sf(data.get("ni_growth"))
-    de = _sf(data.get("de"))
-    debt_g = _sf(data.get("debt_growth"))
-    growth_ok = (rev_g is not None and rev_g > 0) or (ni_g is not None and ni_g > 0)
-    debt_ok = (debt_g is not None and debt_g < 0) or (de is not None and de < 50)
-    trajectory_pass = bool(growth_ok and debt_ok)
+    # Trajectory — now a 0-10 sub-score, thresholded like the other four.
+    # Old rule was `(rev>0 OR ni>0) AND (debt shrank OR de<50)`, which fired on
+    # 39.6% of the universe: the AND of a tautology (72.4%) and a coin (52.4%).
+    # Threshold 6 is a CALIBRATION KNOB — tune against the measured base rate
+    # after the rerun so Trajectory sits alongside Dorsey (12.7%) and Lynch
+    # (23.9%) rather than dominating the composite.
+    trajectory_pass = (data.get("trajectory_score", 0) or 0) >= 6
 
     # Lynch pass (category-dependent threshold)
     lynch_s = data.get("lynch_score", 0) or 0
@@ -1281,6 +1345,7 @@ def compute_all_deep_metrics(data, stock):
     compute_manipulation_flags(data, income_stmt, balance_sheet, cashflow)
     compute_classification(data)
     compute_spectrum_scores(data)
+    compute_trajectory_score(data)
     compute_quality_gate(data)
 
     return data
