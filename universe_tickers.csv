@@ -234,7 +234,6 @@ ticker,name,exchange
 507833.BO,Computer Point Ltd.,BSE
 507852.BO,Addi Industries Ltd.,BSE
 507872.BO,Ashnoor Textiles Mills Ltd.,BSE
-507912.BO,GYFTR LIMITED,BSE
 507917.BO,East Buildtech Limited,BSE
 507938.BO,Manipal Finance Corporation Ltd.,BSE
 507946.BO,Kiduja  India  Ltd,BSE
@@ -297,7 +296,7 @@ ticker,name,exchange
 509953.BO,Trade Wings Ltd.,BSE
 509960.BO,U.P. Hotels Ltd.,BSE
 510245.BO,Swasti Vinayaka Synthetics Ltd.,BSE
-511000.BO,Madhusudan Securities Ltd,BSE
+511000.BO,MSL GLOBAL LIMITED,BSE
 511012.BO,Yamini Investments Company Limited,BSE
 511016.BO,Premier Capital Services Ltd.,BSE
 511018.BO,MILGREY FINANCE & INVESTMENT LTD,BSE
@@ -571,7 +570,6 @@ ticker,name,exchange
 517170.BO,Edvenswa Enterprises Limited,BSE
 517172.BO,Pervasive Commodities Limited,BSE
 517201.BO,Switching Technologies Gunther Ltd.,BSE
-517230.BO,AURIQUE LIMITED,BSE
 517236.BO,Calcom Vision Ltd.,BSE
 517238.BO,Dynavision Limited,BSE
 517246.BO,BCC Fuba India Ltd.,BSE
@@ -1108,7 +1106,7 @@ ticker,name,exchange
 531025.BO,Visagar Financial Services Ltd,BSE
 531027.BO,Libord Securities Ltd.,BSE
 531033.BO,Regal Entertainment & Consultants Ltd.,BSE
-531035.BO,ERAAYA LIFESPACES LIMITED,BSE
+531035.BO,EBIX LIMITED,BSE
 531039.BO,Swadha Nature Limited,BSE
 531041.BO,Competent Automobiles Co. Ltd.,BSE
 531043.BO,Dhanvantri Jeevan Rekha Ltd.,BSE
@@ -1341,7 +1339,6 @@ ticker,name,exchange
 531959.BO,Newtime Infrastructure Limited,BSE
 531962.BO,Shree Metalloys Limited,BSE
 531968.BO,IITL PROJECTS LIMITED,BSE
-531971.BO,POPEES BABY CARE INDIA LIMITED,BSE
 531977.BO,Chartered Logistics Ltd,BSE
 531979.BO,HIND ALUMINIUM INDUSTRIES LTD.,BSE
 531982.BO,Spectrum Foods Limited,BSE
@@ -1509,9 +1506,7 @@ ticker,name,exchange
 537008.BO,ICICI Prudential Mutual Fund,BSE
 537069.BO,Arnold Holdings Ltd,BSE
 537253.BO,Sunil Healthcare Limited,BSE
-537254.BO,JTL DEFENCE LIMITED,BSE
 537326.BO,CHEMTECH INDUSTRIAL VALVES LIMITED,BSE
-537392.BO,Keto Motors Limited,BSE
 537483.BO,Nippon India Mutual Fund,BSE
 537536.BO,Denis Chem Lab Limited,BSE
 537573.BO,Polymac Thermoformers Limited,BSE
@@ -2057,7 +2052,7 @@ ticker,name,exchange
 543282.BO,Niks Technology Limited,BSE
 543284.BO,EKI Energy Services Limited,BSE
 543285.BO,Rajeshwari Cans Limited,BSE
-543286.BO,Jetmall Spices and Masala Limited,BSE
+543286.BO,Artemis ADR Marketplace Limited,BSE
 543289.BO,Kuberan Global Edu Solutions Limited,BSE
 543291.BO,Mirae Asset Mutual Fund,BSE
 543292.BO,ICICI Prudential Mutual Fund,BSE
@@ -2628,6 +2623,11 @@ ticker,name,exchange
 544811.BO,KRATIKAL TECH LIMITED,BSE
 544812.BO,Atharva Poly-Plast Limited,BSE
 544813.BO,Seemax Resources Limited,BSE
+544815.BO,Kotak Mahindra Mutual Fund,BSE
+544817.BO,Kotak Mahindra Mutual Fund,BSE
+544818.BO,Kotak Mahindra Mutual Fund,BSE
+544819.BO,Kotak Mahindra Mutual Fund,BSE
+544820.BO,Kotak Mahindra Mutual Fund,BSE
 555555.BO,ICICI Prudential Mutual Fund,BSE
 590103.BO,Reliance Mutual Fund-Permitted,BSE
 590104.BO,Reliance Mutual Fund-Permitted,BSE
@@ -3374,6 +3374,7 @@ GANECOS.NS,Ganesha Ecosphere Limited,NSE
 GANESHBE.NS,Ganesh Benzoplast Limited,NSE
 GANESHCP.NS,Ganesh Consumer Products Limited,NSE
 GANESHHOU.NS,GANESH HOUSING LIMITED,NSE
+GANGAFO-RE.NS,Ganga Forging Ltd-RE,NSE
 GANGAFORGE.NS,Ganga Forging Limited,NSE
 GANGESSECU.NS,Ganges Securities Limited,NSE
 GARFIBRES.NS,Garware Technical Fibres Limited,NSE
@@ -3493,6 +3494,7 @@ GVKPIL.NS,GVK Power & Infrastructure Limited,NSE
 GVPIL.NS,GE Power India Limited,NSE
 GVPTECH.NS,GVP Infotech Limited,NSE
 GVT&D.NS,GE Vernova T&D India Limited,NSE
+GYFTR.NS,Gyftr Limited,NSE
 HAL.NS,Hindustan Aeronautics Limited,NSE
 HALDER.NS,Halder Venture Limited,NSE
 HALDYNGL.NS,Haldyn Glass Limited,NSE
