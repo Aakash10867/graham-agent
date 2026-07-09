@@ -1,15 +1,34 @@
-streamlit
-google-genai
-scikit-learn
-numpy
-pymupdf
-yfinance
-chromadb==0.6.3
+# Pinned 2026-07-10. Kordent's output is a function of data SEMANTICS.
+#
+# yfinance 1.x changed dividendYield from fraction to percent, corrupting
+#   lynch_pass and dorsey_pass universe-wide, and made yf.download return
+#   MultiIndex columns even for a single ticker, which turned jensen_alpha
+#   into a Series and silently deleted information_ratio.
+# pandas 3.0 changed pct_change()'s fill_method default from 'pad' to None,
+#   silently changing every correlation matrix in the system.
+#
+# Neither required a commit to this repo. NOTHING here floats.
+# To upgrade: bump one pin, rerun universe_updater.py, diff the five flag
+# base rates against the previous run. Merge only if they move for a reason.
+
+yfinance==1.5.1
+pandas==3.0.3
+numpy==2.4.6
+supabase==2.31.0
+postgrest==2.31.0
+httpx==0.28.1
+google-genai==2.11.0
+requests==2.34.2
+pymupdf==1.28.0
 protobuf>=5.27,<6
+chromadb==0.6.3
+
+# TODO: pin these from `pip freeze` in your local venv
+streamlit
+scikit-learn
 pysqlite3-binary
-supabase
 reportlab
-matplotlib 
+matplotlib
 plotly
 pyxirr
 kaleido
