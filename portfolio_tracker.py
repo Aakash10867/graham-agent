@@ -537,6 +537,15 @@ def run_daily_tracker():
     for h in _all_h:
         if h["portfolio_id"] not in _txn_port_ids:
             _ports_needing_bootstrap.add(h["portfolio_id"])
+    # nifty_units is a LEDGER quantity, not a metric. Metrics are recomputed daily;
+    # a NULL costs one day. Ledger rows are summed forever (see L564:
+    # `float(t.get("nifty_units") or 0)`), so a NULL genesis row silently and
+    # permanently understates the Nifty shadow. Skip and retry tomorrow.
+    if _ports_needing_bootstrap and not nifty_bees_price:
+        print(f"Skipping bootstrap of {len(_ports_needing_bootstrap)} portfolios: "
+              f"no NIFTYBEES close today. Will retry next run.")
+        _ports_needing_bootstrap = set()
+
     if _ports_needing_bootstrap:
         _bootstrap_today = date.today().isoformat()
         print(f"Bootstrapping {len(_ports_needing_bootstrap)} portfolios with genesis transactions...")
@@ -1320,7 +1329,12 @@ def run_daily_tracker():
                     if _new_shares <= 0:
                         continue
                     _new_amt = round(_new_shares * _cur_price, 2)
-                    _nifty_u = round(_new_amt / nifty_bees_price, 6) if nifty_bees_price and nifty_bees_price > 0 else None
+                    if not nifty_bees_price or nifty_bees_price <= 0:
+                        print(f"  Skipping paper SIP for {_ticker}: no NIFTYBEES close. "
+                              f"A ledger row with NULL nifty_units would permanently "
+                              f"understate the shadow portfolio.")
+                        continue
+                    _nifty_u = round(_new_amt / nifty_bees_price, 6)
                     # Record transaction
                     try:
                         supabase.table("sip_transactions").insert(_json_safe({
