@@ -36,36 +36,47 @@ jobs:
       # Producing the CSV and consuming it are now separate jobs.
 
       - name: Commit updated CSV
+        if: inputs.skip_universe != 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # Stage the specific CSVs
+
           git add universe_scored.csv universe_tickers.csv
-          
-          # Only proceed if there are actually changes to commit
+
           if ! git diff --cached --quiet; then
             git commit -m "Auto-update: universe scored $(date +%Y-%m-%d)"
-            
-            # Fetch the latest remote changes and rebase our new commit on top of them
-            # This prevents the 'fetch first' rejection and keeps the commit history linear
             git pull --rebase origin main
-            
             git push
           else
             echo "No changes detected in universe data. Skipping commit and push."
           fi
 
-track-portfolios:
+  # ── Separate job, on purpose ──────────────────────────────────────────
+  # The tracker used to run inside update-universe, under `bash -e`. On
+  # 2026-07-09 it raised on a NaN and the commit step never ran: two hours
+  # of universe data discarded, and daily_watchlist_email.yml (which gates
+  # on this workflow succeeding) never fired either. One NaN, three
+  # workflows. Producing the CSV and consuming it are now independent.
+  track-portfolios:
     needs: update-universe
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          # WITHOUT this, checkout clones github.sha — the commit that TRIGGERED
+          # the workflow, i.e. the repo state BEFORE update-universe pushed the
+          # new CSV. The tracker would silently score today's portfolios against
+          # yesterday's universe, every single day, with nothing in the log.
+          ref: ${{ github.ref }}
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - run: pip install -r requirements.txt
+
       - name: Run Daily Portfolio Tracker
         run: python portfolio_tracker.py
         env:
