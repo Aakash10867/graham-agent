@@ -21,7 +21,7 @@ jobs:
         with:
           python-version: '3.11'
           
-      - run: pip install supabase yfinance google-genai pandas
+      - run: pip install -r requirements.txt
       
       - run: python daily_watchlist_email.py
         env:
