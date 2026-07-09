@@ -1,6 +1,7 @@
 # TODO Sprint 8: Polish, XIRR everywhere, review reminders, paper auto-SIP, paper→real, Kite CSV.
 import os
 import re
+import math
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -245,6 +246,68 @@ def compute_diversification_score(holdings, universe_df=None):
     final = (hhi_score * 0.4) + (conc_score * 0.2) + (adequacy_score * 0.2) + (cap_score * 0.2)
     return round(max(0, min(100, final)))
 
+def _json_safe(obj):
+    """Strip NaN/inf from any payload before it reaches Supabase.
+
+    PostgREST's JSON encoder rejects NaN and Infinity. Python's json.dumps emits
+    them happily, so the failure surfaces only at the HTTP boundary — where it
+    kills the ENTIRE daily run, after earlier portfolios have already written.
+    2026-07-10: one NaN from NIFTYBEES.NS took down the whole tracker.
+
+    NULL is the honest representation of "we could not compute this". A zero
+    would be a lie, and the risk metrics would propagate it into the Alpha Report.
+
+    Three subtleties, all load-bearing:
+      - bool is a subclass of int, so it must be matched BEFORE the numeric cases.
+      - np.float64('nan') is NOT a Python float. isinstance(obj, float) misses it
+        entirely. That is the version of this function that looks right and does
+        nothing. Hence the .item() branch.
+      - inf, not just nan. Every ratio in compute_portfolio_risk_metrics divides
+        by something that can be zero (sigma, beta, tracking error).
+    """
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    if isinstance(obj, bool):
+        return obj
+    if isinstance(obj, float):
+        return None if (math.isnan(obj) or math.isinf(obj)) else obj
+    if hasattr(obj, "item"):  # numpy scalar
+        try:
+            return _json_safe(obj.item())
+        except Exception:
+            return obj
+    return obj
+
+
+def _usable_close(hist, label):
+    """Last FINITE, positive close from a yfinance history frame, else None.
+
+    `hist.empty` is False when yfinance returns today's partially-formed row.
+    For an INDEX (^NSEI) that row has a value the moment the session opens,
+    because an index is computed. For an ETF (NIFTYBEES.NS) it is NaN until
+    somebody actually trades. The old guard tested the container, not the value.
+
+    Take the last row with a real close — not simply the last row.
+    """
+    try:
+        if hist is None or hist.empty or "Close" not in hist:
+            return None
+        closes = hist["Close"].dropna()
+        closes = closes[closes > 0]
+        if closes.empty:
+            print(f"Warning: {label} returned rows but no usable close.")
+            return None
+        px = float(closes.iloc[-1])
+        if not math.isfinite(px) or px <= 0:
+            return None
+        return round(px, 2)
+    except Exception as e:
+        print(f"Warning: Could not read close for {label}: {e}")
+        return None
+
+
 def compute_portfolio_risk_metrics(holdings, universe_df=None, nifty_history=None):
     """Compute portfolio-level risk and performance metrics from Reilly & Brown.
     Ch 7: CAPM, Beta, Alpha (Jensen). Ch 18: Sharpe, Treynor, Sortino, IR.
@@ -327,15 +390,22 @@ def compute_portfolio_risk_metrics(holdings, universe_df=None, nifty_history=Non
         port_annual_return = port_returns.mean() * trading_days
         port_annual_std = port_returns.std() * (trading_days ** 0.5)
 
-        result["annual_return"] = round(port_annual_return, 4)
-        result["annual_std"] = round(port_annual_std, 4)
+        # Written unconditionally before; round(nan, 4) is nan.
+        if math.isfinite(port_annual_return):
+            result["annual_return"] = round(port_annual_return, 4)
+        if math.isfinite(port_annual_std):
+            result["annual_std"] = round(port_annual_std, 4)
 
         # ── 3. Sharpe Ratio = (Rp - RFR) / σp (Ch 18) ──
         if port_annual_std > 0:
             result["sharpe_ratio"] = round((port_annual_return - RFR) / port_annual_std, 3)
 
         # ── 4. Treynor Ratio = (Rp - RFR) / βp (Ch 18) ──
-        if "portfolio_beta" in result and result["portfolio_beta"] != 0:
+        # `nan != 0` is True. Without isfinite(), a NaN beta propagates straight
+        # into treynor and jensen_alpha. The other three ratios are already
+        # guarded by `> 0` comparisons, which are False for NaN.
+        _beta = result.get("portfolio_beta")
+        if _beta is not None and math.isfinite(_beta) and _beta != 0:
             result["treynor_ratio"] = round((port_annual_return - RFR) / result["portfolio_beta"], 4)
 
         # ── 5. Jensen's Alpha = Rp - RFR - β(Rm - RFR) (Ch 18) ──
@@ -431,10 +501,8 @@ def run_daily_tracker():
     # ── Fetch Nifty 50 close price once ──
     nifty_close = None
     try:
-        nifty = yf.Ticker("^NSEI")
-        hist = nifty.history(period="5d")
-        if not hist.empty:
-            nifty_close = round(float(hist["Close"].iloc[-1]), 2)
+        nifty_close = _usable_close(yf.Ticker("^NSEI").history(period="5d"), "^NSEI")
+        if nifty_close is not None:
             print(f"Nifty 50 close: {nifty_close:,.2f}")
     except Exception as e:
         print(f"Warning: Could not fetch Nifty 50: {e}")
@@ -442,13 +510,20 @@ def run_daily_tracker():
     # ── Fetch Nifty BeES for shadow portfolio ──
     nifty_bees_price = None
     try:
-        _bees = yf.Ticker("NIFTYBEES.NS")
-        _bees_hist = _bees.history(period="5d")
-        if not _bees_hist.empty:
-            nifty_bees_price = round(float(_bees_hist["Close"].iloc[-1]), 2)
-            print(f"Nifty BeES close: {nifty_bees_price:,.2f}")
+        nifty_bees_price = _usable_close(
+            yf.Ticker("NIFTYBEES.NS").history(period="5d"), "NIFTYBEES.NS")
     except Exception as e:
         print(f"Warning: Could not fetch Nifty BeES: {e}")
+
+    if nifty_bees_price is None:
+        # Do NOT silently substitute a stale price. Every nifty-relative metric
+        # (shadow value, nifty_units, nifty_xirr) is skipped for this run and
+        # written as NULL. One missing day is recoverable; a ledger with a wrong
+        # entry price is not.
+        print("Warning: no usable NIFTYBEES close. Nifty shadow metrics are NULL "
+              "for this run; the ledger will NOT be written with a guessed price.")
+    else:
+        print(f"Nifty BeES close: {nifty_bees_price:,.2f}")
 
     # ── Fetch all transactions once ──
     txn_resp = supabase.table("sip_transactions").select("portfolio_id, amount_inr, transaction_type, nifty_units").execute()
@@ -473,10 +548,16 @@ def run_daily_tracker():
                     continue
                 _h_amt = round(_h_shares * _h_price, 2)
                 _h_date = (h.get("entry_date") or _bootstrap_today)[:10]
-                _nifty_u = round(_h_amt / nifty_bees_price, 6) if nifty_bees_price and _h_amt > 0 else None
+                # `nifty_bees_price and ...` was TRUE for NaN — bool(nan) is True.
+                # This wrote nifty_units=NaN into the permanent ledger. The twin
+                # of this line at the paper-SIP site has `nifty_bees_price > 0`,
+                # which is False for NaN, and was saved by that accident.
+                _nifty_u = (round(_h_amt / nifty_bees_price, 6)
+                            if (nifty_bees_price and nifty_bees_price > 0 and _h_amt > 0)
+                            else None)
                 _port_user = next((p["user_id"] for p in portfolios if p["id"] == h["portfolio_id"]), None)
                 if _port_user:
-                    supabase.table("sip_transactions").insert({
+                    supabase.table("sip_transactions").insert(_json_safe({
                         "portfolio_id": h["portfolio_id"],
                         "user_id": _port_user,
                         "ticker": h["ticker"],
@@ -487,7 +568,7 @@ def run_daily_tracker():
                         "transaction_date": _h_date,
                         "nifty_price": nifty_bees_price,
                         "nifty_units": _nifty_u,
-                    }).execute()
+                    })).execute()
         # Refresh transactions after bootstrap
         txn_resp = supabase.table("sip_transactions").select("portfolio_id, amount_inr, transaction_type, nifty_units").execute()
         all_txns = txn_resp.data or []
@@ -546,10 +627,10 @@ def run_daily_tracker():
         return_pct = ((current_total_value - total_invested) / total_invested) * 100 if total_invested > 0 else 0.0
 
         # ── 1. Update leaderboard snapshot ──
-        supabase.table("portfolios").update({
+        supabase.table("portfolios").update(_json_safe({
             "current_value": round(current_total_value, 2),
             "current_return_pct": round(return_pct, 2)
-        }).eq("id", port_id).execute()
+        })).eq("id", port_id).execute()
 
         # ── 2. Compute cumulative invested & Nifty shadow from transaction ledger ──
         port_txns = [t for t in all_txns if t["portfolio_id"] == port_id]
@@ -563,7 +644,11 @@ def run_daily_tracker():
                 cumulative_invested -= amt
             total_nifty_units += float(t.get("nifty_units") or 0)
 
-        nifty_shadow = round(total_nifty_units * nifty_bees_price, 2) if nifty_bees_price and total_nifty_units > 0 else None
+        nifty_shadow = (round(total_nifty_units * nifty_bees_price, 2)
+                        if (nifty_bees_price and nifty_bees_price > 0 and total_nifty_units > 0)
+                        else None)
+        if nifty_shadow is not None and not math.isfinite(nifty_shadow):
+            nifty_shadow = None
 
         # ── 3. Log history ──
         history_row = {
@@ -580,7 +665,7 @@ def run_daily_tracker():
             history_row["nifty_value"] = nifty_close
 
         supabase.table("portfolio_history").upsert(
-            history_row, on_conflict="portfolio_id,date"
+            _json_safe(history_row), on_conflict="portfolio_id,date"
         ).execute()
 
         # ── Compute & store XIRR ──
@@ -592,7 +677,7 @@ def run_daily_tracker():
             _xirr_update["nifty_xirr_pct"] = _n_xirr
         if _xirr_update:
             try:
-                supabase.table("portfolios").update(_xirr_update).eq("id", port_id).execute()
+                supabase.table("portfolios").update(_json_safe(_xirr_update)).eq("id", port_id).execute()
             except Exception as e:
                 print(f"  XIRR store failed (non-blocking): {e}")
 
@@ -600,9 +685,9 @@ def run_daily_tracker():
         # Diversification score
         _div_score = compute_diversification_score(port_holdings, universe_df)
         try:
-            supabase.table("portfolios").update({
+            supabase.table("portfolios").update(_json_safe({
                 "diversification_score": _div_score
-            }).eq("id", port_id).execute()
+            })).eq("id", port_id).execute()
         except Exception as e:
             print(f"  Diversification score store failed (non-blocking): {e}")
 
@@ -619,7 +704,7 @@ def run_daily_tracker():
                     if k in _risk:
                         _risk_update[k] = _risk[k]
                 if _risk_update:
-                    supabase.table("portfolios").update(_risk_update).eq("id", port_id).execute()
+                    supabase.table("portfolios").update(_json_safe(_risk_update)).eq("id", port_id).execute()
                 _beta_str = f" | β={_risk.get('portfolio_beta', '?')}"
                 _sharpe_str = f" | Sharpe={_risk.get('sharpe_ratio', '?')}"
                 _alpha_str = f" | α={_risk.get('jensen_alpha', '?')}"
@@ -647,10 +732,10 @@ def run_daily_tracker():
 
         if needs_reset:
             sip_budget = opp_budget
-            supabase.table("portfolios").update({
+            supabase.table("portfolios").update(_json_safe({
                 "sip_budget_remaining": round(sip_budget, 2),
                 "sip_budget_reset_date": today_str,
-            }).eq("id", port_id).execute()
+            })).eq("id", port_id).execute()
             if sip_amount > 0:
                 print(f"  Budget reset for [{port['name']}]: ₹{sip_budget:,.0f}")
 
@@ -1118,7 +1203,7 @@ def run_daily_tracker():
             batch = score_rows[i:i+100]
             try:
                 supabase.table("score_history").upsert(
-                    batch, on_conflict="ticker,date"
+                    _json_safe(batch), on_conflict="ticker,date"
                 ).execute()
                 written_scores += len(batch)
             except Exception as e:
@@ -1179,7 +1264,7 @@ def run_daily_tracker():
             if alert.get("alert_type") in ("opportunity", "new_entry"):
                 alert["is_read"] = True
             supabase.table("portfolio_alerts").upsert(
-                alert, on_conflict="portfolio_id,ticker,alert_type,alert_date"
+                _json_safe(alert), on_conflict="portfolio_id,ticker,alert_type,alert_date"
             ).execute()
             written += 1
         except Exception as e:
@@ -1238,7 +1323,7 @@ def run_daily_tracker():
                     _nifty_u = round(_new_amt / nifty_bees_price, 6) if nifty_bees_price and nifty_bees_price > 0 else None
                     # Record transaction
                     try:
-                        supabase.table("sip_transactions").insert({
+                        supabase.table("sip_transactions").insert(_json_safe({
                             "portfolio_id": pp_id,
                             "user_id": pp_user,
                             "ticker": _ticker,
@@ -1249,7 +1334,7 @@ def run_daily_tracker():
                             "transaction_date": today_str,
                             "nifty_price": nifty_bees_price,
                             "nifty_units": _nifty_u,
-                        }).execute()
+                        })).execute()
                     except Exception as e:
                         print(f"  Paper SIP txn failed for {_ticker}: {e}")
                         continue
@@ -1257,10 +1342,10 @@ def run_daily_tracker():
                     _old_shares = float(h.get("shares") or 0)
                     _old_invested = float(h.get("sip_amount_inr") or 0)
                     try:
-                        supabase.table("holdings").update({
+                        supabase.table("holdings").update(_json_safe({
                             "shares": _old_shares + _new_shares,
                             "sip_amount_inr": round(_old_invested + _new_amt, 2),
-                        }).eq("id", h["id"]).execute()
+                        })).eq("id", h["id"]).execute()
                     except Exception as e:
                         print(f"  Holding update failed for {_ticker}: {e}")
                     _sip_spent += _new_amt
