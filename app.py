@@ -3727,7 +3727,7 @@ def get_price_history(ticker: str, period: str) -> dict:
         sma_50 = float(hist["Close"].tail(50).mean()) if len(hist) >= 50 else None
         sma_200 = float(hist["Close"].tail(200).mean()) if len(hist) >= 200 else None
 
-        daily_returns = hist["Close"].pct_change().dropna()
+        daily_returns = hist["Close"].pct_change(fill_method=None).dropna()
         if len(daily_returns) > 1:
             volatility = float(daily_returns.std() * (252 ** 0.5) * 100)
         else:
@@ -4370,10 +4370,20 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
             _end = datetime.now()
             _start = _end - timedelta(days=365)
             _hist = yf.download(_tickers, start=_start.strftime("%Y-%m-%d"),
-                                end=_end.strftime("%Y-%m-%d"), progress=False)
+                                end=_end.strftime("%Y-%m-%d"), progress=False,
+                                auto_adjust=True, group_by="column")
             if not _hist.empty:
-                _prices = _hist["Close"] if len(_tickers) > 1 else _hist["Close"].to_frame(_tickers[0])
-                _returns = _prices.pct_change().dropna()
+                # yfinance 1.x returns MultiIndex columns even for one ticker,
+                # so the old single-ticker branch called .to_frame() on a
+                # DataFrame. Check the type instead of counting tickers.
+                _prices = _hist["Close"]
+                if isinstance(_prices, pd.Series):
+                    _prices = _prices.to_frame(_tickers[0])
+                # pct_change(fill_method=None): pandas 3.0's default, pinned
+                # explicitly. dropna(how="all") not dropna(): a row-wise dropna
+                # across ~200 tickers lets ONE gappy ticker delete that date
+                # for all of them, silently shrinking the correlation sample.
+                _returns = _prices.pct_change(fill_method=None).dropna(how="all")
                 _corr = _returns.corr()
                 _std = _returns.std()  # daily volatility per stock
 
