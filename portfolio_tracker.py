@@ -360,18 +360,27 @@ def compute_portfolio_risk_metrics(holdings, universe_df=None, nifty_history=Non
         weights = [(h.get("current_value", 0) or h.get("sip_amount_inr", 0) or 0) / total_value for h in holdings]
 
         # Fetch daily returns
+        # yfinance 1.x returns MultiIndex columns even for ONE ticker, so
+        # hist["Close"] is a one-column DataFrame, not a Series. The old
+        # `.to_frame()` branch below assumed a Series and would raise.
         hist = yf.download(tickers, start=start_date.strftime("%Y-%m-%d"),
-                           end=end_date.strftime("%Y-%m-%d"), progress=False)
+                           end=end_date.strftime("%Y-%m-%d"), progress=False,
+                           auto_adjust=True, group_by="column")
         if hist.empty:
             return result
 
-        # Handle single vs multiple tickers
-        if len(tickers) == 1:
-            daily_prices = hist["Close"].to_frame(tickers[0])
-        else:
-            daily_prices = hist["Close"]
+        daily_prices = hist["Close"]
+        if isinstance(daily_prices, pd.Series):     # older yfinance
+            daily_prices = daily_prices.to_frame(tickers[0])
 
-        daily_returns = daily_prices.pct_change().dropna()
+        # pandas 3.0 changed pct_change()'s fill_method default from 'pad' to
+        # None. Under 2.x a stale price was forward-filled into a ZERO return;
+        # under 3.0 it becomes NaN. Pin the semantics explicitly — 3.0's
+        # behaviour is the correct one, and we want it by choice, not by
+        # accident of which pandas pip resolved this morning.
+        # dropna(how="all") not dropna(): one gappy ticker must not delete
+        # that date for every other ticker.
+        daily_returns = daily_prices.pct_change(fill_method=None).dropna(how="all")
         if daily_returns.empty:
             return result
 
@@ -412,27 +421,45 @@ def compute_portfolio_risk_metrics(holdings, universe_df=None, nifty_history=Non
         # Need market return (Nifty 50)
         try:
             nifty = yf.download("^NSEI", start=start_date.strftime("%Y-%m-%d"),
-                                end=end_date.strftime("%Y-%m-%d"), progress=False)
+                                end=end_date.strftime("%Y-%m-%d"), progress=False,
+                                auto_adjust=True, group_by="column")
             if not nifty.empty:
-                nifty_returns = nifty["Close"].pct_change().dropna()
-                market_annual_return = nifty_returns.mean() * trading_days
-                result["market_return"] = round(market_annual_return, 4)
+                # yfinance 1.x: nifty["Close"] is a DataFrame. `.mean()` on it
+                # returns a SERIES indexed by Ticker, so market_annual_return,
+                # and therefore jensen_alpha, became Series. The 2026-07-09 log
+                # printed:  alpha=Ticker / ^NSEI -0.087 / dtype: float64
+                # And `nifty_returns.to_frame()` below raised AttributeError on
+                # a DataFrame, which the bare `except: pass` swallowed — so
+                # information_ratio has NEVER been written. Coerce to Series.
+                _nc = nifty["Close"]
+                if hasattr(_nc, "columns"):
+                    _nc = _nc.iloc[:, 0]
 
-                if "portfolio_beta" in result:
-                    alpha = port_annual_return - RFR - result["portfolio_beta"] * (market_annual_return - RFR)
-                    result["jensen_alpha"] = round(alpha, 4)
+                nifty_returns = _nc.pct_change(fill_method=None).dropna()
+                market_annual_return = float(nifty_returns.mean() * trading_days)
+                if math.isfinite(market_annual_return):
+                    result["market_return"] = round(market_annual_return, 4)
+
+                _beta = result.get("portfolio_beta")
+                if _beta is not None and math.isfinite(_beta):
+                    alpha = port_annual_return - RFR - _beta * (market_annual_return - RFR)
+                    if math.isfinite(alpha):
+                        result["jensen_alpha"] = round(float(alpha), 4)
 
                 # ── 6. Information Ratio = (Rp - Rb) / σ(Rp - Rb) (Ch 18) ──
-                # Align dates
-                aligned = port_returns.to_frame("port").join(nifty_returns.to_frame("nifty"), how="inner")
+                aligned = port_returns.to_frame("port").join(
+                    nifty_returns.to_frame("nifty"), how="inner")
                 if not aligned.empty:
                     tracking_diff = aligned["port"] - aligned["nifty"]
-                    tracking_error = tracking_diff.std() * (trading_days ** 0.5)
-                    if tracking_error > 0:
+                    tracking_error = float(tracking_diff.std() * (trading_days ** 0.5))
+                    if math.isfinite(tracking_error) and tracking_error > 0:
                         ir = (port_annual_return - market_annual_return) / tracking_error
-                        result["information_ratio"] = round(ir, 3)
-        except Exception:
-            pass
+                        if math.isfinite(ir):
+                            result["information_ratio"] = round(float(ir), 3)
+        except Exception as e:
+            # NEVER `pass` here again. This block hid a broken information_ratio
+            # for the entire life of the feature.
+            print(f"  Benchmark metrics failed (non-blocking): {type(e).__name__}: {e}")
 
         # ── 7. Sortino Ratio = (Rp - τ) / DRp (Ch 18) ──
         # τ = target return, use RFR; DR = downside deviation
