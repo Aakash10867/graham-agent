@@ -1278,7 +1278,20 @@ def compute_framework_verdicts(data):
     # Threshold 6 is a CALIBRATION KNOB — tune against the measured base rate
     # after the rerun so Trajectory sits alongside Dorsey (12.7%) and Lynch
     # (23.9%) rather than dominating the composite.
-    trajectory_pass = (data.get("trajectory_score", 0) or 0) >= 6
+    # Calibrated 2026-07 against measured base rates on 4,461 stocks:
+    #   >=6 -> 40.5%   >=7 -> 33.0%   >=8 -> 20.0%   >=9 -> 12.4%
+    # 8 sits between dorsey (14.6%) and lynch (23.0%). At 8 the 4+ pool holds
+    # 100 stocks, 23 Large, large-cap quota ceiling 20 (defensive needs 8).
+    # 9 is unaffordable: 5/5 count halves to ten.
+    #
+    # PROVISIONAL. Two known issues, both for Sprint 12 to settle empirically:
+    #   1. 578 stocks sit at exactly 7 — this boundary is a cliff, not a slope.
+    #   2. The `de < 100` component is a LEVEL test inside a DIRECTION framework,
+    #      and Graham/Dorsey already test leverage. It systematically penalizes
+    #      capital-intensive businesses (NTPC: ni_cagr 17%, margins expanding,
+    #      scores 7). Reconstruct the alternative with `trajectory_score - (de<100)`
+    #      and compare forward returns before deciding.
+    trajectory_pass = (data.get("trajectory_score", 0) or 0) >= 8
 
     # Lynch pass (category-dependent threshold)
     lynch_s = data.get("lynch_score", 0) or 0
