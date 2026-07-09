@@ -1304,9 +1304,22 @@ def run_daily_tracker():
             ).execute()
             written += 1
         except Exception as e:
+            _failed_alerts.append((alert.get("alert_type"), alert.get("ticker")))
             print(f"Alert write failed: {e}")
 
     print(f"Wrote {written} alerts.")
+    if _failed_alerts:
+        # A CHECK-constraint violation is a SCHEMA BUG, not a transient error:
+        # it recurs for every row, every day, and prints into a log nobody
+        # reads. On 2026-07-09 nine alerts were rejected because the constraint
+        # allowed only 3 of the 10 types this file emits. `goal_drift` and all
+        # four `watchlist_*` types had NEVER been writable — the watchlist alert
+        # UI in app.py:6688 was reading a table the writer could not populate.
+        from collections import Counter as _C
+        _by_type = _C(t for t, _ in _failed_alerts)
+        print(f"\n!! {len(_failed_alerts)} ALERTS REJECTED — by type: {dict(_by_type)}")
+        print("!! If this is a CHECK-constraint violation, the schema is behind "
+              "the code. Fix the constraint; do not silence this.")
 
 
     # ══════════════════════════════════════
