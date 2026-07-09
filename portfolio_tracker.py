@@ -1294,6 +1294,7 @@ def run_daily_tracker():
         print(f"Warning: Could not clean old alerts: {e}")
 
     written = 0
+    _failed_alerts = []
     for alert in all_alerts:
         try:
             # Opportunity/new_entry collected silently — weekly_mentor activates the best ones Monday
