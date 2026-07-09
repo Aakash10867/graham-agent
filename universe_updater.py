@@ -257,12 +257,23 @@ def fetch_fundamentals(ticker, retries=3):
                 "years_listed": calc_years_listed,
                 "name": info.get("longName") or info.get("shortName", ticker),
                 "sector": info.get("sector", ""),
+                "industry": info.get("industry", ""),
                 "price": info.get("regularMarketPrice") or info.get("currentPrice"),
                 "pe": pe,
                 "pb": info.get("priceToBook"),
                 "roe": info.get("returnOnEquity"),
                 "de": info.get("debtToEquity"),
-                "dividend_yield": info.get("dividendYield"),
+                # yfinance changed convention: dividendYield now returns PERCENT
+                # (3.29), not the fraction (0.0329) every consumer in this
+                # codebase assumes. Normalize once, here, at ingest.
+                #   deep_metrics:393  dy_pct = div_yield * 100
+                #   deep_metrics:676  total_divs = div_yield * market_cap
+                #   deep_metrics:1098 if dy > 0.04
+                #   universe_updater:616 dividend_yield_pct = dy * 100
+                # All four are correct against a fraction. Fixing them
+                # individually would be four places to get wrong next time.
+                "dividend_yield": (info.get("dividendYield") / 100.0
+                                   if info.get("dividendYield") is not None else None),
                 "eps": info.get("trailingEps"),
                 "earnings_yield": round(1.0 / pe * 100, 2) if pe and pe > 0 else None,
                 "profit_margin": info.get("profitMargins"),
@@ -617,9 +628,43 @@ def main():
         else:
             r["dividend_yield_pct"] = None
 
+    # ── Dividend-yield convention guard ──
+    # If yfinance flips convention again, this fires loudly instead of
+    # silently corrupting lynch_score, graham_payout_ratio, and dorsey_pass.
+    # As fractions, a universe median should sit near 0.006 (0.6%). A median
+    # above 0.30 means we are reading percents as fractions; below 0.0001
+    # means the opposite.
+    _dys = [r["dividend_yield"] for r in scored_results
+            if r.get("dividend_yield") is not None and r["dividend_yield"] > 0]
+    if _dys:
+        _dys.sort()
+        _med = _dys[len(_dys) // 2]
+        _mx = _dys[-1]
+        print(f"\n[GUARD] dividend_yield: n={len(_dys)} median={_med:.5f} max={_mx:.4f}")
+        if not (0.00005 < _med < 0.30):
+            print("[GUARD] FATAL: dividend_yield convention has changed upstream.")
+            print("[GUARD] Expected a FRACTION (0.033 == 3.3%). Fix the ingest "
+                  "normalization in fetch_fundamentals before trusting this CSV.")
+            sys.exit(1)
+        if _mx > 0.50:
+            print(f"[GUARD] WARN: max yield {_mx:.1%} — verify against screener.in.")
+
+    # ── Lender exclusion (declared, not accidental) ──
+    # Kordent has no framework for net interest margin, asset quality, or
+    # capital adequacy. Scoring a bank on manufacturing ratios and printing
+    # a verdict is worse than declining to score it. Note this is emitted as
+    # a COLUMN, not a filter — the selector decides, and discloses.
+    _LENDER_INDUSTRIES = {
+        "Banks - Regional", "Banks - Diversified", "Banks—Regional",
+        "Banks—Diversified", "Credit Services", "Mortgage Finance",
+    }
+    for r in scored_results:
+        r["is_lender"] = bool((r.get("industry") or "") in _LENDER_INDUSTRIES)
+
     # ── Existing columns ──
     base_columns = [
-        "ticker", "name", "sector", "price", "market_cap", "years_listed",
+        "ticker", "name", "sector", "industry", "is_lender",
+        "price", "market_cap", "years_listed",
         "pe", "pb", "roe_pct", "de", "eps",
         "dividend_yield_pct", "profit_margin",
         "current_ratio", "beta",
@@ -688,6 +733,7 @@ def main():
         "schilit_manipulation_score", "mulford_cashflow_quality_score",
         # Quality Gate & Framework Verdicts
         "quality_pass",
+        "trajectory_score",
         "graham_pass", "greenblatt_pass", "dorsey_pass", "trajectory_pass",
         "lynch_pass", "score",
     ]
@@ -707,8 +753,10 @@ def main():
             return "Large"
         elif mcap >= 5e10:    # ≥ ₹5,000 Cr
             return "Mid"
-        else:
+        elif mcap >= 5e9:     # ≥ ₹500 Cr
             return "Small"
+        else:
+            return "Micro"    # < ₹500 Cr — the universe had no word for this
 
     if "market_cap" in df.columns:
         df["risk_tier"] = df["market_cap"].apply(_risk_tier)
