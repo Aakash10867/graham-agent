@@ -654,16 +654,31 @@ def main():
     # capital adequacy. Scoring a bank on manufacturing ratios and printing
     # a verdict is worse than declining to score it. Note this is emitted as
     # a COLUMN, not a filter — the selector decides, and discloses.
-    _LENDER_INDUSTRIES = {
+    # Verified 2026-07 against yfinance industry strings on 4,461 stocks.
+    # HDFCBANK/ICICIBANK/SBIN/DCBBANK -> "Banks - Regional"
+    # LICHSGFIN -> "Mortgage Finance"      BAJFINANCE -> "Credit Services"
+    # BSE/CRISIL -> "Financial Data & Stock Exchanges"   CDSL -> "Capital Markets"
+    # The last three are NOT lenders and must pass through.
+    _UNEVALUABLE_INDUSTRIES = {
+        # Lenders: net interest margin, asset quality, capital adequacy.
         "Banks - Regional", "Banks - Diversified", "Banks—Regional",
         "Banks—Diversified", "Credit Services", "Mortgage Finance",
+        # Insurers: float, combined ratio, embedded value.
+        "Insurance - Life", "Insurance - Diversified", "Insurance - Reinsurance",
+        "Insurance - Property & Casualty", "Insurance Brokers",
+        "Insurance - Specialty",
+        # Shells: no business to evaluate.
+        "Shell Companies",
     }
     for r in scored_results:
-        r["is_lender"] = bool((r.get("industry") or "") in _LENDER_INDUSTRIES)
+        _ind = (r.get("industry") or "")
+        r["is_unevaluable"] = bool(_ind in _UNEVALUABLE_INDUSTRIES)
+        r["unevaluable_reason"] = _ind if _ind in _UNEVALUABLE_INDUSTRIES else ""
 
     # ── Existing columns ──
     base_columns = [
-        "ticker", "name", "sector", "industry", "is_lender",
+        "ticker", "name", "sector", "industry",
+        "is_unevaluable", "unevaluable_reason",
         "price", "market_cap", "years_listed",
         "pe", "pb", "roe_pct", "de", "eps",
         "dividend_yield_pct", "profit_margin",
