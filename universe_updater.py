@@ -233,6 +233,13 @@ def combine_and_deduplicate(nse_tickers, bse_tickers):
 # ──────────────────────────────────────────────
 # FUNDAMENTALS FETCHER (per stock)
 # ──────────────────────────────────────────────
+# Every ticker that fails is recorded with WHY. "No data: 606" mixes delisted
+# shells with tickers Yahoo throttled today. Only the second kind is
+# non-deterministic, and only the second kind makes the universe — and
+# therefore backtest_runner.py — irreproducible.
+FAILURES = []   # (ticker, reason)
+
+
 def fetch_fundamentals(ticker, retries=3):
     """Fetch all metrics needed for the 4 frameworks. Returns dict or None. Includes backoff."""
     for attempt in range(retries):
@@ -242,6 +249,7 @@ def fetch_fundamentals(ticker, retries=3):
             info = stock.info
             
             if not info or not info.get("regularMarketPrice"):
+                FAILURES.append((ticker, "no_price"))
                 return None, None
             # Compute years listed for Graham 7-year guard
             first_trade = info.get("firstTradeDateEpochUtc")
@@ -518,10 +526,21 @@ def fetch_fundamentals(ticker, retries=3):
                 print(f"[{ticker}] Rate limited. Sleeping {sleep_time}s...")
                 time.sleep(sleep_time)
             else:
-                print(f"[{ticker}] Failed: {e}")
+                if "404" in error_str:
+                    _reason = "404_not_found"
+                elif "delisted" in error_str.lower():
+                    _reason = "delisted"
+                else:
+                    _reason = f"error:{type(e).__name__}"
+                    print(f"[{ticker}] Failed: {e}")
+                FAILURES.append((ticker, _reason))
                 return None, None
-            
-    # Failed all retries
+
+    # Exhausted all retries — this only happens under 429 backoff. The old code
+    # returned None here silently, making a throttled ticker indistinguishable
+    # from a delisted one in the `failed` counter.
+    FAILURES.append((ticker, "rate_limited"))
+    print(f"[{ticker}] DROPPED after {retries} retries (rate limited).")
     return None, None
 
 
@@ -788,7 +807,43 @@ def main():
     # Add metadata
     df["updated_date"] = datetime.now().strftime("%Y-%m-%d")
 
+    # ── Failure breakdown ──────────────────────────────────────────────
+    from collections import Counter as _Counter
+    if FAILURES:
+        _reasons = _Counter(r for _, r in FAILURES)
+        print(f"\n[SCAN] {len(FAILURES)} tickers produced no data:")
+        for _r, _n in _reasons.most_common():
+            print(f"         {_r:<20s} {_n:>5d}")
+        _rate_limited = _reasons.get("rate_limited", 0)
+        pd.DataFrame(FAILURES, columns=["ticker", "reason"]).to_csv(
+            "universe_failures.csv", index=False)
+        print("[SCAN] Wrote universe_failures.csv")
+        if _rate_limited:
+            print(f"[SCAN] WARNING: {_rate_limited} tickers lost to Yahoo throttling.")
+            print("[SCAN] These are NON-DETERMINISTIC — a rerun would return a "
+                  "different universe. This is the reproducibility ceiling.")
+
+    # ── Regression guard ───────────────────────────────────────────────
+    # Refuse to overwrite a good universe with a throttled one. The CSV is
+    # committed to git and read by app.py, portfolio_tracker.py and
+    # backtest_runner.py. A silent 10% shrink corrupts all three.
     output_file = "universe_scored.csv"
+    if os.path.exists(output_file):
+        try:
+            _prev = len(pd.read_csv(output_file))
+            _delta = (len(df) - _prev) / _prev
+            print(f"\n[GUARD] universe size: {_prev} -> {len(df)} ({_delta:+.1%})")
+            if _delta < -0.02:
+                print("[GUARD] FATAL: universe shrank more than 2%. Not overwriting.")
+                print("[GUARD] Inspect universe_failures.csv. If the losses are "
+                      "'delisted'/'404_not_found', this is real and you can rerun "
+                      "with the guard relaxed. If they are 'rate_limited', rerun later.")
+                sys.exit(1)
+        except SystemExit:
+            raise
+        except Exception as _e:
+            print(f"[GUARD] Could not compare to previous universe: {_e}")
+
     df.to_csv(output_file, index=False)
 
     # ── Summary ──
