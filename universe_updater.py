@@ -18,6 +18,7 @@ import pandas as pd
 import yfinance as yf
 import time
 import io
+import os
 import sys
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -592,6 +593,31 @@ def process_universe(ticker_list, max_workers=2):
                     f"Valid: {len(results)}  |  No data: {failed}",
                     flush=True,
                 )
+
+    # ── Retry the throttled ──────────────────────────────────────────────
+    # Rate-limited tickers are the ONLY non-deterministic failure class: a
+    # rerun would drop a different 88. They fail in bursts, so by the time the
+    # scan ends the window has long since cleared. 88 x 0.5s is ~45 seconds,
+    # and it is the difference between a reproducible universe and a universe
+    # that is a function of Yahoo's mood that morning.
+    _throttled = [t for t, r in FAILURES if r == "rate_limited"]
+    if _throttled:
+        print(f"\n[RETRY] {len(_throttled)} rate-limited tickers. Cooling 60s...")
+        time.sleep(60)
+        FAILURES[:] = [(t, r) for t, r in FAILURES if r != "rate_limited"]
+        _recovered = 0
+        for _t in _throttled:
+            _data, _stock = fetch_fundamentals(_t, retries=5)
+            if _data:
+                try:
+                    deep_metrics.compute_all_deep_metrics(_data, _stock)
+                    results.append(_data)
+                    _recovered += 1
+                except Exception:
+                    FAILURES.append((_t, "retry_scoring_failed"))
+            time.sleep(1.0)
+        print(f"[RETRY] Recovered {_recovered}/{len(_throttled)}. "
+              f"Still lost: {len(_throttled) - _recovered}")
 
     # Greenblatt universe-level ranking (requires all stocks)
     deep_metrics.compute_greenblatt_ranks(results)
