@@ -4332,10 +4332,14 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str,
         pass
     web_grounding["inflation"] = _inf_ctx
 
-    # 3) SECTOR — outlook for the sectors we are allocating into
+    # 3) SECTOR — outlook for the sectors we are ACTUALLY allocating into.
+    # This used to read `candidates` — the ~200-name pre-selection pool that
+    # the deleted greedy loop built. So it searched the outlook for sectors the
+    # user might never hold. The selected holdings are the right set, and they
+    # arrive ordered by rank, so dict.fromkeys keeps the strongest sectors first.
     _top_sectors = list(dict.fromkeys(
-        c.get("sector", "") for c in candidates
-        if c.get("sector") and c.get("sector") != "N/A"
+        h.get("sector", "") for h in recommended_portfolio
+        if h.get("sector") and h.get("sector") != "N/A"
     ))[:5]
     _sec_ctx = ""
     if _top_sectors:
