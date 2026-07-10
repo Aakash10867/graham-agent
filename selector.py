@@ -126,6 +126,31 @@ PHILOSOPHY_TIEBREAK = {
 
 RANK_BAND = 0.05  # percentile points within which covariance may reorder
 
+# ── The conviction sleeve ──────────────────────────────────────────────────
+# Measured 2026-07: gate 3+ and gate 2+ produced IDENTICAL portfolios under all
+# four philosophies. Widening the gate admits 557 stocks and none can reach the
+# top fifteen of their sector, because _rank_score = Σ wᵢ·pctᵢ and the dominant
+# weight is capped at 35%:
+#
+#   specialist (99th on Graham, 40th elsewhere)  0.35(0.99) + 0.65(0.40) = 0.607
+#   generalist (70th on everything)              1.00(0.70)              = 0.700
+#
+# The specialist loses. A gate is a floor; a floor removes, it never surfaces.
+# Middle-tier value has to come from the RANKING, and the ranking punishes
+# specialization by construction.
+#
+# So: reserve k slots for the top-decile specialist under the user's dominant
+# framework, gate-exempt but Tier-1 bound, and make the trace say so out loud:
+#   "Fails three of our five frameworks. 99th percentile of Graham value in its
+#    sector. You told us that's what you're hunting."
+#
+# PROVISIONAL. This encodes an unmeasured belief — that one framework's signal
+# justifies holding a stock that fails three others. Sprint 12 measures forward
+# return per flag and sets k from data. graham_pass is rarest (5.6%) and most
+# orthogonal (max |phi| = 0.26), so it is the one most likely to carry alpha.
+CONVICTION_SLOTS = {4: 0, 3: 0, 2: 2}
+CONVICTION_MIN_PCT = 0.90
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # TIER 1 — INVESTABILITY FLOOR
@@ -249,14 +274,15 @@ def _effective_gate(min_score: int, n_applicable: int) -> int:
     return max(1, int(min_score * n_applicable / len(FRAMEWORKS) + 0.5))
 
 
-def _tier2(df: pd.DataFrame, policy: dict, rejects: dict) -> pd.DataFrame:
-    min_score = int(policy.get("min_acceptable_score", 3))
-    avoid = set(policy.get("avoid_sectors") or [])
+def _tier2(df: pd.DataFrame, policy: dict, rejects: dict):
+    """Annotate EVERY investable stock with its gate arithmetic, then return
+    (gated_pool, annotated_frame). The conviction sleeve needs the arithmetic
+    for stocks that FAILED the gate — that is the whole point of the sleeve.
 
-    if avoid:
-        n = len(df)
-        df = df[~df["sector"].isin(avoid)]
-        rejects["sector_excluded_by_user"] = n - len(df)
+    avoid_sectors moved to select_portfolio: a user's sector exclusion must bind
+    on conviction candidates too, and _tier2 no longer sees them all.
+    """
+    min_score = int(policy.get("min_acceptable_score", 3))
 
     keep, applicable_col, score_col, gate_col = [], [], [], []
     for _, row in df.iterrows():
@@ -269,8 +295,9 @@ def _tier2(df: pd.DataFrame, policy: dict, rejects: dict) -> pd.DataFrame:
         gate_col.append(g)
 
     df = df.assign(_score_applicable=score_col, _effective_gate=gate_col)
-    rejects["below_score_gate"] = int((~pd.Series(keep, index=df.index)).sum())
-    return df[pd.Series(keep, index=df.index)]
+    mask = pd.Series(keep, index=df.index)
+    rejects["below_score_gate"] = int((~mask).sum())
+    return df[mask], df
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -418,8 +445,36 @@ def _corr_tiebreak(cands: pd.DataFrame, chosen: list, corr: pd.DataFrame | None)
         scores[idx] = corr.loc[t, held].abs().mean() if t in corr.columns else 0.5
     return min(scores, key=scores.get)
 
+def _conviction_pool(annotated: pd.DataFrame, gated: pd.DataFrame,
+                     weights: dict) -> tuple[pd.DataFrame, str]:
+    """Top-decile specialists that FAILED the composite gate.
 
-def _fill(pool: pd.DataFrame, q: dict, corr) -> tuple[list, dict]:
+    Four guards, each load-bearing:
+      1. Tier 1 is never waived — these rows already cleared it.
+      2. The dominant framework's BOOLEAN must pass. 99th percentile in a sector
+         where nobody clears Graham is a fact about the sector, not the stock.
+      3. The framework must APPLY (a utility cannot have Greenblatt conviction).
+      4. Percentiles come from the pre-gate frame, so "top decile" means top
+         decile of everything investable — not of whatever survived the gate.
+    """
+    dom = max(weights, key=weights.get)
+    cand = annotated[~annotated.index.isin(gated.index)].copy()
+    if cand.empty:
+        return cand, dom
+
+    cand = cand[cand["_applicable"].apply(lambda a: dom in a)]
+    cand = cand[cand[PASS_FLAG[dom]].fillna(False).astype(bool)]
+    cand = cand[cand[f"_pct_{dom}"] >= CONVICTION_MIN_PCT]
+    cand = cand.assign(_conviction_pct=cand[f"_pct_{dom}"])
+    return cand.sort_values("_conviction_pct", ascending=False), dom
+
+
+def _fill(pool: pd.DataFrame, q: dict, corr, k_conviction: int = 0) -> tuple[list, dict]:
+    """pool carries a boolean `_conviction` column. Conviction rows are invisible
+    to the merit passes and are admitted only in their own pass, AFTER every IPS
+    minimum is satisfied. They consume FREE slots, never quota slots."""
+    is_conv = pool["_conviction"] if "_conviction" in pool.columns \
+        else pd.Series(False, index=pool.index)
     chosen, tickers = [], []
     sec_count, tier_count = defaultdict(int), defaultdict(int)
     slot_type = {}
@@ -442,8 +497,9 @@ def _fill(pool: pd.DataFrame, q: dict, corr) -> tuple[list, dict]:
         tier_count[row["risk_tier"]] += 1
         slot_type[idx] = why
 
-    def remaining(mask=None):
+    def remaining(mask=None, conviction=False):
         m = ~pool.index.isin(chosen)
+        m &= (is_conv if conviction else ~is_conv)
         if mask is not None:
             m &= mask
         sub = pool[m]
@@ -470,7 +526,19 @@ def _fill(pool: pd.DataFrame, q: dict, corr) -> tuple[list, dict]:
             break
         take(c.index[0], "breadth")
 
-    # Pass 4: free fill, pure merit order.
+    # Pass 4: the conviction sleeve. AFTER every IPS minimum is met, so a
+    # long-shot can never displace the large-cap floor or sector breadth.
+    # Ordered by the dominant framework's percentile, not by _rank_score —
+    # _rank_score is precisely the number that buried these stocks.
+    taken_conv = 0
+    while taken_conv < k_conviction and len(chosen) < q["n"]:
+        c = remaining(conviction=True)
+        if c.empty:
+            break
+        take(c.sort_values("_conviction_pct", ascending=False).index[0], "conviction")
+        taken_conv += 1
+
+    # Pass 5: free fill, pure merit order.
     while len(chosen) < q["n"]:
         c = remaining()
         if c.empty:
@@ -506,8 +574,26 @@ def select_portfolio(universe_df: pd.DataFrame, policy: dict,
     #
     # A stock's standing is a property of the stock, not of the filter it
     # happened to pass through.
+    # avoid_sectors binds on conviction candidates too, so it applies here —
+    # before ranking, before the gate — not inside _tier2.
+    avoid = set(policy.get("avoid_sectors") or [])
+    if avoid:
+        _n = len(df)
+        df = df[~df["sector"].isin(avoid)]
+        rejects["sector_excluded_by_user"] = _n - len(df)
+
     ranked = _tier3(df, policy)
-    pool = _tier2(ranked, policy, rejects)
+    gated, annotated = _tier2(ranked, policy, rejects)
+
+    weights = _resolve_weights(policy)
+    k_conv = CONVICTION_SLOTS.get(int(policy.get("min_acceptable_score", 3)), 0)
+    conv, dom_framework = (_conviction_pool(annotated, gated, weights)
+                           if k_conv else (annotated.iloc[0:0], None))
+
+    pool = pd.concat([gated.assign(_conviction=False),
+                      conv.head(max(k_conv * 4, 0)).assign(_conviction=True)])
+    if "_conviction_pct" not in pool.columns:
+        pool["_conviction_pct"] = np.nan
 
     if pool.empty:
         return {"holdings": [], "warnings": ["No stock clears the gate you chose."],
@@ -547,15 +633,16 @@ def select_portfolio(universe_df: pd.DataFrame, policy: dict,
     # Infeasible => shrink n. NEVER lower the gate, never inject a stock that
     # failed Tier 2 to satisfy a percentage.
     q = _quotas(n, alloc)
-    ok, why = _feasible(pool, q)
+    _merit = pool[~pool["_conviction"]]
+    ok, why = _feasible(_merit, q)
     while not ok and n > 1:
         n -= 1
         q = _quotas(n, alloc)
-        ok, why = _feasible(pool, q)
+        ok, why = _feasible(_merit, q)
     if n < min(len(pool), aff_n, ips_target):
         warnings.append(f"Portfolio shrunk to {n} holdings: {why}.")
 
-    chosen, slot_type = _fill(pool, q, corr)
+    chosen, slot_type = _fill(pool, q, corr, k_conviction=k_conv)
 
     pct = round(100.0 / max(len(chosen), 1), 1)
     holdings = []
@@ -573,8 +660,17 @@ def select_portfolio(universe_df: pd.DataFrame, policy: dict,
                 # Two ORTHOGONAL facts. Conflating them is why every stock used
                 # to read "diversifier": the old role was a function of
                 # diversification_rank and nothing else.
+                # Two ORTHOGONAL facts, and both are now informative.
                 "slot_type": slot_type[idx],           # why it got a seat
-                "gate_cleared": "merit",               # how it passed Tier 2
+                "gate_cleared": ("conviction_sleeve" if slot_type[idx] == "conviction"
+                                 else "abstention_adjusted" if abstained
+                                 else "merit"),        # how it cleared Tier 2
+                "conviction_framework": (dom_framework if slot_type[idx] == "conviction"
+                                         else None),
+                "conviction_pct": (round(float(r["_conviction_pct"]), 3)
+                                   if slot_type[idx] == "conviction"
+                                   and not pd.isna(r.get("_conviction_pct"))
+                                   else None),
                 "sector": r["sector"],
                 "rank_in_sector": int(r["_rank_in_sector"]),
                 "sector_depth": int(r["_sector_depth"]),
@@ -619,6 +715,9 @@ def select_portfolio(universe_df: pd.DataFrame, policy: dict,
             "min_acceptable_score": policy.get("min_acceptable_score"),
             "acceptable_tradeoff": policy.get("acceptable_tradeoff"),
             "covariance_used": corr is not None,
+            "conviction_slots": k_conv,
+            "conviction_framework": dom_framework,
+            "conviction_candidates": int(len(conv)),
             "sector_counts": {h["sector"]: sum(1 for x in holdings if x["sector"] == h["sector"])
                               for h in holdings},
             "tier_counts": {t: sum(1 for x in holdings if x["risk_tier"] == t)
