@@ -759,3 +759,16 @@ def select_portfolio(universe_df: pd.DataFrame, policy: dict,
                             for t in ("Large", "Mid", "Small", "Micro")},
         },
     }
+
+def investable_tickers(universe_df: pd.DataFrame, sip_amount: float,
+                       avoid_sectors=None, limit: int = 250) -> list[str]:
+    """Tier-1 survivors, best-scored first. Callers use this to decide which
+    price histories to download — WITHOUT reimplementing the floor.
+
+    Single source of truth: if MIN_TURNOVER changes, this changes with it.
+    """
+    df = _tier1(universe_df.copy(), sip_amount, {})
+    if avoid_sectors:
+        df = df[~df["sector"].isin(set(avoid_sectors))]
+    return (df.sort_values("score", ascending=False)
+              .head(limit)["ticker"].tolist())
