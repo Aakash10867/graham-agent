@@ -673,7 +673,11 @@ def select_portfolio(universe_df: pd.DataFrame, policy: dict,
 
     chosen, slot_type = _fill(pool, q, corr, k_conviction=k_conv)
 
-    pct = round(100.0 / max(len(chosen), 1), 1)
+    # Rounded for display, but the validator re-normalizes off this value, so a
+    # 1-decimal round at n=12 (8.3) reintroduces the epsilon it was meant to
+    # avoid: 12 x 8.3 = 99.6, not 100. Keep enough precision that the sum is
+    # exact to well inside the tolerance. Renderers should format, not the model.
+    pct = round(100.0 / max(len(chosen), 1), 4)
     holdings = []
     for idx in chosen:
         r = pool.loc[idx]
