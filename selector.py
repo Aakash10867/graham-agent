@@ -475,6 +475,7 @@ def _mark_conviction(gated: pd.DataFrame, weights: dict) -> tuple[pd.DataFrame, 
     g = gated.copy()
     if g.empty:
         g["_conviction_pct"] = np.nan
+        g["_conviction_rank"] = np.nan
         g["_conviction_eligible"] = False
         return g, dom
 
@@ -484,6 +485,16 @@ def _mark_conviction(gated: pd.DataFrame, weights: dict) -> tuple[pd.DataFrame, 
 
     g["_conviction_pct"] = pct.where(applies & passes)
     g["_conviction_eligible"] = applies & passes & (pct >= CONVICTION_MIN_PCT)
+
+    # A conviction pick was chosen on the DOMINANT FRAMEWORK's percentile, not on
+    # _rank_score. Reporting its composite rank is therefore misleading, and
+    # occasionally unsayable: an early run surfaced BUILDPRO at greenblatt_pct
+    # 0.936 and rank_in_sector #74 of 74. Both numbers were true. "Ranked last of
+    # 74, and we bought it" is not a sentence any user accepts, however
+    # well-founded. Give the trace the rank that actually did the choosing.
+    g["_conviction_rank"] = (g.groupby("sector")[f"_pct_{dom}"]
+                              .rank(ascending=False, method="first")
+                              .where(applies & passes))
     return g, dom
 
 
@@ -689,6 +700,12 @@ def select_portfolio(universe_df: pd.DataFrame, policy: dict,
                                    if slot_type[idx] == "conviction"
                                    and not pd.isna(r.get("_conviction_pct"))
                                    else None),
+                # The rank that CHOSE this stock, not the composite rank that
+                # buried it. "#3 of 56 on Greenblatt in Basic Materials."
+                "conviction_rank": (int(r["_conviction_rank"])
+                                    if slot_type[idx] == "conviction"
+                                    and not pd.isna(r.get("_conviction_rank"))
+                                    else None),
                 "sector": r["sector"],
                 "rank_in_sector": int(r["_rank_in_sector"]),
                 "sector_depth": int(r["_sector_depth"]),
