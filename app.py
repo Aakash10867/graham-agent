@@ -2563,7 +2563,9 @@ default_state = {
     "pending_retry": None,
     "pending_disambiguation": None,
     "pending_watch_tickers": None,
-    "builder_profile": None
+    "builder_profile": None,
+    "_screen_open": False,        # is the deterministic screener table showing?
+    "_screen_pending": None,      # tickers picked BEFORE sign-in, flushed after
 }
 
 for key, value in default_state.items():
@@ -2589,6 +2591,41 @@ STOCK_PRESETS = [
     ("⚖️ Compare",
      "Compare {company} as investments — valuation, growth, profitability, and which is the better buy."),
 ]
+
+def _add_to_watchlist(rows) -> int:
+    """Insert selected tickers, deduped. Same row shape as the single-stock path."""
+    if not st.session_state.get("sb_user_id"):
+        return 0
+    _sb = get_supabase()
+    try:
+        _have = {w["ticker"] for w in (_sb.table("watchlist").select("ticker")
+                 .eq("user_id", st.session_state.sb_user_id).execute().data or [])}
+    except Exception:
+        _have = set()
+
+    _new = [{
+        "user_id": st.session_state.sb_user_id,
+        "ticker": r["ticker"],
+        "name": str(r["name"]),
+        # RAW 5-denominator `score`, matching the single-stock path. This is what
+        # portfolio_tracker compares against to fire watchlist_score_up. Storing
+        # score_applicable here would make every financial look like it improved
+        # the moment it was added. The CARD shows "3 of 4"; the DATABASE stores 3.
+        "score_when_added": int(r["score"]) if pd.notna(r["score"]) else None,
+        "quality_when_added": bool(r["quality_pass"]) if pd.notna(r["quality_pass"]) else None,
+    } for _, r in rows.iterrows() if r["ticker"] not in _have]
+
+    if not _new:
+        st.info("Already watching all of those.")
+        return 0
+    try:
+        _sb.table("watchlist").insert(_new).execute()
+        st.success(f"Watching {len(_new)}. You'll hear from us when their scores move.")
+        return len(_new)
+    except Exception as e:
+        st.error(f"Failed: {e}")
+        return 0
+
 
 # The list is DETERMINISTIC and rendered by Streamlit, never by the model.
 # Asking an LLM to produce a table of tickers and then parsing them back out to
@@ -3190,6 +3227,12 @@ with st.sidebar:
             st.session_state.sb_view_mode = "chat"
             st.session_state.pending_disambiguation = None
             st.session_state.pop("_pending_navigate", None)
+            # Every key the screener sets must be cleared here. A stale
+            # _screen_pending would silently add stocks to the watchlist after
+            # an unrelated sign-in, hours later.
+            st.session_state._screen_open = False
+            st.session_state._screen_pending = None
+            st.session_state.pop("_screen_table", None)
             if "pending_portfolio" in st.session_state:
                 st.session_state.pending_portfolio = None
                 st.session_state.pop("pending_watch_tickers", None)
@@ -5984,6 +6027,17 @@ def _render_verdict_badge(text=None, stored_tier=None):
 
 if st.session_state.sb_view_mode == "chat":
     chat_area = st.container()
+
+    # ── Flush picks made before sign-in ─────────────────────────────────────
+    # Deliberately NOT inside either login handler. There are two (Google OAuth
+    # and email/password) and a rule duplicated in two places is a rule that
+    # will diverge. Both end in st.rerun(), so this runs on the next pass with
+    # sb_user_id populated.
+    if st.session_state.get("_screen_pending") and st.session_state.get("sb_user_id"):
+        _p = universe_df[universe_df["ticker"].isin(st.session_state._screen_pending)]
+        st.session_state._screen_pending = None
+        if not _p.empty:
+            _add_to_watchlist(_p)
 
     # ── Screener: one button, deterministic list, no LLM in the list path ──
     if not st.session_state.messages and "pending_prompt" not in st.session_state:
