@@ -1758,6 +1758,27 @@ def validate_portfolio_ips(stocks: list, ips_policy: dict) -> dict:
     violations = []
     warnings = []
 
+    # Every constraint below is "<= max" or ">= min", not strict. A portfolio
+    # sitting EXACTLY at its cap is compliant — and the deterministic selector
+    # puts it there on purpose: per_sector = floor(max_sector_pct * n / 100), so
+    # a full sector is exactly at the limit by construction.
+    #
+    # Without tolerance, n=12 fails: allocation_pct rounds to 8.3, the validator
+    # re-normalizes 8.3 / (12*8.3) * 100 = 8.333..., three of them sum to
+    # 25.000000000000004, and 25.000000000000004 > 25.0. The error message then
+    # prints "25.0% exceeds 25.0% max", which is not a sentence any user should
+    # ever see.
+    #
+    # generate_ips already hacked around exactly this once, with
+    # `max_single_stock_pct = min(10.0, ...) + 0.5`. One constraint got a fudge
+    # factor and three didn't. Handle it here, once, for all of them.
+    _EPS = 1e-6
+    def _over(value, limit):
+        return value - limit > _EPS
+
+    def _under(value, limit):
+        return limit - value > _EPS
+
     if not stocks:
         return {"valid": False, "violations": ["No stocks in portfolio"], "warnings": []}
 
@@ -1770,7 +1791,7 @@ def validate_portfolio_ips(stocks: list, ips_policy: dict) -> dict:
     max_stock_pct = alloc.get("max_single_stock_pct", 10.0)
     for s in stocks:
         pct = (s.get("allocation_pct", 0) / total_alloc) * 100 if total_alloc else 0
-        if pct > max_stock_pct:
+        if _over(pct, max_stock_pct):
             violations.append(
                 f"{s.get('name', s.get('ticker', '?'))} is {pct:.1f}% — exceeds {max_stock_pct}% max per stock (SEBI/Reilly & Brown)")
 
@@ -1788,7 +1809,7 @@ def validate_portfolio_ips(stocks: list, ips_policy: dict) -> dict:
         sector_counts[sec] = sector_counts.get(sec, 0) + 1
 
     for sec, weight in sector_weights.items():
-        if weight > max_sector_pct:
+        if _over(weight, max_sector_pct):
             violations.append(f"Sector '{sec}' is {weight:.1f}% — exceeds {max_sector_pct}% max")
 
     for sec, count in sector_counts.items():
@@ -1816,7 +1837,7 @@ def validate_portfolio_ips(stocks: list, ips_policy: dict) -> dict:
                 elif tier == "Small":
                     small_weight += pct
 
-        if large_min > 0 and large_weight < large_min:
+        if large_min > 0 and _under(large_weight, large_min):
             violations.append(f"Large-cap is {large_weight:.1f}% — below {large_min}% minimum")
         if small_weight > small_max:
             violations.append(f"Small-cap is {small_weight:.1f}% — exceeds {small_max}% maximum")
