@@ -186,6 +186,12 @@ def _tier1(df: pd.DataFrame, sip_amount: float, rejects: dict) -> pd.DataFrame:
     # satisfies the breadth requirement.
     cut(df["sector"].notna(), "no_sector")
 
+    # A row whose `name` is blank or a comma-mangled fragment is a corrupt CSV
+    # record, not a company. The universe has held `505685.BO,0P0000CFCT,0` and
+    # a broken TRANSRAILL row. Never render one to a user.
+    _nm = df["name"].astype(str).str.strip()
+    cut(_nm.str.len() > 2, "corrupt_name")
+
     if "is_unevaluable" in df.columns:
         # Declared, not accidental. Lenders stayed out before only because
         # `notna(de)` happened to drop them — banks report no debtToEquity.
@@ -776,3 +782,58 @@ def investable_tickers(universe_df: pd.DataFrame, sip_amount: float,
         df = df[~df["sector"].isin(set(avoid_sectors))]
     return (df.sort_values("score", ascending=False)
               .head(limit)["ticker"].tolist())
+
+# ══════════════════════════════════════════════════════════════════════════
+# LANDING SCREEN — improving businesses, not perfect scores
+# ══════════════════════════════════════════════════════════════════════════
+# NOT the 5-of-5 list. A watchlist exists to be WATCHED, and the alert that
+# brings a user back is watchlist_score_up. A perfect score has nowhere to go
+# but down. A 3-of-5 that fails only Graham becomes a 4-of-5 the day its price
+# falls — which teaches the correct reflex: a price drop is GOOD news, because
+# it widens margin of safety.
+#
+# We do NOT claim "the market hasn't noticed yet". We measured that claim and
+# could not support it. `pe_vs_avg` is a percent deviation from a stock's own
+# 4-year average P/E, and P/E has EARNINGS in the denominator — so any stock we
+# selected on trajectory and sorted by earnings CAGR shows a depressed P/E
+# versus its own history *by construction*. Bharti Airtel reads -55 while
+# sitting at an all-time high. The metric measured the growth we conditioned on.
+#
+# The honest claim is the failure pattern: graham appeared in 65 of the 73
+# three-of-five stocks, exactly as its 5.6% base rate predicts.
+#     "These businesses are measurably improving. Graham would tell you they
+#      aren't cheap. Both are true, and which matters is up to you."
+MIN_BASE_NET_INCOME = 10e7   # ₹10 crore
+
+
+def improving_businesses(universe_df: pd.DataFrame, limit: int = 25) -> pd.DataFrame:
+    """Investable, quality-passing, improving, and NOT unanimous."""
+    df = _tier1(universe_df.copy(), sip_amount=float("inf"), rejects={})
+    df = _attach_applicable(df)
+
+    df["attainable"] = df["_applicable"].apply(len)
+    df["score_applicable"] = [
+        sum(1 for f in r["_applicable"] if bool(r.get(PASS_FLAG[f], False)))
+        for _, r in df.iterrows()
+    ]
+    df["abstained"] = df["_applicable"].apply(
+        lambda a: ", ".join(f for f in FRAMEWORKS if f not in a))
+    df["failed"] = [
+        ", ".join(f for f in r["_applicable"] if not bool(r.get(PASS_FLAG[f], False)))
+        for _, r in df.iterrows()
+    ]
+
+    m = (df["trajectory_pass"].fillna(False).astype(bool)
+         # 3 .. attainable-1: strong, and not unanimous. Excludes perfect scores.
+         & (df["score_applicable"] >= 3)
+         & (df["score_applicable"] <= df["attainable"] - 1)
+         # Base-effect guard. Nobody compounds earnings at 226% for three years:
+         # SAILIFE, WABAG and PRIVISCL are recoveries off a near-zero base, and
+         # sorting on ni_cagr_3y would put the noisiest names on the front page.
+         & (df["net_income_y3"].fillna(0) >= MIN_BASE_NET_INCOME))
+
+    # revenue_cagr_3y, never ni_cagr_3y. Revenue has no zero-base pathology.
+    return (df[m]
+            .sort_values(["trajectory_score", "revenue_cagr_3y", "pe"],
+                         ascending=[False, False, True])
+            .head(limit))
