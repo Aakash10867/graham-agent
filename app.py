@@ -5051,7 +5051,8 @@ def _detect_firm_distress(firm_names: list, min_confidence: str = "high") -> dic
     return _out
 
 
-def _explain_portfolio(recommended_portfolio: list, web_grounding: dict = None) -> dict:
+def _explain_portfolio(recommended_portfolio: list, web_grounding: dict = None,
+                       diagnostics: dict = None) -> dict:
     """LLM-as-TRANSLATOR: phrase each stock's deterministic reason-trace into
     plain English + one portfolio-level paragraph. The model is handed the
     facts (score, rank, sector role, why-chosen) and may ONLY phrase them.
@@ -5091,7 +5092,11 @@ def _explain_portfolio(recommended_portfolio: list, web_grounding: dict = None) 
 
     # Always-true fallback first
     out = {s["ticker"]: _template(s) for s in recommended_portfolio}
-    _diag = st.session_state.get("_selection_diagnostics", {}) or {}
+    # Passed in, not fished out of session state. This function is now a pure
+    # transform of (portfolio, grounding, diagnostics) -> explanations, which
+    # means it can be unit-tested and cannot silently render '?' on a page rerun
+    # where the selector never ran.
+    _diag = diagnostics or {}
     out["_portfolio"] = (
         f"These {len(recommended_portfolio)} holdings were chosen deterministically from "
         f"{_diag.get('pool_size', '?')} stocks that cleared your "
@@ -7170,6 +7175,9 @@ elif st.session_state.sb_view_mode == "builder":
             )
             st.session_state._built_portfolio = _cand_result.get("recommended_portfolio", [])
             st.session_state._built_web_grounding = _cand_result.get("web_grounding", {})
+            st.session_state._built_diagnostics = _cand_result.get("selection_diagnostics", {})
+            st.session_state._built_warnings = _cand_result.get("selection_warnings", [])
+            st.session_state._built_near_misses = _cand_result.get("near_misses", [])
             st.session_state._built_is_paper = _b_is_paper
             st.session_state.sb_view_mode = "build_result"
             st.rerun()
@@ -7178,6 +7186,7 @@ elif st.session_state.sb_view_mode == "build_result":
     st.markdown("### \U0001F4CA Your Portfolio")
     _built = st.session_state.get("_built_portfolio", [])
     _bwg = st.session_state.get("_built_web_grounding", {})
+    _bdiag = st.session_state.get("_built_diagnostics", {})
     _bprof = st.session_state.get("builder_profile", {}) or {}
 
     if not _built:
@@ -7193,12 +7202,21 @@ elif st.session_state.sb_view_mode == "build_result":
         _dropped = st.session_state.get("_distress_dropped", {})
         if _dropped:
             _dl = "; ".join(f"{n} ({r})" for n, r in _dropped.items())
-            st.warning(f"\u26A0\uFE0F Removed for distress signals and replaced: {_dl}")
+            # No longer "and replaced". Distressed tickers are excluded from the
+            # universe and the whole selection is re-run deterministically —
+            # the old patch-in-a-replacement could violate a quota already met.
+            st.warning(f"\u26A0\uFE0F Removed for distress signals: {_dl}")
+
+        # Honest under-diversification, surfaced rather than padded away.
+        # A 9-stock portfolio the user understands beats a 15-stock portfolio
+        # padded with names nobody chose.
+        for _w in st.session_state.get("_built_warnings", []):
+            st.warning(f"\u26A0\uFE0F {_w}")
 
         # Translator: phrase the deterministic reason-traces (LLM = translator only)
         if "_built_explanations" not in st.session_state:
             with st.spinner("Preparing explanations..."):
-                st.session_state._built_explanations = _explain_portfolio(_built, _bwg)
+                st.session_state._built_explanations = _explain_portfolio(_built, _bwg, _bdiag)
         _expl = st.session_state._built_explanations
 
         st.markdown(f"_{_expl.get('_portfolio', '')}_")
@@ -7270,14 +7288,21 @@ elif st.session_state.sb_view_mode == "build_result":
                             if _res.get("stale_priced"):
                                 st.warning(f"⚠️ Live price unavailable for {', '.join(_res['stale_priced'])} — used last known close. Verify on Kite before paying.")
                             st.session_state.builder_profile = None
-                            for _k in ("_built_portfolio", "_built_web_grounding", "_built_is_paper", "_distress_dropped", "_built_explanations"):
+                            # Every key set alongside _built_portfolio must be cleared
+                            # with it. A stale _built_diagnostics would render last
+                            # build's pool size against this build's holdings.
+                            for _k in ("_built_portfolio", "_built_web_grounding", "_built_is_paper",
+                                       "_distress_dropped", "_built_explanations",
+                                       "_built_diagnostics", "_built_warnings", "_built_near_misses"):
                                 st.session_state.pop(_k, None)
                             st.session_state.sb_view_mode = "portfolios"
                             st.rerun()
         with _c2:
             if st.button("\u2190 Rebuild", width="stretch"):
                 st.session_state.builder_profile = None
-                st.session_state.pop("_built_explanations", None)
+                for _k in ("_built_explanations", "_built_diagnostics",
+                           "_built_warnings", "_built_near_misses"):
+                    st.session_state.pop(_k, None)
                 st.session_state.sb_view_mode = "builder"
                 st.rerun()
 
