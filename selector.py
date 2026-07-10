@@ -337,6 +337,13 @@ def _tier3(df: pd.DataFrame, policy: dict) -> pd.DataFrame:
         df["_tiebreak_metric"] = None
         df["_tiebreak_value"] = np.nan
 
+    # No _rank_in_sector / _sector_depth here. Those are TRACE fields — "#1 of 14
+    # in Technology" must count the stocks that actually competed for the slot,
+    # i.e. the post-gate pool. They are computed in select_portfolio after _tier2.
+    # The _rank_score percentiles above, by contrast, are deliberately computed
+    # PRE-gate, against everything investable.
+    return df
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # STRUCT — INTEGER QUOTAS, RESERVATION NOT REPAIR
