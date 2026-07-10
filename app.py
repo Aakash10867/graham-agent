@@ -5061,30 +5061,58 @@ def _explain_portfolio(recommended_portfolio: list, web_grounding: dict = None) 
     Fail-safe: on any error, returns trace-derived template strings (no LLM),
     so an explanation always exists and is always true even if the model fails.
     """
+    _SLOT = {
+        "cap_quota_large": "held to meet your large-cap floor",
+        "cap_quota_mid": "held to meet your mid-cap floor",
+        "breadth": "the first holding in this sector",
+        "conviction": "a specialist pick",
+        "free": "selected on merit",
+    }
+
     def _template(s):
+        """Always-true, trace-derived. Never says 'diversifier'."""
         t = s.get("_trace", {}) or {}
-        role = t.get("role", "selected by the quality screen")
-        sr = t.get("sector_role", s.get("sector", ""))
-        sc = t.get("score", s.get("score", "?"))
-        return f"Score {sc}/5, {sr} — {role}."
+        sec, depth = t.get("sector", "?"), t.get("sector_depth", "?")
+        passed, failed = t.get("passed") or [], t.get("failed") or []
+        n_app = len(t.get("applicable") or []) or 5
+
+        if t.get("gate_cleared") == "conviction_sleeve":
+            fw = t.get("conviction_framework", "your chosen framework")
+            return (f"#{t.get('conviction_rank', '?')} of {depth} in {sec} on {fw}. "
+                    f"Fails {', '.join(failed) or 'nothing'} — you told us that is "
+                    f"the trade-off you accept.")
+
+        base = (f"Passed {len(passed)} of the {n_app} frameworks that apply to it; "
+                f"ranked #{t.get('rank_in_sector', '?')} of {depth} in {sec}")
+        if t.get("abstained"):
+            base += (f". {', '.join(t['abstained']).title()} abstains on this "
+                     f"business model rather than mis-scoring it")
+        return f"{base} — {_SLOT.get(t.get('slot_type'), 'selected on merit')}."
 
     # Always-true fallback first
     out = {s["ticker"]: _template(s) for s in recommended_portfolio}
+    _diag = st.session_state.get("_selection_diagnostics", {}) or {}
     out["_portfolio"] = (
-        f"This {len(recommended_portfolio)}-stock portfolio was built deterministically to "
-        f"satisfy your IPS constraints — sector caps, small-cap limit, large-cap floor, and "
-        f"stock-count target — while maximising diversification (minimum-variance ranking)."
+        f"These {len(recommended_portfolio)} holdings were chosen deterministically from "
+        f"{_diag.get('pool_size', '?')} stocks that cleared your "
+        f"{_diag.get('min_acceptable_score', '?')}+ score gate. Each was ranked against "
+        f"its own sector on the five frameworks, weighted by the philosophy you chose. "
+        f"IPS constraints — sector caps, cap-tier floors, the single-stock limit — were "
+        f"satisfied before any discretionary slot was filled."
     )
 
     # Build the facts payload for the translator
     _facts = []
     for s in recommended_portfolio:
         t = s.get("_trace", {}) or {}
+        # Pass the WHOLE trace. Fifteen holdings now carry fifteen genuinely
+        # different fact-sets, which is why the model stops writing "diversifier"
+        # fifteen times. It receives different inputs, so it writes different
+        # sentences. No prompt engineering required.
         _facts.append({
             "ticker": s["ticker"], "name": s.get("name", ""),
-            "score": t.get("score"), "div_rank": t.get("div_rank"),
-            "sector_role": t.get("sector_role"), "role": t.get("role"),
-            "pe": s.get("pe"), "roe_pct": s.get("roe_pct"),
+            "score": s.get("score"), "pe": s.get("pe"), "roe_pct": s.get("roe_pct"),
+            **t,
         })
 
     _sector_ctx = ""
@@ -5301,12 +5329,12 @@ PHASE 1: DRAFT & INTERROGATE (DO NOT SHOW THE PORTFOLIO YET)
 1. Call get_sip_candidates with the profile parameters.
 2. Silently construct a "V1" portfolio in your mind. Do NOT output a table, do NOT list the stocks, and do NOT call register_portfolio.
 3. The candidates already contain "web_grounding" with live macro, tax, and sector data. Use this to inform your V1 draft — no separate web search needed here.
-4. Analyze the trade-offs in your V1 draft and review the "fringe_candidates" returned by the tool.
+4. Analyze the trade-offs in the portfolio. Review "near_misses" — stocks that ranked highly and did not make it, with the constraint that blocked each one.
 5. Output a brief, layman-friendly summary of the strategy you are considering.
 6. Ask the user 1 to 3 targeted questions to refine the build.
    - RULE: Speak to them as a layman. Do NOT use jargon like "Graham", "Dorsey", "moat", "beta", or "PE expansion".
-   - HARD RULE: Your questions must NEVER offer options that violate the ALLOCATION POLICY in [BUILDER_PROFILE]. Sector caps, small-cap limits, large-cap minimums, and stock count targets are NON-NEGOTIABLE hard constraints — they are not preferences the user can override. Never ask "would you like higher sector concentration?" when the IPS caps it. Never ask "would you prefer fewer stocks?" when the IPS sets a target count.
-   - HARD RULE: You MUST select exactly the number of stocks specified in the ALLOCATION POLICY target. If some candidates fail quality checks or have red flags, backfill from fringe_candidates or pick the next-best from the pool. NEVER present fewer stocks than the target unless there are literally not enough qualifying candidates in the entire universe.
+   - HARD RULE: You do NOT select stocks, add stocks, remove stocks, or change the count. `recommended_portfolio` is complete and final. There is no backfilling and no "next-best from the pool" — that instruction previously licensed you to invent tickers. If the portfolio holds fewer stocks than you expected, `selection_warnings` says exactly why (the gate, the SIP, or an infeasible cap-tier quota). Report that reason honestly. A 9-stock portfolio the user understands beats a 15-stock portfolio padded with names nobody chose.
+   - Example (Near Miss): "A highly profitable company ranked #1 in Financial Services, but your sector cap was already full at 3 holdings. Worth revisiting if you'd relax that."
    - Example (Fringe Candidate): "I found a highly profitable company that fits your goals perfectly, but it's in the Energy sector which you asked to avoid. Are you open to making an exception for a top-tier performer?"
    - Example (Risk Trade-off): "To hit your target, we need a bit more growth. Would you prefer adding a fast-growing but bumpier stock, or stick to steady, slow-moving giants?"
 7. Stop and wait for the user's reply.
@@ -5319,13 +5347,10 @@ PHASE 2: FINALIZE & REGISTER (TRIGGERED ONLY AFTER USER REPLIES)
 
 PORTFOLIO EXPANSION PROTOCOL:
 When you receive a message starting with [EXPANSION], a user has increased their SIP and needs more stocks added to an existing portfolio:
-1. Call get_sip_candidates with their profile parameters.
-2. Filter OUT all tickers already in the portfolio (listed in the message).
-3. From remaining candidates, prioritize stocks that:
-   a. Are from sectors NOT already in the portfolio (maximum diversification benefit)
-   b. Have LOW avg_corr_with_top5 (if available) — low correlation with existing holdings
-   c. Meet the IPS allocation policy constraints
-4. Present the expansion candidates with a brief explanation of how each REDUCES portfolio risk.
+1. Call get_sip_candidates with their profile parameters and the NEW, larger SIP amount.
+2. A larger SIP raises `affordable_n`, so the deterministic selector returns a larger portfolio under the same IPS. The additions are simply the tickers in `recommended_portfolio` that are not already held.
+3. Do NOT choose which stocks to add. The correlation tiebreak, the sector caps and the cap-tier quotas were all applied by the selector, over the full portfolio, at the new size.
+4. Present the additions, using each holding's `_trace` to say why the selector placed it — its rank within its sector, the frameworks it passed, and whether it filled a cap-tier quota or an empty sector.
 5. Call register_portfolio with the FULL stock list (existing + new) to update the portfolio.
    Use the existing portfolio name. The system will handle the update.
 
