@@ -2590,12 +2590,27 @@ STOCK_PRESETS = [
      "Compare {company} as investments — valuation, growth, profitability, and which is the better buy."),
 ]
 
-SCREENER_PRESETS = [
-    ("🔎 Screen Indian Stocks",
-     "Find the best Indian stocks to invest in right now. Show me which stocks pass all 5 frameworks and which pass 3 out of 5 and which pass 4 out of 5, with upto top 10 from each tier. Explain why each tier is a good investment using the book philosophies."),
-    ("💎 Find Hidden Gems",
-     "Find hidden gem stocks — small and mid cap Indian companies outside the Nifty 50 that pass at least 4 out of 5 frameworks. Show top 10 with key metrics. Explain why each is a good investment using book philosophies."),
-]
+# The list is DETERMINISTIC and rendered by Streamlit, never by the model.
+# Asking an LLM to produce a table of tickers and then parsing them back out to
+# build checkboxes is how hallucinated tickers get into a user's watchlist. The
+# model gets the stocks it was GIVEN, and explains them. It never chooses them.
+SCREENER_EXPLAIN_PROMPT = (
+    "Explain these stocks, which the system selected deterministically:\n{tickers}\n\n"
+    "Each passes 3 or 4 of the frameworks that apply to it, plus a three-year "
+    "trajectory test on revenue growth, earnings growth, margin expansion, and "
+    "whether that growth was debt-funded.\n\n"
+    "For EACH stock, name the specific framework(s) it fails and what that means "
+    "in plain language. graham_pass fires on only 5.6% of the market, so 'fails "
+    "Graham' means 'not statistically cheap' — a common and often acceptable "
+    "trade-off. 'Fails Dorsey' means no durable competitive moat, which is a "
+    "much more serious objection. These are different stocks for different "
+    "investors.\n\n"
+    "Where a stock shows 'X of 4', a framework ABSTAINED rather than failed — "
+    "Greenblatt's formula uses ROIC and earnings yield, meaningless for a "
+    "levered balance sheet, and he instructs that it not be applied to "
+    "financials or utilities. Say so; it is a strength of the method.\n\n"
+    "Do NOT recommend a portfolio and do NOT add stocks. This is a screen."
+)
 
 # ══════════════════════════════════════════════
 # CSS — INSTITUTIONAL LIGHT THEME
@@ -5970,15 +5985,81 @@ def _render_verdict_badge(text=None, stored_tier=None):
 if st.session_state.sb_view_mode == "chat":
     chat_area = st.container()
 
-    # ── Screener presets: hide when chat already has messages (cleaner return experience) ──
+    # ── Screener: one button, deterministic list, no LLM in the list path ──
     if not st.session_state.messages and "pending_prompt" not in st.session_state:
         st.markdown("")
-        st.caption("Market screeners")
-        scr_cols = st.columns(len(SCREENER_PRESETS))
-        for i, (label, template) in enumerate(SCREENER_PRESETS):
-            with scr_cols[i]:
-                if st.button(label, key=f"screener_{i}", width="stretch"):
-                    st.session_state.pending_prompt = template
+
+        if not st.session_state.get("_screen_open"):
+            if st.button("💎  Businesses that are getting better",
+                         key="screen_open", width="stretch", type="primary"):
+                st.session_state._screen_open = True
+                st.rerun()
+            st.caption(
+                "Three years of rising revenue, rising earnings, expanding margins — "
+                "and growth that wasn't borrowed. Scored daily against Graham, "
+                "Greenblatt, Dorsey, Buffett and Lynch. None of them is unanimous. "
+                "That's the interesting part."
+            )
+        else:
+            _screen = selector.improving_businesses(universe_df, limit=25)
+            _view = pd.DataFrame({
+                "Ticker": _screen["ticker"].str.replace(r"\.(NS|BO)$", "", regex=True),
+                "Company": _screen["name"],
+                "Sector": _screen["sector"],
+                "Size": _screen["risk_tier"],
+                "Frameworks": _screen["score_applicable"].astype(str) + " of "
+                              + _screen["attainable"].astype(str),
+                "Fails": _screen["failed"],
+                "Abstains": _screen["abstained"],
+                "Revenue 3y": _screen["revenue_cagr_3y"].round(1),
+                "Earnings 3y": _screen["ni_cagr_3y"].round(1),
+                "P/E": _screen["pe"].round(1),
+            })
+
+            st.markdown("#### Businesses that are getting better")
+            st.caption(
+                "Every one of these is improving on the numbers. Not one of them is "
+                "cheap by every measure — 'Fails' says which test each one loses, and "
+                "'Abstains' means a framework declined to judge rather than judged badly. "
+                "Select any to watch. We'll email you when their scores move."
+            )
+
+            _sel = st.dataframe(
+                _view, hide_index=True, width="stretch",
+                on_select="rerun", selection_mode="multi-row", key="_screen_table",
+            )
+            _rows = _sel.selection.rows if _sel and _sel.selection else []
+            _picked = _screen.iloc[_rows] if _rows else _screen.iloc[0:0]
+
+            c1, c2, c3 = st.columns([2, 2, 1])
+            with c1:
+                if st.session_state.sb_user_id:
+                    if st.button(f"👁  Watch {len(_picked)} selected",
+                                 disabled=not len(_picked), width="stretch",
+                                 type="primary", key="_screen_watch"):
+                        _add_to_watchlist(_picked)
+                        st.rerun()
+                else:
+                    # The choice survives sign-in. Asking a stranger to authenticate
+                    # BEFORE they have chosen anything is what kills the funnel; the
+                    # work they have already done is what carries them through it.
+                    st.button(f"👁  Watch {len(_picked)} selected",
+                              disabled=not len(_picked), width="stretch",
+                              type="primary", key="_screen_watch_anon",
+                              on_click=lambda: st.session_state.update(
+                                  _screen_pending=list(_picked["ticker"])))
+                    if st.session_state.get("_screen_pending"):
+                        st.info("Sign in from the sidebar — your picks are saved.")
+            with c2:
+                if st.button("💬  Explain these", disabled=not len(_picked),
+                             width="stretch", key="_screen_explain"):
+                    st.session_state.pending_prompt = SCREENER_EXPLAIN_PROMPT.format(
+                        tickers=", ".join(_picked["ticker"]))
+                    st.session_state._screen_open = False
+                    st.rerun()
+            with c3:
+                if st.button("Close", width="stretch", key="_screen_close"):
+                    st.session_state._screen_open = False
                     st.rerun()
 
     prompt = st.chat_input("Ask about any stock, or type a question...")
