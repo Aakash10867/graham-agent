@@ -6038,6 +6038,8 @@ if st.session_state.sb_view_mode == "chat":
         st.session_state._screen_pending = None
         if not _p.empty:
             _add_to_watchlist(_p)
+    elif st.session_state.get("sb_user_id") and st.session_state.get("_screen_open"):
+        pass  # already signed in; table stays open
 
     # ── Screener: one button, deterministic list, no LLM in the list path ──
     if not st.session_state.messages and "pending_prompt" not in st.session_state:
@@ -6103,7 +6105,11 @@ if st.session_state.sb_view_mode == "chat":
                               on_click=lambda: st.session_state.update(
                                   _screen_pending=list(_picked["ticker"])))
                     if st.session_state.get("_screen_pending"):
-                        st.info("Sign in from the sidebar — your picks are saved.")
+                        # Session state does NOT survive the Google OAuth redirect —
+                        # the browser leaves the app and returns as a new session.
+                        # Email/password login keeps it; Google does not. Until the
+                        # picks ride through redirect_to, do not promise they will.
+                        st.info("Sign in from the sidebar, then pick again — it's one click.")
             with c2:
                 if st.button("💬  Explain these", disabled=not len(_picked),
                              width="stretch", key="_screen_explain"):
