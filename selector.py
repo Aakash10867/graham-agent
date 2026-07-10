@@ -260,7 +260,7 @@ def _tier2(df: pd.DataFrame, policy: dict, rejects: dict) -> pd.DataFrame:
 
     keep, applicable_col, score_col, gate_col = [], [], [], []
     for _, row in df.iterrows():
-        app = _applicable_frameworks(row)
+        app = row["_applicable"] if "_applicable" in row else _applicable_frameworks(row)
         s = sum(1 for f in app if bool(row.get(PASS_FLAG[f], False)))
         g = _effective_gate(min_score, len(app))
         keep.append(s >= g)
@@ -268,8 +268,7 @@ def _tier2(df: pd.DataFrame, policy: dict, rejects: dict) -> pd.DataFrame:
         score_col.append(s)
         gate_col.append(g)
 
-    df = df.assign(_applicable=applicable_col, _score_applicable=score_col,
-                   _effective_gate=gate_col)
+    df = df.assign(_score_applicable=score_col, _effective_gate=gate_col)
     rejects["below_score_gate"] = int((~pd.Series(keep, index=df.index)).sum())
     return df[pd.Series(keep, index=df.index)]
 
@@ -288,6 +287,11 @@ def _resolve_weights(policy: dict) -> dict:
     return {f: 100.0 * w.get(f, 0) / total for f in FRAMEWORKS}
 
 
+def _attach_applicable(df: pd.DataFrame) -> pd.DataFrame:
+    """Which frameworks can even evaluate this stock. Needed by rank AND gate."""
+    return df.assign(_applicable=[_applicable_frameworks(r) for _, r in df.iterrows()])
+
+
 def _tier3(df: pd.DataFrame, policy: dict) -> pd.DataFrame:
     """Percentile-rank each sub-score WITHIN SECTOR, then weight.
 
@@ -300,7 +304,7 @@ def _tier3(df: pd.DataFrame, policy: dict) -> pd.DataFrame:
     tails that riddle Indian small-cap fundamentals.
     """
     w = _resolve_weights(policy)
-    df = df.copy()
+    df = _attach_applicable(df.copy())
 
     for f in FRAMEWORKS:
         col = SUBSCORE[f]
@@ -332,11 +336,6 @@ def _tier3(df: pd.DataFrame, policy: dict) -> pd.DataFrame:
         df["_tiebreak"] = 0.0
         df["_tiebreak_metric"] = None
         df["_tiebreak_value"] = np.nan
-
-    df["_rank_in_sector"] = (df.groupby("sector")["_rank_score"]
-                               .rank(ascending=False, method="first").astype(int))
-    df["_sector_depth"] = df.groupby("sector")["ticker"].transform("size")
-    return df.sort_values(["_rank_score", "_tiebreak"], ascending=False)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -488,13 +487,32 @@ def select_portfolio(universe_df: pd.DataFrame, policy: dict,
 
     df = _tier1(universe_df.copy(), sip, rejects)
     df = _staleness_filter(df, price_history, rejects)
-    df = _tier2(df, policy, rejects)
 
-    if df.empty:
+    # RANK FIRST, GATE SECOND.
+    #
+    # Percentiles must be computed against everything INVESTABLE, not against
+    # the gated subset. Otherwise "top decile" means something different at a
+    # 4+ gate (≈100 peers) than at 2+ (≈450), every survivor is renormalized
+    # upward, and the gate silently cancels its own effect: a distinctive 2/5
+    # Graham name loses exactly the distinctiveness that admitting it was
+    # supposed to surface.
+    #
+    # A stock's standing is a property of the stock, not of the filter it
+    # happened to pass through.
+    ranked = _tier3(df, policy)
+    pool = _tier2(ranked, policy, rejects)
+
+    if pool.empty:
         return {"holdings": [], "warnings": ["No stock clears the gate you chose."],
                 "rejects": rejects, "diagnostics": {}}
 
-    pool = _tier3(df, policy).reset_index(drop=True)
+    # rank_in_sector / sector_depth are TRACE fields — "#1 of 14 in Technology"
+    # must count the stocks that actually competed, i.e. post-gate.
+    pool = pool.copy()
+    pool["_rank_in_sector"] = (pool.groupby("sector")["_rank_score"]
+                                   .rank(ascending=False, method="first").astype(int))
+    pool["_sector_depth"] = pool.groupby("sector")["ticker"].transform("size")
+    pool = pool.sort_values(["_rank_score", "_tiebreak"], ascending=False).reset_index(drop=True)
 
     corr = None
     if price_history is not None and not price_history.empty:
