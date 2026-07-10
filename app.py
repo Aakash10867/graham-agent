@@ -4384,15 +4384,18 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str,
         "tier1_rejections": result.get("rejects", {}),
         "recommended_portfolio": recommended_portfolio,
         "recommended_portfolio_instruction": (
-            "CRITICAL: The 'recommended_portfolio' above is a DETERMINISTIC, IPS-COMPLIANT "
-            "portfolio built by the system using greedy minimum-variance optimization (Reilly & Brown Ch 6). "
-            "It satisfies ALL allocation policy constraints: sector caps, small-cap limits, large-cap minimums, "
-            "and stock count targets. "
-            "In PHASE 2 (after the user answers your questions): "
-            "You MUST call register_portfolio with EXACTLY the stocks in recommended_portfolio. "
-            "Do NOT add stocks. Do NOT remove stocks. Do NOT change allocation_pct. "
-            "Your job is to EXPLAIN why each stock was chosen, using the candidate data, web grounding, "
-            "and book philosophy. The system builds the portfolio; you sell it to the investor."
+            "CRITICAL: 'recommended_portfolio' is DETERMINISTIC and FINAL. "
+            "It was NOT built by minimum-variance optimization — that method ranks stocks "
+            "by how STALE their prices are (no-trade days produce zero returns, so sigma "
+            "and correlation are both biased down), and it was removed. "
+            "Each holding was ranked against its OWN SECTOR on five framework sub-scores, "
+            "weighted by the investor's stated philosophy, after clearing their score gate. "
+            "Cap-tier floors, sector caps and the single-stock limit were satisfied as "
+            "integer quotas before any discretionary slot was filled. "
+            "In PHASE 2: call register_portfolio with EXACTLY these stocks. "
+            "Do NOT add, remove, reorder, or change allocation_pct. "
+            "Every holding carries a '_trace'. Your ONLY job is to phrase it. "
+            "The system builds the portfolio; you explain it truthfully."
         ),
         "web_grounding": web_grounding,
         "web_grounding_instruction": (
@@ -4408,16 +4411,20 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str,
             "indicates a clear phase."
         ),
         "selection_instruction": (
-            f"You have {len(candidates)} pre-filtered candidates and a READY-TO-REGISTER "
-            f"'recommended_portfolio' of {len(recommended_portfolio)} stocks built by the system. "
+            # `candidates` is gone. There is no pre-filtered pool for you to pick from
+            # — that pool, and your access to it, was how hallucinated tickers got in.
+            f"'recommended_portfolio' holds {len(recommended_portfolio)} stocks, selected "
+            f"from {result.get('diagnostics', {}).get('pool_size', 0)} that cleared the "
+            f"investor's {result.get('diagnostics', {}).get('min_acceptable_score', '?')}+ "
+            f"score gate. There is no candidate pool for you to choose from. "
             f"PHASE 1 (message starts with [BUILDER_PROFILE]): Do NOT output a portfolio table. "
-            f"Review the recommended_portfolio and ask the user 1-3 clarification questions. "
+            f"Review the holdings and ask the user 1-3 clarification questions. "
             f"Questions must NEVER offer options that violate the ALLOCATION POLICY. "
-            f"PHASE 2 (user answers your questions): Present the recommended_portfolio with a "
-            f"brief explanation per stock (2-3 sentences each, layman-friendly). "
-            f"Then call register_portfolio with EXACTLY the recommended_portfolio stocks. "
-            f"Do NOT modify the stock list — the system built it to satisfy all IPS constraints. "
-            f"Use web_grounding data to ground your explanations in current macro/sector context."
+            f"PHASE 2 (user answers): Present the portfolio with 2-3 layman-friendly sentences "
+            f"per stock, drawn from its '_trace'. If 'selection_warnings' is non-empty, state "
+            f"the reason honestly rather than apologising for the stock count. "
+            f"Then call register_portfolio with EXACTLY these stocks. "
+            f"Use web_grounding for macro and sector context only — it never changes selection."
         ),
     }
 
