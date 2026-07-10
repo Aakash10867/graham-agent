@@ -34,6 +34,8 @@ import numpy as np
 import math
 import plotly.graph_objects as go
 import verdict_engine
+import deep_metrics
+import selector
 
 SECTOR_INDEX_MAP = {
     "Technology": "^CNXIT",
@@ -4169,515 +4171,123 @@ def find_investments(market: str) -> dict:
         "note": "Pre-scored universe of ~4500 Indian stocks (NSE + BSE). Data updated monthly. After presenting results, use search_book to explain WHY each investment style delivers returns, citing Graham, Greenblatt, and Dorsey.",
     }
 
-def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, review_freq: str, avoid_sectors: str = "[]") -> dict:
-    """Filter the pre-scored universe to SIP-suitable candidates based on investor profile.
-    Returns a min/max stock count range computed from the SIP amount. The LLM decides the
-    exact count within that range based on candidate quality, not a hardcoded number.
+def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str,
+                       review_freq: str, avoid_sectors: str = "[]",
+                       min_acceptable_score: int = 3,
+                       philosophy: str = "growth_at_fair_price",
+                       acceptable_tradeoff: str = "any",
+                       framework_weights: str = "{}") -> dict:
+    """Build a deterministic, IPS-compliant SIP portfolio from the scored universe.
 
-    Use this when building a portfolio from a [BUILDER_PROFILE] message.
+    THIS FUNCTION NO LONGER SELECTS ANYTHING. selector.select_portfolio does,
+    and it is a pure function with no Streamlit and no network — which is what
+    lets backtest_runner.py call the REAL selector instead of a lookalike.
+
+    What was deleted here, and why:
+
+      candidates.sort(key=lambda c: c.get("diversification_rank", 999))
+
+    That line was the terminal sort. Everything ranked above it was discarded.
+    diversification_rank came from a greedy minimum-variance loop over a
+    covariance matrix built from daily closes. A thinly traded stock has flat
+    closes on no-trade days, hence ZERO returns, hence a downward-biased sigma;
+    non-synchronous trading biases its correlations down too. So argmin(variance)
+    is mechanically argmax(staleness). The loop was a staleness detector wearing
+    a Markowitz costume, and it was choosing the stocks. That is why every
+    portfolio was penny stocks, and why every portfolio was IDENTICAL regardless
+    of the questionnaire: diversification_rank contains no user information.
 
     Args:
-        sip_amount: Monthly SIP amount in INR (e.g. 5000, 25000, 50000)
-        time_horizon: Investment duration. Must be one of:
-                      short  - 1 to 3 years
-                      medium - 3 to 7 years
-                      long   - 7+ years
-        investor_type: Risk profile. Must be one of:
-                       defensive    - wants to beat FD returns with safety
-                       balanced     - wants to build wealth steadily over time
-                       enterprising - wants maximum growth, patient through volatility
-        review_freq: How often the investor wants to monitor. Must be one of:
-                     passive  - set it and forget for years
-                     moderate - review every few months
-                     active   - likes staying informed and adjusting
-        avoid_sectors: JSON string list of sector names to exclude, e.g. '["Energy", "Basic Materials"]'.
-                       Pass '[]' for no exclusions.
+        sip_amount: Monthly SIP amount in INR.
+        time_horizon: short | medium | long
+        investor_type: defensive | balanced | enterprising
+        review_freq: passive | moderate | active
+        avoid_sectors: JSON list of sector names to exclude, e.g. '["Energy"]'
+        min_acceptable_score: 4 | 3 | 2 — the hard gate from builder Q8.
+        philosophy: deep_value | growth_at_fair_price | quality_compounder | contrarian
+        acceptable_tradeoff: any | ok_fail_graham | ok_fail_trajectory_lynch | ok_fail_dorsey_buffett
+        framework_weights: JSON dict of the five framework weights.
     """
-    df = universe_df.copy()
-
-    # ── Base quality filter (all profiles) ──
-    if "quality_pass" in df.columns:
-        df = df[df["quality_pass"] != False]
-    df = df[df["years_of_data"] >= 2]
-    df = df[pd.notna(df["pe"]) & pd.notna(df["roe_pct"]) & pd.notna(df["de"])]
-    df = df[df["pe"] > 0]  # Exclude negative P/E (loss-making)
-    # ── Affordability filter (IPS-aware, breadth-depth optimized) ──
-    # Leverages the breadth-then-depth allocation algorithm by allowing any stock 
-    # that can be purchased cleanly within a single monthly budget installment.
-    if "price" in df.columns:
-        _max_price = float(sip_amount)
-        _affordable = df[df["price"] <= _max_price]
-        if len(_affordable) >= 10:
-            df = _affordable
-    # ── Sector exclusions from builder profile ──
     try:
-        _excluded = json.loads(avoid_sectors) if isinstance(avoid_sectors, str) else avoid_sectors
-        if _excluded:
-            df = df[~df["sector"].isin(_excluded)]
-    except (json.JSONDecodeError, TypeError):
-        pass
-
-    # ── Profile-specific RANKING PREFERENCE (not filtering) ──
-    # Three-tier hierarchy (per Reilly & Brown + roadmap 3B):
-    #   Tier 1 (existence floor, already applied above): quality_pass,
-    #     years_of_data>=2, real pe/price — a stock failing these is
-    #     UNINVESTABLE/UNASSESSABLE, not merely low quality.
-    #   Tier 2 (book structure): stock count, sector caps, cap-tier limits —
-    #     enforced by the deterministic selector downstream. These are the
-    #     hard constraints that MUST be satisfied.
-    #   Tier 3 (analysis preferences): graham/score/greenblatt/dorsey/dividend
-    #     — these RANK candidates via the composite below; they NEVER exclude.
-    # Analysis quality is a preference; the book's 15-stock diversification
-    # mandate is the law. So score/graham are demoted from gates to sort weights.
-    if investor_type == "defensive":
-        # Prefer dividend payers (soft): only narrow if it leaves a deep pool.
-        div_payers = df[pd.notna(df["dividend_yield_pct"]) & (df["dividend_yield_pct"] > 0)]
-        if len(div_payers) >= 40:
-            df = df[pd.notna(df["dividend_yield_pct"]) & (df["dividend_yield_pct"] > 0)]
-    # Pool cap (NOT portfolio size). Must be large enough that truncation never
-    # binds BEFORE the book constraints do — else a short portfolio is a
-    # truncation artifact, not real scarcity. 200 gives ~13x headroom over a
-    # 15-stock target: the selector exhausts the *constraints*, not the *pool*,
-    # while staying within one batched yfinance download and a tractable
-    # O(pool^2 * n) greedy loop. Short count at this depth = REAL scarcity.
-    target_count = 200
-
-    # ── Risk tier caps: limit small-cap exposure by profile ──
-    if "risk_tier" in df.columns:
-        _small_cap_limit = {"defensive": 0.10, "balanced": 0.20, "enterprising": 0.30}.get(investor_type, 0.20)
-        _total = len(df)
-        if _total > 0:
-            _small = df[df["risk_tier"] == "Small"]
-            _max_small = max(1, int(_total * _small_cap_limit))
-            if len(_small) > _max_small:
-                _keep_small = _small.sort_values("score", ascending=False).head(_max_small)
-                df = pd.concat([df[df["risk_tier"] != "Small"], _keep_small])
-
-        # Exclude illiquid stocks entirely (avg volume < 50k/day)
-        if "liquidity_flag" in df.columns:
-            _liquid = df[df["liquidity_flag"] != "illiquid"]
-            if len(_liquid) >= 10:
-                df = _liquid
-
-    # ── Time horizon adjustments ──
-    if time_horizon == "short":
-        # Short horizon: prefer lower volatility, higher score
-        df = df[df["score"] >= 3] if len(df[df["score"] >= 3]) >= 10 else df
-        # Prefer larger, established companies
-        large = df[pd.notna(df["market_cap"]) & (df["market_cap"] > 1e10)]
-        if len(large) >= 10:
-            df = large
-
-    elif time_horizon == "long":
-        # Long horizon: can include smaller companies with growth
-        pass  # No additional filtering, broader pool is fine
-
-    # ── Weighted composite score (profile-based) ──
-    df = df.copy()
-    _w = {"defensive":    (0.35, 0.20, 0.30, 0.15),
-          "balanced":     (0.25, 0.25, 0.25, 0.25),
-          "enterprising": (0.15, 0.25, 0.20, 0.40),
-          }.get(investor_type, (0.25, 0.25, 0.25, 0.25))
-    df["_composite"] = (
-        _w[0] * df["graham_pass"].fillna(False).astype(float) +
-        _w[1] * df["greenblatt_pass"].fillna(False).astype(float) +
-        _w[2] * df["dorsey_pass"].fillna(False).astype(float) +
-        _w[3] * df["trajectory_pass"].fillna(False).astype(float)
-    )
-    df["_sort_pe"] = df["pe"].apply(lambda x: x if pd.notna(x) else 9999)
-    df["_sort_roe"] = df["roe_pct"].apply(lambda x: -x if pd.notna(x) else 9999)
-    df["_sort_growth"] = df["revenue_cagr_3y"].apply(lambda x: -x if pd.notna(x) else 9999)
-    # Replaced price tie-breaker with absolute quality (score) to prevent penny-stock bias 
-    # without violating the IPS cap distribution goals.
-    df["_sort_score"] = df["score"].apply(lambda x: -x if pd.notna(x) else 0)
-    if investor_type == "defensive":
-        df = df.sort_values(["_composite", "_sort_score", "_sort_pe", "_sort_roe"], ascending=[False, True, True, True])
-    elif investor_type == "enterprising":
-        df = df.sort_values(["_composite", "_sort_score", "_sort_growth", "_sort_roe"], ascending=[False, True, True, True])
-    else:
-        df = df.sort_values(["_composite", "_sort_score", "_sort_roe", "_sort_pe"], ascending=[False, True, True, True])
-
-    # ── Trim to target count ──
-    df = df.head(target_count)
-
-    # ── Build output ──
-    candidates = []
-    for _, row in df.iterrows():
-        candidate = {
-            "ticker": row["ticker"],
-            "name": row.get("name", "N/A") if pd.notna(row.get("name")) else "N/A",
-            "sector": row.get("sector", "N/A") if pd.notna(row.get("sector")) else "N/A",
-            "price": round(row["price"], 2) if pd.notna(row.get("price")) else "N/A",
-            "market_cap": round(float(row["market_cap"]), 0) if pd.notna(row.get("market_cap")) else "N/A",
-            "pe": round(row["pe"], 2) if pd.notna(row.get("pe")) else "N/A",
-            "pb": round(row["pb"], 2) if pd.notna(row.get("pb")) else "N/A",
-            "roe_pct": round(row["roe_pct"], 2) if pd.notna(row.get("roe_pct")) else "N/A",
-            "de": round(row["de"], 2) if pd.notna(row.get("de")) else "N/A",
-            "earnings_yield": round(row["earnings_yield"], 2) if pd.notna(row.get("earnings_yield")) else "N/A",
-            "dividend_yield_pct": round(row["dividend_yield_pct"], 2) if pd.notna(row.get("dividend_yield_pct")) else "N/A",
-            "rev_growth": round(row["rev_growth"], 2) if pd.notna(row.get("rev_growth")) else "N/A",
-            "ni_growth": round(row["ni_growth"], 2) if pd.notna(row.get("ni_growth")) else "N/A",
-            "debt_growth": round(row["debt_growth"], 2) if pd.notna(row.get("debt_growth")) else "N/A",
-            "years_of_data": int(row["years_of_data"]) if pd.notna(row.get("years_of_data")) else 0,
-            "score": int(row["score"]),
-            "graham_pass": bool(row.get("graham_pass")) if pd.notna(row.get("graham_pass")) else False,
-            "greenblatt_pass": bool(row.get("greenblatt_pass")) if pd.notna(row.get("greenblatt_pass")) else False,
-            "dorsey_pass": bool(row.get("dorsey_pass")) if pd.notna(row.get("dorsey_pass")) else False,
-            "trajectory_pass": bool(row.get("trajectory_pass")) if pd.notna(row.get("trajectory_pass")) else False,
-            # Historical trends for qualitative LLM assessment
-            "roe_y0": round(row["roe_y0"], 2) if pd.notna(row.get("roe_y0")) else None,
-            "roe_y1": round(row["roe_y1"], 2) if pd.notna(row.get("roe_y1")) else None,
-            "roe_y2": round(row["roe_y2"], 2) if pd.notna(row.get("roe_y2")) else None,
-            "roe_y3": round(row["roe_y3"], 2) if pd.notna(row.get("roe_y3")) else None,
-            "revenue_y0": row.get("revenue_y0") if pd.notna(row.get("revenue_y0")) else None,
-            "revenue_y1": row.get("revenue_y1") if pd.notna(row.get("revenue_y1")) else None,
-            # Enriched columns for LLM judgment
-            "pe_4y_avg": round(row["pe_4y_avg"], 2) if pd.notna(row.get("pe_4y_avg")) else None,
-            "pe_vs_avg": round(row["pe_vs_avg"], 2) if pd.notna(row.get("pe_vs_avg")) else None,
-            "pct_from_high": round(row["pct_from_high"], 2) if pd.notna(row.get("pct_from_high")) else None,
-            "pct_from_low": round(row["pct_from_low"], 2) if pd.notna(row.get("pct_from_low")) else None,
-            "current_ratio": round(row["current_ratio"], 2) if pd.notna(row.get("current_ratio")) else None,
-            "beta": round(row["beta"], 2) if pd.notna(row.get("beta")) else None,
-            "revenue_cagr_3y": round(row["revenue_cagr_3y"], 2) if pd.notna(row.get("revenue_cagr_3y")) else None,
-            "ni_cagr_3y": round(row["ni_cagr_3y"], 2) if pd.notna(row.get("ni_cagr_3y")) else None,
-            "risk_tier": row.get("risk_tier", "Unknown") if pd.notna(row.get("risk_tier")) else "Unknown",
-            "liquidity_flag": row.get("liquidity_flag", "Unknown") if pd.notna(row.get("liquidity_flag")) else "Unknown",
-        }
-        candidates.append(candidate)
-
-    # Sanitize: replace any NaN/inf values that would break JSON serialization
-    def _sanitize(obj):
-        if isinstance(obj, float) and (pd.isna(obj) or np.isinf(obj)):
-            return None
-        if isinstance(obj, dict):
-            return {k: _sanitize(v) for k, v in obj.items()}
-        if isinstance(obj, list):
-            return [_sanitize(v) for v in obj]
-        return obj
-
-    candidates = _sanitize(candidates)
-
-    # ══════════════════════════════════════════════════════════════════
-    # Sprint 11: Correlation-based diversification ranking (Reilly & Brown Ch 6)
-    # Portfolio risk = f(covariance between holdings), NOT f(individual variance)
-    # Compute actual correlations from 1-year daily returns, then rank candidates
-    # by diversification contribution using greedy minimum-variance selection.
-    # ══════════════════════════════════════════════════════════════════
+        _avoid = json.loads(avoid_sectors) if isinstance(avoid_sectors, str) else (avoid_sectors or [])
+    except Exception:
+        _avoid = []
     try:
-        from datetime import datetime, timedelta
-        _tickers = [c["ticker"] for c in candidates if c.get("ticker")]
-        if len(_tickers) >= 5:
-            _end = datetime.now()
-            _start = _end - timedelta(days=365)
-            _hist = yf.download(_tickers, start=_start.strftime("%Y-%m-%d"),
+        _fw = json.loads(framework_weights) if isinstance(framework_weights, str) else (framework_weights or {})
+    except Exception:
+        _fw = {}
+
+    _profile = st.session_state.get("builder_profile") or {}
+    _ips = _profile.get("ips_policy") or generate_ips(_profile or {
+        "investor_type": investor_type, "time_horizon": time_horizon,
+        "sip_amount": sip_amount, "philosophy": philosophy,
+    })
+
+    policy = {
+        "sip_amount": sip_amount,
+        "avoid_sectors": _avoid,
+        "min_acceptable_score": int(min_acceptable_score),
+        "philosophy": philosophy,
+        "acceptable_tradeoff": acceptable_tradeoff,
+        "framework_weights": _fw or _ips.get("framework_weights") or {},
+        "allocation_policy": _ips.get("allocation_policy", {}),
+        "portfolio_sizing": _ips.get("portfolio_sizing", {}),
+    }
+
+    # ── Price history for the staleness filter and the covariance tiebreak ──
+    # Only for Tier-1 survivors. investable_tickers() applies the SAME floor the
+    # selector will, so the turnover threshold lives in exactly one place.
+    _price_history = None
+    try:
+        _tk = selector.investable_tickers(universe_df, sip_amount, _avoid, limit=250)
+        if len(_tk) >= 2:
+            _end = datetime.date.today()
+            _start = _end - datetime.timedelta(days=365)
+            _hist = yf.download(_tk, start=_start.strftime("%Y-%m-%d"),
                                 end=_end.strftime("%Y-%m-%d"), progress=False,
                                 auto_adjust=True, group_by="column")
             if not _hist.empty:
-                # yfinance 1.x returns MultiIndex columns even for one ticker,
-                # so the old single-ticker branch called .to_frame() on a
-                # DataFrame. Check the type instead of counting tickers.
-                _prices = _hist["Close"]
-                if isinstance(_prices, pd.Series):
-                    _prices = _prices.to_frame(_tickers[0])
-                # pct_change(fill_method=None): pandas 3.0's default, pinned
-                # explicitly. dropna(how="all") not dropna(): a row-wise dropna
-                # across ~200 tickers lets ONE gappy ticker delete that date
-                # for all of them, silently shrinking the correlation sample.
-                _returns = _prices.pct_change(fill_method=None).dropna(how="all")
-                _corr = _returns.corr()
-                _std = _returns.std()  # daily volatility per stock
+                _c = _hist["Close"]
+                if isinstance(_c, pd.Series):
+                    _c = _c.to_frame(_tk[0])
+                _price_history = _c
+    except Exception as _e:
+        # Non-blocking. Without prices the selector skips staleness and the
+        # correlation tiebreak; the merit ranking is unaffected. Never silently
+        # substitute a stale frame.
+        print(f"Price history unavailable, selecting without covariance: {_e}")
 
-                # ── Greedy minimum-variance portfolio construction ──
-                # Start with highest-scoring stock, iteratively add the stock
-                # that REDUCES portfolio variance the most (Ch 6, Eq 6.7)
-                _selected = []
-                _remaining = [t for t in _corr.columns]
-                _score_map = {c["ticker"]: c.get("score", 0) for c in candidates}
-                _global_rank_map = {c["ticker"]: i for i, c in enumerate(candidates)}
-                _sector_map = {c["ticker"]: c.get("sector", "Unknown") for c in candidates}
+    result = selector.select_portfolio(universe_df, policy, _price_history)
 
-                # Seed with highest-scoring stock. Tie-break using the profile-optimized global rank.
-                _remaining.sort(key=lambda t: (-_score_map.get(t, 0), _global_rank_map.get(t, 999)))
-                # ── Cap the greedy working set ──
-                # The greedy min-variance rank is O(pool^2 * selected) — at a
-                # 200-deep pool that is millions of covariance ops in pure Python
-                # (minutes; presents as "portfolio not coming"). But the selector
-                # only ever reaches ~target_n stocks; ranking positions beyond a
-                # generous working set is wasted compute. Rank the top 50 by
-                # composite; stocks below keep a default (worse) rank. Pool stays
-                # 200 for constraint headroom (cheap slice); ranking stays fast.
-                _GREEDY_WORKING_SET = 80
-                _rank_pool = _remaining[:_GREEDY_WORKING_SET]
-                _remaining = _rank_pool
-                if _remaining:
-                    _selected.append(_remaining.pop(0))
-
-                while _remaining and len(_selected) < len(_rank_pool):
-                    best_t = None
-                    best_portfolio_var = float("inf")
-
-                    for t in _remaining:
-                        if t not in _corr.columns:
-                            continue
-                        # Simulate adding t to selected: compute portfolio variance (equal weight)
-                        _trial = _selected + [t]
-                        n = len(_trial)
-                        w = 1.0 / n
-                        # σ²_port = Σ wi²σi² + ΣΣ wi*wj*σi*σj*ρij (Ch 6)
-                        port_var = 0.0
-                        for i, ti in enumerate(_trial):
-                            if ti not in _std.index:
-                                continue
-                            for j, tj in enumerate(_trial):
-                                if tj not in _std.index:
-                                    continue
-                                if i == j:
-                                    port_var += (w ** 2) * (_std[ti] ** 2)
-                                else:
-                                    _rij = _corr.loc[ti, tj] if ti in _corr.index and tj in _corr.columns else 0.5
-                                    port_var += (w ** 2) * _std[ti] * _std[tj] * _rij
-
-                        # Penalize if this stock is in a sector we already have 2 of
-                        _trial_sectors = [_sector_map.get(s, "?") for s in _trial]
-                        _sec_count = _trial_sectors.count(_sector_map.get(t, "?"))
-                        if _sec_count > 2:
-                            port_var *= 1.5  # Penalty: sector concentration
-
-                        if port_var < best_portfolio_var:
-                            best_portfolio_var = port_var
-                            best_t = t
-
-                    if best_t:
-                        _selected.append(best_t)
-                        _remaining.remove(best_t)
-                    else:
-                        break
-
-                # ── Inject diversification data into each candidate ──
-                for c in candidates:
-                    t = c["ticker"]
-                    if t in _selected:
-                        c["diversification_rank"] = _selected.index(t) + 1
-                    else:
-                        c["diversification_rank"] = len(_selected) + 1
-
-                    if t in _corr.columns:
-                        # Avg correlation with the top-5 picks
-                        _top5 = [s for s in _selected[:5] if s != t and s in _corr.columns]
-                        c["avg_corr_with_top5"] = round(float(_corr.loc[t, _top5].mean()), 3) if _top5 else None
-                        c["annual_volatility"] = round(float(_std[t]) * (252 ** 0.5), 4) if t in _std.index else None
-                    else:
-                        c["avg_corr_with_top5"] = None
-                        c["annual_volatility"] = None
-
-                # Re-sort: diversification rank is primary ordering
-                candidates.sort(key=lambda c: c.get("diversification_rank", 999))
-
-    except Exception as e:
-        # Non-blocking: if correlation fails, candidates keep their score-based order
-        print(f"Correlation computation failed (non-blocking): {e}")
-
-    # Sprint 11: Book-standard sizing (Reilly & Brown Ch 6)
-    # Book minimum: 12 stocks. System adapts to book, not reverse.
-    _affordable_count = max(3, sip_amount // 500)
-    max_stocks = min(30, _affordable_count)        # Cap at 30 (book's practical upper bound)
-    min_stocks = max(5, min(12, _affordable_count)) # Book says 12, but can't exceed what SIP affords
-
-    fringe_candidates = []
+    # ── Firm-distress gate ──────────────────────────────────────────────────
+    # Asymmetric by design: dropping a candidate at build time is cheap and
+    # reversible, so "medium" confidence suffices. Rather than patching a
+    # replacement into the finished list (the old code's approach, which could
+    # violate a quota it had already satisfied), exclude the distressed tickers
+    # from the universe and re-run the whole deterministic selection. Same code
+    # path, same guarantees, no special case.
+    _dropped = {}
     try:
-        # Find 5 highly-scored stocks (3 or 4) that were excluded due to sector restrictions
-        _exc = json.loads(avoid_sectors) if isinstance(avoid_sectors, str) else avoid_sectors
-        if _exc:
-            fringe_df = universe_df[(universe_df["score"] >= 3) & (universe_df["sector"].isin(_exc))].head(5)
-            for _, r in fringe_df.iterrows():
-                fringe_candidates.append({
-                    "ticker": r["ticker"], "name": str(r.get("name", r["ticker"])),
-                    "sector": str(r.get("sector", "N/A")), "score": int(r["score"]),
-                    "reason_excluded": f"Sector ({r.get('sector')}) was excluded by user."
-                })
+        _names = [h["name"] for h in result["holdings"] if h.get("name")]
+        if _names:
+            _distressed = _detect_firm_distress(_names, min_confidence="medium")
+            if _distressed:
+                _bad = {h["ticker"] for h in result["holdings"]
+                        if h.get("name") in _distressed}
+                _dropped = {n: d["reason"] for n, d in _distressed.items()}
+                _clean = universe_df[~universe_df["ticker"].isin(_bad)]
+                result = selector.select_portfolio(_clean, policy, _price_history)
+                result.setdefault("warnings", []).append(
+                    f"{len(_bad)} candidate(s) dropped on distress signals.")
     except Exception:
         pass
+    st.session_state._distress_dropped = _dropped
 
-    # ── Deterministic web grounding (Reilly & Brown Step 2) ──
-    # Fires EVERY time at the data layer. Macro, tax, sector context
-    # baked into candidates so all downstream decisions are grounded.
-    st.session_state._last_candidates = candidates
-
-    # ── Build IPS-compliant portfolio deterministically (Reilly & Brown Ch 18) ──
-    # Security selection follows from IPS constraints. The system builds the
-    # portfolio; the LLM explains it. Not the other way around.
-    _bp = st.session_state.get("builder_profile") or {}
-    _ips = _bp.get("ips_policy", {})
-    _alloc_policy = _ips.get("allocation_policy", {})
-    _sizing = _ips.get("portfolio_sizing", {})
-    _target_n = _sizing.get("actual", _sizing.get("ips_target", min_stocks))
-
-    _max_same_sec = _alloc_policy.get("max_same_sector", 2)
-    _max_sec_pct = _alloc_policy.get("max_sector_pct", 25)
-    _small_cap_max = _alloc_policy.get("small_cap_max_pct", 10)
-    _large_cap_min = _alloc_policy.get("large_cap_min_pct", 50)
-
-    from collections import Counter as _Counter
-    _rp_selected = []
-    _rp_sector_counts = _Counter()
-    _rp_small = 0
-    _rp_large = 0
-
-    # Candidates already sorted by diversification_rank (greedy min-variance)
-    for _c in candidates:
-        if len(_rp_selected) >= _target_n:
-            break
-
-        _sec = _c.get("sector", "Unknown")
-        _tier = _c.get("risk_tier", "Unknown")
-        _n_so_far = len(_rp_selected) + 1
-
-        # Constraint 1: max same-sector stocks
-        if _rp_sector_counts[_sec] >= _max_same_sec:
-            continue
-
-        # Constraint 2: max sector % — checked against the KNOWN FINAL count.
-        # The original bug used n_so_far (transient) as denominator, making the
-        # first stock in any sector compute as 100%. The fix: project the
-        # sector's FINAL weight at the target count. A sector with k stocks
-        # finally weighs k/target_n. The COUNT cap does NOT imply this — e.g.
-        # 3 stocks/sector at n=12 is 25.0%, which the count cap allows but the
-        # %-cap forbids at the boundary. Use a small epsilon so an exact-boundary
-        # sector (25.0% vs 25.0% cap) is rejected rather than tripping the
-        # downstream validator on float noise.
-        _proj_sector_pct = ((_rp_sector_counts[_sec] + 1) / max(_target_n, 1)) * 100
-        if _proj_sector_pct > (_max_sec_pct - 0.1):
-            continue
-
-        # Constraint 3: small-cap cap
-        if _tier == "Small":
-            if ((_rp_small + 1) / _n_so_far) * 100 > _small_cap_max:
-                continue
-
-        _rp_selected.append(_c)
-        # ── Reason trace: true-by-construction facts at admission ──
-        _c["_trace"] = {
-            "score": _c.get("score"),
-            "div_rank": _c.get("diversification_rank", 999),
-            "sector": _sec,
-            "sector_role": f"{_rp_sector_counts[_sec] + 1} of max {_max_same_sec} in {_sec}",
-            "tier": _tier,
-            "position": _n_so_far,
-            "role": ("core holding" if _c.get("diversification_rank", 999) <= max(1, _target_n // 3)
-                     else "diversifier" if _c.get("diversification_rank", 999) <= _target_n
-                     else "breadth filler"),
-        }
-        _rp_sector_counts[_sec] += 1
-        if _tier == "Small":
-            _rp_small += 1
-        if _tier in ("Large", "Mega"):
-            _rp_large += 1
-
-    # Check large-cap minimum — if under, swap lowest-scored non-large for best available large
-    if _rp_selected:
-        _large_pct = (_rp_large / len(_rp_selected)) * 100
-        if _large_pct < _large_cap_min:
-            _current_tickers = {s["ticker"] for s in _rp_selected}
-            _large_avail = [c for c in candidates
-                           if c["ticker"] not in _current_tickers
-                           and c.get("risk_tier") in ("Large", "Mega")
-                           and _rp_sector_counts.get(c.get("sector", "?"), 0) < _max_same_sec]
-            _non_large = [s for s in _rp_selected if s.get("risk_tier") not in ("Large", "Mega")]
-            _non_large.sort(key=lambda x: x.get("score", 0) if isinstance(x.get("score"), (int, float)) else 0)
-
-            while _large_pct < _large_cap_min and _non_large and _large_avail:
-                _drop = _non_large.pop(0)
-                _add = _large_avail.pop(0)
-                _rp_selected.remove(_drop)
-                _rp_sector_counts[_drop.get("sector", "?")] -= 1
-                if _drop.get("risk_tier") == "Small":
-                    _rp_small -= 1
-
-                _add["_trace"] = {
-                    "score": _add.get("score"), "div_rank": _add.get("diversification_rank", 999),
-                    "sector": _add.get("sector", "?"),
-                    "sector_role": f"in {_add.get('sector', '?')}",
-                    "tier": _add.get("risk_tier", "?"), "position": None,
-                    "role": f"added to meet {_large_cap_min}% large-cap floor (replaced {_drop.get('ticker')})",
-                }
-                _rp_selected.append(_add)
-                _rp_sector_counts[_add.get("sector", "?")] += 1
-                _rp_large += 1
-                _large_pct = (_rp_large / len(_rp_selected)) * 100
-
-    # ── Firm-distress gate (build time): drop distressed candidates, replace from pool ──
-    # min_confidence="medium" — dropping a candidate is cheap, so err toward caution.
-    if _rp_selected:
-        try:
-            _sel_names = [s.get("name", "") for s in _rp_selected if s.get("name")]
-            _distressed = _detect_firm_distress(_sel_names, min_confidence="medium")
-            if _distressed:
-                _sel_tickers = {s["ticker"] for s in _rp_selected}
-                for _bad in [s for s in _rp_selected if s.get("name") in _distressed]:
-                    # Find a clean replacement from the pool that keeps constraints
-                    _bad_sec = _bad.get("sector", "Unknown")
-                    _bad_tier = _bad.get("risk_tier", "Unknown")
-                    _repl = None
-                    # Two-pass: if the distressed stock was Large/Mega, prefer a
-                    # Large/Mega replacement so the large-cap floor is preserved.
-                    # A Large->Small swap silently breaks the 50% floor (the one
-                    # gap the old auto-fix could never repair — removing stocks
-                    # can't raise large%). Match the tier first, fall back to any.
-                    _prefer_large = _bad_tier in ("Large", "Mega")
-                    for _pass in (("Large", "Mega"), None):
-                        if _repl:
-                            break
-                        for _c in candidates:
-                            if _c["ticker"] in _sel_tickers:
-                                continue
-                            if _c.get("name", "") in _distressed:
-                                continue
-                            if _pass and _c.get("risk_tier") not in _pass:
-                                continue
-                            if _c.get("sector") == _bad_sec or \
-                               _rp_sector_counts.get(_c.get("sector", "?"), 0) < _max_same_sec:
-                                _repl = _c
-                                break
-                        # only do the tier-restricted first pass when it matters
-                        if not _prefer_large:
-                            break
-                    _rp_selected.remove(_bad)
-                    _rp_sector_counts[_bad_sec] -= 1
-                    _sel_tickers.discard(_bad["ticker"])
-                    if _repl:
-                        _repl["_trace"] = {
-                            "score": _repl.get("score"), "div_rank": _repl.get("diversification_rank", 999),
-                            "sector": _repl.get("sector", "?"), "sector_role": f"in {_repl.get('sector', '?')}",
-                            "tier": _repl.get("risk_tier", "?"), "position": None,
-                            "role": f"replaced {_bad.get('name', _bad.get('ticker'))} (flagged for distress)",
-                        }
-                        _rp_selected.append(_repl)
-                        _rp_sector_counts[_repl.get("sector", "?")] += 1
-                        _sel_tickers.add(_repl["ticker"])
-                st.session_state._distress_dropped = {
-                    n: d["reason"] for n, d in _distressed.items()}
-        except Exception:
-            pass
-
-    # Equal weight
-    _rp_pct = round(100 / max(len(_rp_selected), 1), 1)
-    recommended_portfolio = []
-    for _s in _rp_selected:
-        recommended_portfolio.append({
-            "ticker": _s["ticker"],
-            "name": _s.get("name", ""),
-            "sector": _s.get("sector", "Unknown"),
-            "score": _s.get("score", 0),
-            "price": _s.get("price", 0),
-            "risk_tier": _s.get("risk_tier", "Unknown"),
-            "allocation_pct": _rp_pct,
-            "diversification_rank": _s.get("diversification_rank", 999),
-            "pe": _s.get("pe", "N/A"),
-            "roe_pct": _s.get("roe_pct", "N/A"),
-            "beta": _s.get("beta", "N/A"),
-            "_trace": _s.get("_trace", {}),
-        })
-    st.session_state._last_candidates = candidates  # keep full pool for backfill
+    recommended_portfolio = result["holdings"]
+    st.session_state._last_candidates = recommended_portfolio
+    st.session_state._selection_diagnostics = result.get("diagnostics", {})
+    st.session_state._selection_warnings = result.get("warnings", [])
+    st.session_state._selection_rejections = result.get("rejections", [])
 
     # ── Web grounding: THREE separate searches (tax / inflation / sector) ──
     # Separated by half-life and purpose. Each failure is isolated so a tax
@@ -4756,14 +4366,18 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str, r
             "investor_type": investor_type,
             "review_frequency": review_freq,
         },
-        "portfolio_sizing": {
-            "min_stocks": min_stocks,
-            "max_stocks": max_stocks,
-            "note": "These are hard bounds from the SIP amount. You decide the exact count based on candidate quality.",
-        },
-        "candidates_count": len(candidates),
-        "candidates": candidates,
-        "fringe_candidates": fringe_candidates,
+        # min_stocks / max_stocks are gone. n is ENDOGENOUS:
+        #   n = min(pool_size, affordable_n, ips_target)
+        # No padding to a book number. Evans & Archer's 12-18 was measured on
+        # RANDOMLY selected portfolios, where stock #15 has the same expected
+        # return as stock #1 and diversification is free. Under a ranking, stock
+        # #15 is your fifteenth-best idea and costs expected return. The floor
+        # that remains (n >= 10) is a RUIN constraint, derived from the SEBI 10%
+        # single-stock cap this IPS already applies — not a variance argument.
+        "selection_diagnostics": result.get("diagnostics", {}),
+        "selection_warnings": result.get("warnings", []),
+        "near_misses": result.get("rejections", []),
+        "tier1_rejections": result.get("rejects", {}),
         "recommended_portfolio": recommended_portfolio,
         "recommended_portfolio_instruction": (
             "CRITICAL: The 'recommended_portfolio' above is a DETERMINISTIC, IPS-COMPLIANT "
@@ -5751,18 +5365,45 @@ Step 4 — BEHAVIORAL BIAS SELF-AUDIT (Ch 5):
   - THE CONSENSUS TEST (Ch 5): Superior analysis requires being BOTH correct AND different from consensus.
     If your view matches what every analyst already thinks, there is no informational advantage.
 
-SIP PORTFOLIO CONSTRUCTION — CORRELATION-AWARE (Reilly & Brown Ch 6):
-Candidates now include diversification_rank and avg_corr_with_top5 computed from actual 1-year return correlations.
-- diversification_rank = order in which stocks should be added for MAXIMUM portfolio variance reduction
-  (greedy minimum-variance selection using the full covariance matrix, Ch 6 Eq 6.7)
-- avg_corr_with_top5 = average return correlation with the 5 highest-priority picks (lower = more diversification benefit)
-- annual_volatility = annualized standard deviation of daily returns
+SIP PORTFOLIO CONSTRUCTION — YOU DO NOT CONSTRUCT PORTFOLIOS.
+The portfolio in `recommended_portfolio` is built by deterministic code. You add
+no stock, remove no stock, reorder nothing. Your only job is to translate each
+holding's `_trace` into plain English.
 
-PORTFOLIO CONSTRUCTION PRIORITIES (in this order):
-1. MINIMIZE UNSYSTEMATIC RISK: Select stocks with LOW inter-correlation. A score-3 stock with 0.15 avg correlation adds MORE value than a score-5 stock with 0.85 correlation. Follow the diversification_rank ordering.
-2. MAXIMIZE QUALITY: Within the diversification constraint, prefer higher-scoring stocks.
-3. PRICE PREFERENCE: When two candidates have similar diversification value and quality, prefer the lower-priced stock (more shares per SIP = finer rebalancing granularity).
-4. RESPECT IPS CONSTRAINTS: The ALLOCATION POLICY in [BUILDER_PROFILE] contains hard limits. Never violate them.
+Every holding carries a `_trace` with two ORTHOGONAL facts. Use both:
+
+  gate_cleared — HOW it passed the user's score gate
+    "merit"                 passed N of 5 frameworks outright.
+    "abstention_adjusted"   a framework structurally cannot evaluate it.
+                            Greenblatt's formula uses ROIC and earnings yield,
+                            meaningless for a levered balance sheet — he says
+                            himself not to apply it to financials or utilities.
+                            So it ABSTAINS. The stock is judged on 4, not 5, and
+                            held to the same FRACTION. Say so plainly; it is a
+                            strength of the method, not an excuse.
+    "conviction_sleeve"     the user chose a wider gate, and this stock is a
+                            TOP-DECILE SPECIALIST in the framework they said
+                            matters most. It fails others. Name which, and name
+                            the framework that earned it its place. Use
+                            `conviction_rank` — the rank that CHOSE it — never
+                            `rank_in_sector`, which is the composite rank that
+                            buried it.
+
+  slot_type — WHY it got a seat
+    cap_quota_large / cap_quota_mid   reserved to meet an IPS cap-tier floor
+    breadth                           first name in an otherwise empty sector
+    conviction                        the sleeve above
+    free                              pure merit order
+
+`rank_in_sector`, `sector_depth` and `conviction_rank` count ONLY stocks that
+cleared THIS user's score gate. They are not universe ranks. Say "of the 33
+Basic Materials names that met your 3+ bar", never "of 33 in the market".
+
+Never write "chosen as a diversifier" or "sector filler". Fifteen holdings have
+fifteen different reasons and the trace contains all of them.
+
+`near_misses` lists stocks that ranked highly and did not make it, with the
+binding constraint. Mention one or two. Rejections build more trust than picks.
 
 The math: adding stock i to a portfolio reduces risk when ρ(i, portfolio) < σ(i)/σ(portfolio).
 The lower the correlation, the greater the diversification benefit. Same-sector stocks typically have ρ > 0.6.
@@ -7486,12 +7127,21 @@ elif st.session_state.sb_view_mode == "builder":
             # The system builds the portfolio from universe_scored + IPS.
             # No chat, no clarification questions, no LLM stock-picking.
             import json as _json
+            # Q7, Q8 and Q9 were computed, stored in _b_profile, handed to
+            # generate_ips — and then never reached the selector. Five arguments
+            # went in; philosophy, min_acceptable_score, acceptable_tradeoff and
+            # framework_weights were dropped on the floor. That is why every
+            # answer produced the same fifteen stocks.
             _cand_result = get_sip_candidates(
                 sip_amount=_calc_sip,
                 time_horizon=_b_time,
                 investor_type=_b_inv_type,
                 review_freq=_b_rev_freq,
                 avoid_sectors=_json.dumps(_b_avoid or []),
+                min_acceptable_score=_b_min_score,
+                philosophy=_b_philosophy_val,
+                acceptable_tradeoff=_b_tradeoff_val,
+                framework_weights=_json.dumps(_framework_weights.get(_b_philosophy_val, {})),
             )
             st.session_state._built_portfolio = _cand_result.get("recommended_portfolio", [])
             st.session_state._built_web_grounding = _cand_result.get("web_grounding", {})
