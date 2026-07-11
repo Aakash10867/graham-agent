@@ -1,4 +1,3 @@
-# TODO Sprint 8: Polish, XIRR everywhere, review reminders, paper auto-SIP, paper→real, Kite CSV.
 import os
 import re
 import math
@@ -14,6 +13,102 @@ from datetime import date, timedelta
 from collections import Counter
 import requests as _requests
 import verdict_engine
+
+
+# ══════════════════════════════════════════════
+# RISK-FREE RATE — one constant, one place
+# ══════════════════════════════════════════════
+# India 10Y G-Sec yield, as a decimal. Feeds Sharpe/Treynor/Jensen/Sortino/CAPM.
+#
+# Deliberately a constant, not a live fetch. Two reasons:
+#   1. RFR is the SMALLEST term in every ratio it enters — a 30bp error moves
+#      Sharpe in the third decimal and never changes a decision.
+#   2. No free, unauthenticated, stable India-10Y JSON feed exists (verified
+#      2026-07). Every source needs a key or a paid plan. A live dependency for
+#      a number this insensitive is a bad trade: it adds a daily failure mode to
+#      the tracker to chase precision that does not matter.
+#
+# The bug this REPLACES was not staleness — it was DUPLICATION. RFR was
+# hardcoded here AND in the Graham scorer, invisible in both, free to drift
+# apart. This is now the single source of truth. deep_metrics should import it.
+#
+# MAINTENANCE: bump this when RBI policy moves the 10Y materially (a few times a
+# year, not daily). Current India 10Y ~6.7-6.8% as of 2026-07.
+INDIA_RFR = 0.07
+
+
+def get_india_rfr():
+    """India 10Y G-Sec yield as a decimal (0.07 == 7%). Single source of truth."""
+    return INDIA_RFR
+
+
+# ══════════════════════════════════════════════
+# HONEST RANGES — a ratio from few days is an INTERVAL, not a point
+# ══════════════════════════════════════════════
+# Two kinds of range, because two kinds of uncertainty:
+#   - series ratios (Sharpe, Sortino, IR, semi-dev): bootstrap the daily returns,
+#     then FLOOR the width by 1/sqrt(n) so a calm short sample cannot fake
+#     precision. Narrows continuously as history accrues — no step function.
+#   - beta ratios (Treynor, Jensen, CAPM): no return series behind them (beta is
+#     read from the universe CSV), so propagate a fixed beta band. Does NOT
+#     shrink with age — honest that the uncertainty is in a stale external beta.
+MIN_DAYS_SERIES = 20          # below this a series ratio is withheld entirely
+BETA_UNCERTAINTY = 0.15       # absolute noise band on yfinance beta
+_TD = 252
+
+
+def _series_ratio_range(daily_returns, ratio_fn, n_boot=400, block=5,
+                        floor_rel=0.9):
+    """10th-90th block-bootstrap band for a series ratio, width-floored by
+    1/sqrt(n). Returns (low, high, n_days) or None if history too short."""
+    import numpy as np
+    r = np.asarray(daily_returns, dtype=float)
+    r = r[np.isfinite(r)]
+    n = len(r)
+    if n < MIN_DAYS_SERIES:
+        return None
+    point = ratio_fn(r)
+    if not (isinstance(point, float) and math.isfinite(point)):
+        try:
+            point = float(point)
+            if not math.isfinite(point):
+                return None
+        except Exception:
+            return None
+    rng = np.random.default_rng(12345)   # fixed seed: stable day-to-day numbers
+    n_blocks = int(np.ceil(n / block))
+    boot = np.empty(n_boot)
+    for b in range(n_boot):
+        starts = rng.integers(0, n, size=n_blocks)
+        idx = (starts[:, None] + np.arange(block)[None, :]).ravel() % n
+        boot[b] = ratio_fn(r[idx[:n]])
+    boot = boot[np.isfinite(boot)]
+    if len(boot) < 20:
+        return None
+    lo, hi = np.percentile(boot, [10, 90])
+    scale = math.sqrt(MIN_DAYS_SERIES / n)
+    min_half = floor_rel * max(abs(point), 0.25) * scale
+    mid = 0.5 * (lo + hi)
+    half = max(0.5 * (hi - lo), min_half)
+    return (round(float(mid - half), 3), round(float(mid + half), 3), int(n))
+
+
+def _beta_ratio_range(point_fn, beta, band=BETA_UNCERTAINTY):
+    """Range for a beta-dependent ratio by propagating +-band through the
+    formula. Does not shrink with portfolio age. Returns (low, high) or None."""
+    if beta is None or not math.isfinite(beta):
+        return None
+    vals = []
+    for b in (beta - band, beta + band):
+        try:
+            v = point_fn(b)
+        except Exception:
+            v = None
+        if v is not None and math.isfinite(v):
+            vals.append(v)
+    if len(vals) < 2:
+        return None
+    return (round(min(vals), 4), round(max(vals), 4))
 
 
 # ══════════════════════════════════════════════
@@ -319,7 +414,7 @@ def compute_portfolio_risk_metrics(holdings, universe_df=None, nifty_history=Non
     if not holdings or len(holdings) == 0:
         return {}
 
-    RFR = 0.07  # India 10Y govt bond rate — TODO: fetch dynamically via get_web_context
+    RFR = get_india_rfr()  # single source of truth (module constant INDIA_RFR)
     result = {}
 
     total_value = sum(h.get("current_value", 0) or h.get("sip_amount_inr", 0) or 0 for h in holdings)
@@ -416,6 +511,12 @@ def compute_portfolio_risk_metrics(holdings, universe_df=None, nifty_history=Non
         _beta = result.get("portfolio_beta")
         if _beta is not None and math.isfinite(_beta) and _beta != 0:
             result["treynor_ratio"] = round((port_annual_return - RFR) / result["portfolio_beta"], 4)
+            # Range from BETA uncertainty, not history. Does not shrink with
+            # portfolio age — the uncertainty is in a stale external beta.
+            _tr_rng = _beta_ratio_range(
+                lambda b: (port_annual_return - RFR) / b if b else None, _beta)
+            if _tr_rng:
+                result["treynor_low"], result["treynor_high"] = _tr_rng
 
         # ── 5. Jensen's Alpha = Rp - RFR - β(Rm - RFR) (Ch 18) ──
         # Need market return (Nifty 50)
@@ -469,6 +570,36 @@ def compute_portfolio_risk_metrics(holdings, universe_df=None, nifty_history=Non
             downside_dev = ((downside - daily_rfr) ** 2).mean() ** 0.5 * (trading_days ** 0.5)
             if downside_dev > 0:
                 result["sortino_ratio"] = round((port_annual_return - RFR) / downside_dev, 3)
+
+        # ── 7b. HONEST RANGES for the series ratios ──────────────────────
+        # A Sharpe/Sortino from N days is an INTERVAL, not a point. Report a
+        # band that narrows continuously as history accrues (no "now we're
+        # confident" step) and is width-floored by 1/sqrt(N) so a calm short
+        # sample cannot fake precision. Stored as *_low/*_high/*_days so the
+        # report renders "0.8-2.1 (34 days)" instead of a false-precise point.
+        try:
+            _pr = port_returns.dropna().to_numpy()
+            _sharpe_fn = lambda r: (
+                (r.mean() * trading_days - RFR)
+                / (r.std() * (trading_days ** 0.5))
+                if r.std() > 0 else float("nan"))
+
+            def _sortino_fn(r):
+                mu = r.mean() * trading_days
+                dn = r[r < daily_rfr]
+                if len(dn) == 0:
+                    return float("nan")
+                dd = ((dn - daily_rfr) ** 2).mean() ** 0.5 * (trading_days ** 0.5)
+                return (mu - RFR) / dd if dd > 0 else float("nan")
+
+            _rng = _series_ratio_range(_pr, _sharpe_fn)
+            if _rng:
+                result["sharpe_low"], result["sharpe_high"], result["metrics_history_days"] = _rng
+            _rng = _series_ratio_range(_pr, _sortino_fn)
+            if _rng:
+                result["sortino_low"], result["sortino_high"], _ = _rng
+        except Exception as _e:
+            print(f"  Range computation failed (non-blocking): {type(_e).__name__}: {_e}")
 
         # ── 8. Semi-deviation (Ch 6) ──
         below_mean = port_returns[port_returns < port_returns.mean()]
@@ -736,7 +867,10 @@ def run_daily_tracker():
                 _risk_update = {}
                 for k in ["portfolio_beta", "sharpe_ratio", "sortino_ratio", "jensen_alpha",
                            "treynor_ratio", "information_ratio", "max_drawdown",
-                           "capm_expected_return", "semi_deviation", "annual_return", "annual_std"]:
+                           "capm_expected_return", "semi_deviation", "annual_return", "annual_std",
+                           # Sprint 12: honest ranges (band, not point) + history depth
+                           "sharpe_low", "sharpe_high", "sortino_low", "sortino_high",
+                           "treynor_low", "treynor_high", "metrics_history_days"]:
                     if k in _risk:
                         _risk_update[k] = _risk[k]
                 if _risk_update:
