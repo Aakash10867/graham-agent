@@ -1130,8 +1130,8 @@ def generate_portfolio_narrative(portfolio, holdings, collection, score_data=Non
         query = f"{' '.join(passing)} {sector}" if passing else f"{sector} stock investment"
  
         try:
-            passages = collection.query(query_texts=[query], n_results=2)
-            book_text = "\n".join(passages["documents"][0][:2])
+            passages = search_book_passages(collection, query, 2)
+            book_text = "\n".join(p["text"] for p in passages[:2])
         except Exception:
             book_text = ""
  
@@ -1333,14 +1333,13 @@ def generate_health_check(portfolio, holdings, universe_df, collection):
 
     # Book passages for portfolio construction
     try:
-        passages = collection.query(
-            query_texts=[
-                f"{investor_type} portfolio construction sector diversification concentration risk",
-                "margin of safety portfolio level risk management number of holdings",
-            ],
-            n_results=3
+        passages = search_book_passages(
+            collection,
+            f"{investor_type} portfolio construction sector diversification "
+            f"concentration risk margin of safety number of holdings",
+            3,
         )
-        book_text = "\n".join(passages["documents"][0][:2]) if passages["documents"] else ""
+        book_text = "\n".join(p["text"] for p in passages[:2])
     except Exception:
         book_text = ""
 
