@@ -349,6 +349,26 @@ def project_goal_distribution(current_value, sip_monthly, target_amount,
     # history actually contains. Few windows => the fan is stitched, not observed.
     result["independent_windows"] = max(1, len(r) // H)
 
+    # Force the caveat to ride WITH the probability. A 24% that came from zero
+    # complete historical windows must never be read as a forecast. This tag is
+    # inseparable from prob_hit_target wherever it is shown or handed to the LLM.
+    _w = result["independent_windows"]
+    if _w >= 10:
+        result["confidence"] = "well-sampled"
+        result["confidence_note"] = (
+            f"Based on {_w} independent {H // 12}-year periods in the history.")
+    elif _w >= 3:
+        result["confidence"] = "thinly-sampled"
+        result["confidence_note"] = (
+            f"Based on only {_w} independent {H // 12}-year periods — a wide "
+            f"band is honest, not pessimistic.")
+    else:
+        result["confidence"] = "stitched"
+        result["confidence_note"] = (
+            f"No complete {H // 12}-year period exists in the available history "
+            f"({len(r)} months). This range is stitched from shorter blocks — "
+            f"illustrative, not a forecast.")
+
     # Percentile fan over time for charting: p10/p50/p90 corpus at each month.
     # Recompute cumulative paths cheaply for the fan (reuse path_returns).
     fan_corpus = np.full(n_paths, float(current_value))
