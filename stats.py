@@ -130,6 +130,31 @@ def compute_universe_stats(universe_df):
     if _defined:
         out["most_orthogonal"] = min(_defined, key=_defined.get)
 
+    # The real story lives in the PAIRS, not per-flag maxima. If three flags
+    # travel together (high |phi|), a 3/5 that passes all three is a weaker
+    # signal than a 3/5 spread across independent flags — they are ~1.5 votes,
+    # not 3. Surface the most- and least-entangled pairs by name so the page
+    # leads with the finding instead of burying it in the matrix.
+    _pairs = [(k, v) for k, v in phi.items() if v is not None]
+    if _pairs:
+        _by_abs = sorted(_pairs, key=lambda kv: abs(kv[1]))
+        def _pair_dict(key, val):
+            fi, fj = key.split("|")
+            return {
+                "pair": key,
+                "labels": [FLAG_LABELS.get(fi, fi), FLAG_LABELS.get(fj, fj)],
+                "phi": val,
+            }
+        out["least_orthogonal_pair"] = _pair_dict(*_by_abs[-1])   # most entangled
+        out["most_orthogonal_pair"] = _pair_dict(*_by_abs[0])     # most independent
+        # the entangled cluster: every pair above a redundancy-worth-noting bar
+        CLUSTER_PHI = 0.30
+        out["correlated_cluster"] = [
+            _pair_dict(k, v) for k, v in
+            sorted(_pairs, key=lambda kv: abs(kv[1]), reverse=True)
+            if abs(v) >= CLUSTER_PHI
+        ]
+
     # ── 3. Score distribution ────────────────────────────────────────────
     if "score" in df.columns:
         sc = pd.to_numeric(df["score"], errors="coerce").dropna().astype(int)
