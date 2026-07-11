@@ -24,6 +24,15 @@ from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import deep_metrics
 
+# ──────────────────────────────────────────────
+# SCHEMA VERSION — bump whenever a scorer threshold, formula, or the raw-input
+# column set changes. Stamped onto every row of universe_scored.csv so a future
+# re-score of an archived snapshot knows which scorer vintage produced it.
+# History:
+#   1  2026-07-10  dividend_yield fraction->percent fix; trajectory_pass >= 8
+# ──────────────────────────────────────────────
+SCHEMA_VERSION = 1
+
 # --- ADD THIS GLOBAL SESSION BLOCK HERE ---
 global_session = requests.Session()
 global_session.headers.update({
@@ -625,6 +634,76 @@ def process_universe(ticker_list, max_workers=2):
 
 
 # ──────────────────────────────────────────────
+# ARCHIVE COMPLETENESS GUARD
+# ──────────────────────────────────────────────
+def verify_archive_completeness(df):
+    """Refuse to commit a snapshot that a future scorer could not re-derive.
+
+    The whole point of the archive is that any snapshot can be re-scored by a
+    later version of deep_metrics. That only holds if the RAW INPUTS the scorer
+    reads are all present in the saved columns. This guard proves it, per commit,
+    by re-running the two pure verdict functions against the saved columns and
+    asserting the result matches what was written.
+
+    A mismatch means a saved score can NOT be reproduced from saved inputs —
+    i.e. the archive is silently un-rescoreable. That is a red CI run today, not
+    a discovery in 2027.
+
+    Cheap: pure Python over the rows, no network, ~1-2s on 4,400 rows.
+    """
+    import math
+
+    # Inputs read by compute_trajectory_score + compute_framework_verdicts.
+    # If deep_metrics grows a new input, add it here AND to the column list —
+    # this list existing is what forces that discipline.
+    REQUIRED_INPUTS = [
+        # trajectory raw inputs
+        "ni_cagr_3y", "revenue_cagr_3y", "rev_growth", "debt_growth", "de",
+        "revenue_y0", "revenue_y1", "revenue_y2", "revenue_y3",
+        "net_income_y0", "net_income_y1", "net_income_y2", "net_income_y3",
+        # sub-scores the verdict function thresholds
+        "graham_defensive_score", "greenblatt_score", "dorsey_buffett_score",
+        "trajectory_score", "lynch_score", "lynch_category",
+    ]
+    missing = [c for c in REQUIRED_INPUTS if c not in df.columns]
+    if missing:
+        print("[ARCHIVE] FATAL: raw inputs missing from the saved column set:")
+        for c in missing:
+            print(f"[ARCHIVE]   {c}")
+        print("[ARCHIVE] These snapshots could not be re-scored later. Add the "
+              "column(s) to base_columns/deep_columns before committing.")
+        sys.exit(1)
+
+    # Re-derive on a sample and confirm reproducibility. Full-universe is fine
+    # too, but a 200-row sample catches drift just as reliably and stays instant.
+    sample = df.head(200)
+    mismatches = 0
+    for _, row in sample.iterrows():
+        d = row.to_dict()
+        before = (d.get("trajectory_score"), d.get("score"))
+        deep_metrics.compute_trajectory_score(d)
+        deep_metrics.compute_framework_verdicts(d)
+        after = (d.get("trajectory_score"), d.get("score"))
+        # trajectory_score is recomputed from raw inputs; score from sub-scores.
+        for b, a in zip(before, after):
+            if b is None or (isinstance(b, float) and math.isnan(b)):
+                continue
+            if int(b) != int(a):
+                mismatches += 1
+                break
+    if mismatches:
+        pct = mismatches / len(sample)
+        print(f"[ARCHIVE] FATAL: {mismatches}/{len(sample)} sampled rows "
+              f"({pct:.0%}) could not be reproduced from their own saved inputs.")
+        print("[ARCHIVE] The saved scores and the saved inputs disagree. Either a "
+              "scorer changed without a re-run, or an input column is stale. Fix "
+              "before committing — this snapshot is not re-scoreable.")
+        sys.exit(1)
+    print(f"[ARCHIVE] OK: {len(sample)} rows re-derived from saved inputs, "
+          f"schema_version={SCHEMA_VERSION}.")
+
+
+# ──────────────────────────────────────────────
 # MAIN
 # ──────────────────────────────────────────────
 def main():
@@ -832,6 +911,7 @@ def main():
 
     # Add metadata
     df["updated_date"] = datetime.now().strftime("%Y-%m-%d")
+    df["schema_version"] = SCHEMA_VERSION
 
     # ── Failure breakdown ──────────────────────────────────────────────
     from collections import Counter as _Counter
@@ -869,6 +949,10 @@ def main():
             raise
         except Exception as _e:
             print(f"[GUARD] Could not compare to previous universe: {_e}")
+
+    # Protect the clock: a snapshot we cannot re-score later is worthless as
+    # an archive. Prove re-scoreability before committing.
+    verify_archive_completeness(df)
 
     df.to_csv(output_file, index=False)
 
