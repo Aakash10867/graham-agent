@@ -23,7 +23,8 @@ import datetime
 import streamlit as st
 from google import genai
 from google.genai import types
-import chromadb
+import re
+import pymupdf
 import pymupdf
 import yfinance as yf
 import json
@@ -3366,57 +3367,70 @@ if st.session_state.sb_view_mode == "chat" and not st.session_state.messages:
 
 
 # ──────────────────────────────────────────────
-# LOAD BOOKS INTO CHROMADB (runs once, cached)
+# LOAD BOOKS — keyword search (replaces ChromaDB)
 # ──────────────────────────────────────────────
-@st.cache_resource
+# ChromaDB pulled chroma-hnswlib + onnxruntime, C++ extensions that segfaulted
+# against numpy 2 on Streamlit Cloud. portfolio_tracker.py has used this same
+# keyword approach in production for weeks. `collection` is now a list of
+# {"author","text"} chunks, not a Chroma collection.
+@st.cache_resource(show_spinner=False)
 def load_books():
     books = {
         "Graham": "The Intelligent Investor.pdf",
         "Greenblatt": "The Little Book That Still Beats the Market.pdf",
-        "Dorsey": "The Five Rules for Successful Stock Investing.pdf"
+        "Dorsey": "The Five Rules for Successful Stock Investing.pdf",
     }
-
-    chroma_client = chromadb.PersistentClient(path="./chroma_db")
-    collection = chroma_client.get_or_create_collection("investment_committee")
-
-    if collection.count() > 0:
-        return collection
-
+    chunks = []
     for author, filename in books.items():
-        if not os.path.exists(filename):
+        path = os.path.join(BASE_DIR, filename) if "BASE_DIR" in globals() else filename
+        if not os.path.exists(path):
             print(f"Warning: {filename} not found.")
             continue
+        try:
+            doc = pymupdf.open(path)
+            full_text = "\n".join(page.get_text() for page in doc)
+            doc.close()
+            current = ""
+            for para in full_text.split("\n\n"):
+                para = para.strip()
+                if not para or len(para) < 50:
+                    continue
+                if len(current) + len(para) < 1200:
+                    current = (current + "\n" + para) if current else para
+                else:
+                    if len(current) >= 100:
+                        chunks.append({"author": author, "text": current})
+                    current = para
+            if current and len(current) >= 100:
+                chunks.append({"author": author, "text": current})
+        except Exception as e:
+            print(f"Warning: could not load {filename}: {e}")
+    print(f"Loaded {len(chunks)} book passages from {len(books)} books.")
+    return chunks
 
-        doc = pymupdf.open(filename)
-        full_text = "\n".join(page.get_text() for page in doc)
-        doc.close()
 
-        raw_paragraphs = full_text.split("\n\n")
-        chunks = []
-        current = ""
-        for para in raw_paragraphs:
-            para = para.strip()
-            if not para:
-                continue
-            if len(current) + len(para) < 1500:
-                current = current + "\n\n" + para if current else para
-            else:
-                if len(current) >= 100:
-                    chunks.append(current)
-                current = para
-        if current and len(current) >= 100:
-            chunks.append(current)
+_STOP = {"the", "a", "an", "is", "are", "was", "were", "be", "been", "have",
+         "has", "do", "does", "did", "will", "would", "could", "should", "may",
+         "might", "shall", "can", "to", "of", "in", "for", "on", "with", "at",
+         "by", "from", "and", "or", "not", "but", "if", "that", "this", "it",
+         "its", "as", "about"}
 
-        batch_size = 100
-        for i in range(0, len(chunks), batch_size):
-            batch = chunks[i:i + batch_size]
-            collection.add(
-                documents=batch,
-                metadatas=[{"author": author} for _ in batch],
-                ids=[f"{author}_chunk_{j}" for j in range(i, i + len(batch))]
-            )
 
-    return collection
+def search_book_passages(chunks, query, n=3):
+    """Keyword search. Returns a list of {"author","text"} dicts, best first."""
+    kws = [w.lower() for w in re.split(r"\W+", query or "")
+           if w.lower() not in _STOP and len(w) > 2]
+    if not kws:
+        return []
+    scored = []
+    for c in chunks:
+        low = c["text"].lower()
+        s = sum(low.count(k) for k in kws)
+        if s > 0:
+            scored.append((s, c))
+    scored.sort(key=lambda x: -x[0])
+    return [c for _, c in scored[:n]]
+
 
 collection = load_books()
 
