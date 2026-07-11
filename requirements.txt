@@ -21,12 +21,10 @@ google-genai==2.11.0
 requests==2.34.2
 pymupdf==1.28.0
 protobuf>=5.27,<6
-chromadb==0.6.3
 
 # TODO: pin these from `pip freeze` in your local venv
 streamlit
 scikit-learn
-pysqlite3-binary
 reportlab
 matplotlib
 plotly
