@@ -3591,19 +3591,15 @@ def search_book(query: str) -> dict:
     Args:
         query: What to search for, e.g. "magic formula return on capital" or "economic moat"
     """
-    sem_results = collection.query(query_texts=[query], n_results=5)
+    passages = search_book_passages(collection, query, 5)
 
-    if not sem_results["documents"][0]:
+    if not passages:
         return {"error": "No relevant passages found."}
 
-    sem_docs = sem_results["documents"][0]
-    sem_meta = sem_results["metadatas"][0]
-    sem_dists = sem_results["distances"][0]
-
     formatted = []
-    for text, meta, dist in zip(sem_docs, sem_meta, sem_dists):
-        author = meta.get("author", "Unknown")
-        formatted.append(f"[Source: {author} | Relevance: {1-dist:.2f}]:\n{text}")
+    for p in passages:
+        author = p.get("author", "Unknown")
+        formatted.append(f"[Source: {author}]:\n{p['text']}")
 
     return {"passages": "\n\n".join(formatted)}
 
