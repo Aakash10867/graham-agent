@@ -3369,10 +3369,6 @@ if st.session_state.sb_view_mode == "chat" and not st.session_state.messages:
 # ──────────────────────────────────────────────
 # LOAD BOOKS — keyword search (replaces ChromaDB)
 # ──────────────────────────────────────────────
-# ChromaDB pulled chroma-hnswlib + onnxruntime, C++ extensions that segfaulted
-# against numpy 2 on Streamlit Cloud. portfolio_tracker.py has used this same
-# keyword approach in production for weeks. `collection` is now a list of
-# {"author","text"} chunks, not a Chroma collection.
 @st.cache_resource(show_spinner=False)
 def load_books():
     books = {
