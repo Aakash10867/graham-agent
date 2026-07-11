@@ -704,6 +704,61 @@ def verify_archive_completeness(df):
 
 
 # ──────────────────────────────────────────────
+# ARCHIVE MANIFEST — the clock the "Does It Work?" page counts
+# ──────────────────────────────────────────────
+# One record per COMMITTED, GUARD-PASSED snapshot. Written by the same process
+# that produces the archive, at the moment it produces it — so the counter and
+# the archive are the same object, not a proxy. Carries schema_version so the
+# page can count only clean-scorer snapshots (>= 1). Committed to the repo, so
+# the deployed Streamlit app reads it directly with no git history or DB call.
+#
+# CLOCK START: 2026-07-10, the day the dividend + trajectory_pass fixes landed.
+# Snapshots before that ran a scorer with wrong flags and do NOT count.
+ARCHIVE_MANIFEST = "archive_manifest.json"
+CLOCK_START = "2026-07-10"
+
+
+def append_archive_manifest(df, manifest_path=ARCHIVE_MANIFEST):
+    """Record this snapshot in the clock. Idempotent per date: re-running on the
+    same day overwrites that day's entry rather than double-counting. Never
+    raises — a manifest failure must not fail the universe commit."""
+    import json
+    try:
+        today = datetime.now().strftime("%Y-%m-%d")
+        entry = {
+            "date": today,
+            "schema_version": SCHEMA_VERSION,
+            "n_universe": int(len(df)),
+            "n_investable": int(len(df[df["quality_pass"] == True]))
+                            if "quality_pass" in df.columns else None,
+        }
+        records = []
+        if os.path.exists(manifest_path):
+            try:
+                with open(manifest_path) as f:
+                    records = json.load(f)
+                if not isinstance(records, list):
+                    records = []
+            except Exception:
+                records = []
+        # idempotent: drop any existing entry for today, then append
+        records = [r for r in records if r.get("date") != today]
+        records.append(entry)
+        records.sort(key=lambda r: r.get("date", ""))
+        with open(manifest_path, "w") as f:
+            json.dump(records, f, indent=2)
+
+        # count clean-scorer snapshots since the clock start
+        clean = [r for r in records
+                 if r.get("schema_version", 0) >= 1 and r.get("date", "") >= CLOCK_START]
+        print(f"[MANIFEST] recorded {today}; clean snapshots since "
+              f"{CLOCK_START}: {len(clean)}")
+    except Exception as e:
+        print(f"[MANIFEST] non-fatal: could not update manifest: "
+              f"{type(e).__name__}: {e}")
+
+
+# ──────────────────────────────────────────────
 # MAIN
 # ──────────────────────────────────────────────
 def main():
@@ -955,6 +1010,10 @@ def main():
     verify_archive_completeness(df)
 
     df.to_csv(output_file, index=False)
+
+    # Record this guard-passed, committed snapshot in the clock the
+    # "Does It Work?" page counts. Non-fatal on failure.
+    append_archive_manifest(df)
 
     # ── Summary ──
     total_scored = len(df)
