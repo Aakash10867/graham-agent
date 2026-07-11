@@ -191,3 +191,176 @@ def compute_universe_stats(universe_df):
         }
 
     return out
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# HALF B — GOAL PROJECTION AS A DISTRIBUTION, NOT A LINE
+# ══════════════════════════════════════════════════════════════════════════
+# The old goal projection drew ONE curve at a fixed 12% CAGR and reported one
+# number: "you'll have Rs X." That is false precision — the same sin the risk
+# ranges fixed. Half B replaces the certainty (not the function): keep the
+# deterministic median line, add a probability FAN around it and P(hit target).
+#
+# HONESTY, built structurally:
+#   - Block bootstrap (12-month blocks) preserves crash CLUSTERING and sequence
+#     risk. Shuffling single months would manufacture a tidy near-normal outcome
+#     that hides the chance of a lost decade. Bad months come in runs; we keep
+#     the runs.
+#   - Max-available history (Sensex reaches ~1997, incl. 2000/2008/2020) because
+#     the typical user projects 25 years. A 25-year path sampled from 15 BULL
+#     years is a brochure. The sample must contain the crises a 25-year holder
+#     could actually live through.
+#   - The distribution is the INDEX's, not Kordent's. Every output is labelled
+#     `benchmark: <name>` and `is_proxy: True`. "82% chance" always means "IF
+#     your portfolio behaves like the index". Swappable for Kordent's own
+#     realised returns once they exist.
+#   - Past returns as future distribution is an OPTIMISTIC assumption (India
+#     equity history is bull-heavy). Output carries `bias: "optimistic_ceiling"`.
+
+import datetime as _dt
+
+_NIFTY_CACHE = {"returns": None, "meta": None}
+
+
+def fetch_index_monthly_returns(force=False):
+    """~Max-available monthly returns for an Indian large-cap index, as a list
+    of floats (0.02 == +2%). Tries Nifty 50, falls back to Sensex for the longer
+    tail. Cached per process. Returns (returns_list, meta_dict).
+
+    meta: {benchmark, start, end, n_months}. On total failure returns (None, err).
+    Never raises.
+    """
+    if _NIFTY_CACHE["returns"] is not None and not force:
+        return _NIFTY_CACHE["returns"], _NIFTY_CACHE["meta"]
+
+    import yfinance as yf
+    # (ticker, human name). Nifty first (what users know); Sensex reaches further
+    # back on Yahoo and is a near-perfect large-cap proxy for the pre-2007 tail.
+    for ticker, name in (("^NSEI", "Nifty 50"), ("^BSESN", "BSE Sensex")):
+        try:
+            hist = yf.download(ticker, start="1990-01-01", interval="1mo",
+                               progress=False, auto_adjust=True)
+            if hist is None or len(hist) < 60:
+                continue
+            close = hist["Close"]
+            # yfinance 1.x hands back a DataFrame even for one ticker
+            if hasattr(close, "columns"):
+                close = close.iloc[:, 0]
+            rets = close.pct_change(fill_method=None).dropna()
+            rets = rets[(rets > -0.6) & (rets < 0.6)]  # drop data-glitch spikes
+            if len(rets) < 60:
+                continue
+            meta = {
+                "benchmark": name,
+                "start": str(rets.index[0].date()),
+                "end": str(rets.index[-1].date()),
+                "n_months": int(len(rets)),
+                "is_proxy": True,
+                "bias": "optimistic_ceiling",
+            }
+            out = [float(x) for x in rets.tolist()]
+            _NIFTY_CACHE["returns"], _NIFTY_CACHE["meta"] = out, meta
+            return out, meta
+        except Exception as e:
+            last_err = f"{type(e).__name__}: {e}"
+            continue
+    return None, {"error": "no index history available"}
+
+
+def project_goal_distribution(current_value, sip_monthly, target_amount,
+                              months_remaining, monthly_returns=None,
+                              n_paths=2000, block=12, seed=20260712):
+    """Monte Carlo goal projection using a block bootstrap of real index months.
+
+    Parameters
+    ----------
+    current_value    : starting corpus (INR)
+    sip_monthly      : monthly SIP contribution (INR)
+    target_amount    : goal (INR); may be None/0 -> P(hit) omitted
+    months_remaining : horizon in months
+    monthly_returns  : list of historical monthly returns. If None, fetched.
+    n_paths          : number of simulated futures
+    block            : bootstrap block length in months (12 keeps crash runs)
+
+    Returns a dict with percentile terminal values, P(hit target), a percentile
+    fan for charting, and the benchmark label/caveat. None on unusable inputs.
+    """
+    import numpy as np
+
+    if months_remaining is None or months_remaining <= 0:
+        return None
+
+    meta = None
+    if monthly_returns is None:
+        monthly_returns, meta = fetch_index_monthly_returns()
+    if not monthly_returns or len(monthly_returns) < block * 2:
+        return None
+    if meta is None:
+        meta = {"benchmark": "index", "is_proxy": True,
+                "bias": "optimistic_ceiling"}
+
+    r = np.asarray(monthly_returns, dtype=float)
+    H = int(months_remaining)
+    rng = np.random.default_rng(seed)
+
+    # Build each path from contiguous blocks so autocorrelation/crash-clustering
+    # survives. n_blocks blocks of `block` months, trimmed to H.
+    n_blocks = int(np.ceil(H / block))
+    n_start = len(r) - block  # valid block start indices: 0..n_start
+
+    # sample matrix of block start indices: (n_paths, n_blocks)
+    starts = rng.integers(0, n_start + 1, size=(n_paths, n_blocks))
+    # expand to month-level return matrix (n_paths, n_blocks*block) then trim
+    offsets = np.arange(block)
+    idx = starts[:, :, None] + offsets[None, None, :]      # (paths, blocks, block)
+    idx = idx.reshape(n_paths, n_blocks * block)[:, :H]     # (paths, H)
+    path_returns = r[idx]                                   # (paths, H)
+
+    # Compound: each month multiply corpus by (1+r), then add SIP at month end.
+    corpus = np.full(n_paths, float(current_value))
+    for m in range(H):
+        corpus = corpus * (1.0 + path_returns[:, m]) + sip_monthly
+    terminal = corpus
+
+    pct = {p: float(np.percentile(terminal, p)) for p in (10, 25, 50, 75, 90)}
+
+    result = {
+        "benchmark": meta.get("benchmark", "index"),
+        "is_proxy": True,
+        "bias": "optimistic_ceiling",
+        "history_start": meta.get("start"),
+        "history_end": meta.get("end"),
+        "history_months": meta.get("n_months"),
+        "n_paths": n_paths,
+        "horizon_months": H,
+        "block_months": block,
+        "terminal_p10": round(pct[10]),
+        "terminal_p25": round(pct[25]),
+        "terminal_p50": round(pct[50]),
+        "terminal_p75": round(pct[75]),
+        "terminal_p90": round(pct[90]),
+    }
+
+    if target_amount and target_amount > 0:
+        result["target_amount"] = float(target_amount)
+        result["prob_hit_target"] = round(float((terminal >= target_amount).mean()), 4)
+
+    # Independent-window honesty: how many non-overlapping H-month windows the
+    # history actually contains. Few windows => the fan is stitched, not observed.
+    result["independent_windows"] = max(1, len(r) // H)
+
+    # Percentile fan over time for charting: p10/p50/p90 corpus at each month.
+    # Recompute cumulative paths cheaply for the fan (reuse path_returns).
+    fan_corpus = np.full(n_paths, float(current_value))
+    fan = {"p10": [], "p50": [], "p90": []}
+    step = max(1, H // 60)  # cap at ~60 points for a clean chart
+    for m in range(H):
+        fan_corpus = fan_corpus * (1.0 + path_returns[:, m]) + sip_monthly
+        if (m + 1) % step == 0 or m == H - 1:
+            fan["p10"].append(round(float(np.percentile(fan_corpus, 10))))
+            fan["p50"].append(round(float(np.percentile(fan_corpus, 50))))
+            fan["p90"].append(round(float(np.percentile(fan_corpus, 90))))
+    result["fan"] = fan
+    result["fan_step_months"] = step
+
+    return result
