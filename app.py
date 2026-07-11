@@ -1730,6 +1730,41 @@ def generate_review_recommendations(enriched_holdings, investor_type, time_horiz
                 f"CREATE sell pressure that a broken thesis did not already justify.)\n"
             )
 
+    # Sprint 12: universe statistics as CALIBRATION context. The LLM uses these
+    # to set confidence LANGUAGE — it must NOT quote raw percentages at the user
+    # (two-consumer rule). The load-bearing fact is the correlation cluster:
+    # Dorsey/Trajectory/Lynch travel together (phi ~0.4), so a 3/5 passing those
+    # three is a WEAKER signal than a 3/5 spread across independent frameworks.
+    stats_context = ""
+    try:
+        import stats as _kstats
+        _udf = globals().get("universe_df")
+        if _udf is not None and len(_udf):
+            _us = _kstats.compute_universe_stats(_udf)
+            _br = _us.get("base_rates", {})
+            _cl = _us.get("least_orthogonal_pair", {})
+            if _br:
+                _rare = _us.get("base_rate_spread", {}).get("rarest", "")
+                _rare_lbl = _br.get(_rare, {}).get("label", "Graham")
+                _rate_lines = ", ".join(
+                    f"{v['label']} {v['pass_rate']*100:.0f}%" for v in _br.values())
+                stats_context = (
+                    "\nUNIVERSE CALIBRATION (context for your CONFIDENCE LANGUAGE only "
+                    "— do NOT quote these numbers to the user):\n"
+                    f" - Flag pass-rates across the whole market: {_rate_lines}.\n"
+                    f" - {_rare_lbl} is the RAREST and hardest test; a stock passing it "
+                    "deserves genuinely higher confidence in your wording.\n")
+                if _cl and _cl.get("labels"):
+                    _a, _b = _cl["labels"]
+                    stats_context += (
+                        f" - {_a} and {_b} are CORRELATED (they tend to pass together). "
+                        f"When a stock passes both, treat them as ~1.5 signals, not 2 — "
+                        f"be MORE measured in your confidence, not less. A score built on "
+                        f"independent frameworks (e.g. {_rare_lbl} + one other) is stronger "
+                        f"than the same score built on the correlated cluster.\n")
+    except Exception as _se:
+        print(f"Stats calibration skipped (non-blocking): {type(_se).__name__}: {_se}")
+
     review_prompt = (
         f"You are the Kordent Investment Committee reviewing a {investor_type} investor's "
         f"portfolio with a {time_horizon}-term horizon.\n\n"
@@ -1748,6 +1783,7 @@ def generate_review_recommendations(enriched_holdings, investor_type, time_horiz
         f"{'Be conservative. Prefer HOLD over BUY MORE, SELL sooner on red flags.' if investor_type == 'defensive' else 'Balance risk and reward.' if investor_type == 'balanced' else 'Tolerate volatility. HOLD through short-term drops if moat is intact.'}\n\n"
         f"{user_context}"
         f"{macro_context}"
+        f"{stats_context}"
         f"{holdings_text}\n\n"
         f"Respond ONLY with a JSON array (no markdown, no backticks, no preamble). Each element:\n"
         f'{{"ticker": "TICKER.NS", "action": "HOLD", "sell_qty": 0, "reasoning": "2-3 sentences grounded in Graham/Greenblatt/Dorsey.", "confidence": "high"}}\n'
@@ -8250,6 +8286,46 @@ elif st.session_state.sb_view_mode == "portfolios":
                                         _np = goal_data.get("needed_points", [])
                                         _ga = port["target_amount"]
                                         _gf = go.Figure()
+
+                                        # Sprint 12: probability FAN behind the deterministic line.
+                                        # Replaces the illusion of one certain path with a p10-p90
+                                        # band from a block-bootstrap of real Nifty months. The
+                                        # confidence caveat rides in the title, inseparable.
+                                        _fan_title = None
+                                        try:
+                                            import stats as _kstats
+                                            _months = goal_data.get("months_remaining") or len(_cp)
+                                            _dist = _kstats.project_goal_distribution(
+                                                _pdf_cur_val, port.get("sip_amount", 0),
+                                                port["target_amount"], _months)
+                                            if _dist and _dist.get("fan"):
+                                                _fan = _dist["fan"]
+                                                _step = _dist.get("fan_step_months", 1)
+                                                _base = _cp[0]["date"]
+                                                _fdates = [_add_months(_base, (i + 1) * _step)
+                                                           for i in range(len(_fan["p50"]))]
+                                                # upper (p90) then lower (p10) with fill between
+                                                _gf.add_trace(go.Scatter(
+                                                    x=_fdates, y=_fan["p90"], mode="lines",
+                                                    line=dict(width=0), showlegend=False,
+                                                    hoverinfo="skip"))
+                                                _gf.add_trace(go.Scatter(
+                                                    x=_fdates, y=_fan["p10"], mode="lines",
+                                                    line=dict(width=0), fill="tonexty",
+                                                    fillcolor="rgba(29,78,216,0.12)",
+                                                    name="10th-90th percentile",
+                                                    hoverinfo="skip"))
+                                                _ph = _dist.get("prob_hit_target")
+                                                _conf = _dist.get("confidence_note", "")
+                                                _pht = (f"{_ph*100:.0f}% chance of reaching "
+                                                        f"Rs.{port['target_amount']:,.0f}"
+                                                        if _ph is not None else "")
+                                                _fan_title = ("If your portfolio behaves like the "
+                                                              f"{_dist.get('benchmark','index')}: "
+                                                              f"{_pht}. {_conf}")
+                                        except Exception as _fe:
+                                            print(f"Goal fan skipped (non-blocking): {type(_fe).__name__}: {_fe}")
+
                                         _gf.add_trace(go.Scatter(
                                             x=[_cp[0]["date"], _cp[-1]["date"]], y=[_ga, _ga],
                                             line=dict(color="#10B981", width=1.5, dash="dot"), name="Goal"))
@@ -8261,9 +8337,10 @@ elif st.session_state.sb_view_mode == "portfolios":
                                             x=[p["date"] for p in _cp], y=[p["value"] for p in _cp],
                                             line=dict(color="#1D4ED8", width=2), name="Projected"))
                                         _gf.update_layout(
-                                            margin=dict(l=10, r=10, t=30, b=10), height=280, width=800,
+                                            margin=dict(l=10, r=10, t=(46 if _fan_title else 30), b=10), height=280, width=800,
                                             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                                             yaxis=dict(tickprefix="Rs.", tickformat=","),
+                                            title=(dict(text=_fan_title, font=dict(size=9), x=0.0, xanchor="left") if _fan_title else None),
                                             plot_bgcolor="white", paper_bgcolor="white")
                                         goal_chart_buf = _plotly_to_png(_gf, width=800, height=280)
  
