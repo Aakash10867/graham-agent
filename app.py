@@ -706,9 +706,24 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
     if _beta is not None or _sharpe is not None or _div_score is not None:
         _div_hex = "#16A34A" if _div_score and _div_score >= 70 else "#F59E0B" if _div_score and _div_score >= 40 else "#DC2626"
         _sharpe_hex = "#16A34A" if _sharpe and _sharpe > 0 else "#DC2626"
+        # Sprint 12: show the honest band, not a false-precise point. The band
+        # narrows as history accrues; day-count kept inseparable from the value.
+        _s_lo = portfolio.get("sharpe_low")
+        _s_hi = portfolio.get("sharpe_high")
+        _s_days = portfolio.get("metrics_history_days")
+        if _sharpe is not None and _s_lo is not None and _s_hi is not None:
+            _sharpe_val = f"{_s_lo:.1f} … {_s_hi:.1f}"
+            _sharpe_sub = f"{_s_days}d" if _s_days else ""
+        elif _sharpe is not None:
+            _sharpe_val = f"{_sharpe:.2f}"
+            _sharpe_sub = ""
+        else:
+            _sharpe_val = "—"
+            _sharpe_sub = ""
+        _sharpe_label = "Sharpe (range)" if _s_lo is not None else "Sharpe Ratio"
         kpi_row3 = [
             _kpi("Portfolio Beta (β)", f"{_beta:.2f}" if _beta is not None else "—"),
-            _kpi("Sharpe Ratio", f"{_sharpe:.2f}" if _sharpe is not None else "—", _sharpe_hex if _sharpe is not None else "#0F172A"),
+            _kpi(_sharpe_label, (f"{_sharpe_val}  ({_sharpe_sub})" if _sharpe_sub else _sharpe_val), _sharpe_hex if _sharpe is not None else "#0F172A"),
             _kpi("Diversification", f"{_div_score}/100" if _div_score is not None else "—", _div_hex if _div_score is not None else "#0F172A"),
         ]
         kpi_data.append(kpi_row3)
@@ -947,6 +962,11 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
     if any(v is not None for v in [_sortino, _treynor, _jensen, _ir, _drawdown, _capm]):
         story.append(Paragraph("Risk & Performance Metrics", s_heading))
         _metrics_text = ""
+        _mhd = portfolio.get("metrics_history_days")
+        if _mhd is not None:
+            _metrics_text += (f"Computed from {_mhd} days of price history. Ranges "
+                              f"narrow as more history accrues — a wider band means "
+                              f"a shorter track record, not a worse portfolio. ")
         if _capm is not None:
             _metrics_text += f"CAPM expected return: {_capm*100:.1f}% p.a. "
         if _jensen is not None:
@@ -954,9 +974,19 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
             _alpha_label = "outperforming" if _jensen >= 0 else "underperforming"
             _metrics_text += f"Jensen's Alpha: {_sign}{_jensen*100:.1f}% ({_alpha_label} risk-adjusted expectation). "
         if _sortino is not None:
-            _metrics_text += f"Sortino ratio: {_sortino:.2f} (downside-risk-adjusted). "
+            _so_lo = portfolio.get("sortino_low")
+            _so_hi = portfolio.get("sortino_high")
+            if _so_lo is not None and _so_hi is not None:
+                _metrics_text += f"Sortino ratio: {_so_lo:.2f} to {_so_hi:.2f} (downside-risk-adjusted). "
+            else:
+                _metrics_text += f"Sortino ratio: {_sortino:.2f} (downside-risk-adjusted). "
         if _treynor is not None:
-            _metrics_text += f"Treynor ratio: {_treynor:.4f}. "
+            _tr_lo = portfolio.get("treynor_low")
+            _tr_hi = portfolio.get("treynor_high")
+            if _tr_lo is not None and _tr_hi is not None:
+                _metrics_text += f"Treynor ratio: {_tr_lo:.4f} to {_tr_hi:.4f}. "
+            else:
+                _metrics_text += f"Treynor ratio: {_treynor:.4f}. "
         if _ir is not None:
             _metrics_text += f"Information ratio: {_ir:.2f}. "
         if _drawdown is not None:
