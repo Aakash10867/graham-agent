@@ -706,24 +706,9 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
     if _beta is not None or _sharpe is not None or _div_score is not None:
         _div_hex = "#16A34A" if _div_score and _div_score >= 70 else "#F59E0B" if _div_score and _div_score >= 40 else "#DC2626"
         _sharpe_hex = "#16A34A" if _sharpe and _sharpe > 0 else "#DC2626"
-        # Sprint 12: show the honest band, not a false-precise point. The band
-        # narrows as history accrues; day-count kept inseparable from the value.
-        _s_lo = portfolio.get("sharpe_low")
-        _s_hi = portfolio.get("sharpe_high")
-        _s_days = portfolio.get("metrics_history_days")
-        if _sharpe is not None and _s_lo is not None and _s_hi is not None:
-            _sharpe_val = f"{_s_lo:.1f} … {_s_hi:.1f}"
-            _sharpe_sub = f"{_s_days}d" if _s_days else ""
-        elif _sharpe is not None:
-            _sharpe_val = f"{_sharpe:.2f}"
-            _sharpe_sub = ""
-        else:
-            _sharpe_val = "—"
-            _sharpe_sub = ""
-        _sharpe_label = "Sharpe (range)" if _s_lo is not None else "Sharpe Ratio"
         kpi_row3 = [
             _kpi("Portfolio Beta (β)", f"{_beta:.2f}" if _beta is not None else "—"),
-            _kpi(_sharpe_label, (f"{_sharpe_val}  ({_sharpe_sub})" if _sharpe_sub else _sharpe_val), _sharpe_hex if _sharpe is not None else "#0F172A"),
+            _kpi("Sharpe Ratio", f"{_sharpe:.2f}" if _sharpe is not None else "—", _sharpe_hex if _sharpe is not None else "#0F172A"),
             _kpi("Diversification", f"{_div_score}/100" if _div_score is not None else "—", _div_hex if _div_score is not None else "#0F172A"),
         ]
         kpi_data.append(kpi_row3)
@@ -962,11 +947,6 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
     if any(v is not None for v in [_sortino, _treynor, _jensen, _ir, _drawdown, _capm]):
         story.append(Paragraph("Risk & Performance Metrics", s_heading))
         _metrics_text = ""
-        _mhd = portfolio.get("metrics_history_days")
-        if _mhd is not None:
-            _metrics_text += (f"Computed from {_mhd} days of price history. Ranges "
-                              f"narrow as more history accrues — a wider band means "
-                              f"a shorter track record, not a worse portfolio. ")
         if _capm is not None:
             _metrics_text += f"CAPM expected return: {_capm*100:.1f}% p.a. "
         if _jensen is not None:
@@ -974,19 +954,9 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
             _alpha_label = "outperforming" if _jensen >= 0 else "underperforming"
             _metrics_text += f"Jensen's Alpha: {_sign}{_jensen*100:.1f}% ({_alpha_label} risk-adjusted expectation). "
         if _sortino is not None:
-            _so_lo = portfolio.get("sortino_low")
-            _so_hi = portfolio.get("sortino_high")
-            if _so_lo is not None and _so_hi is not None:
-                _metrics_text += f"Sortino ratio: {_so_lo:.2f} to {_so_hi:.2f} (downside-risk-adjusted). "
-            else:
-                _metrics_text += f"Sortino ratio: {_sortino:.2f} (downside-risk-adjusted). "
+            _metrics_text += f"Sortino ratio: {_sortino:.2f} (downside-risk-adjusted). "
         if _treynor is not None:
-            _tr_lo = portfolio.get("treynor_low")
-            _tr_hi = portfolio.get("treynor_high")
-            if _tr_lo is not None and _tr_hi is not None:
-                _metrics_text += f"Treynor ratio: {_tr_lo:.4f} to {_tr_hi:.4f}. "
-            else:
-                _metrics_text += f"Treynor ratio: {_treynor:.4f}. "
+            _metrics_text += f"Treynor ratio: {_treynor:.4f}. "
         if _ir is not None:
             _metrics_text += f"Information ratio: {_ir:.2f}. "
         if _drawdown is not None:
@@ -9530,133 +9500,196 @@ elif st.session_state.sb_view_mode == "settings":
 # DOES IT WORK? VIEW (Sprint 6)
 # ──────────────────────────────────────────────
 elif st.session_state.sb_view_mode == "backtest":
+    # ──────────────────────────────────────────────
+    # DOES IT WORK? (Sprint 12 — honest clock, not a fabricated backtest)
+    # ──────────────────────────────────────────────
+    # The old version rendered a strategy-vs-Nifty CAGR chart from a backtest
+    # that CANNOT exist yet: the point-in-time archive is days old, and a
+    # durable-business thesis cannot be judged on weeks of forward returns.
+    # This page tells that truth structurally: it opens with the count (starting
+    # near zero) and the DATE the numbers start to mean something, then shows the
+    # things that ARE measurable today — descriptive facts about the scorer,
+    # each labelled as description, never as a performance claim.
+    import json as _json
+    import datetime as _dtm
+
     st.markdown("### 📊 Does It Work?")
-    st.caption("Retrospective backtest of Kordent's 5-framework scoring system")
 
-    # Try to load backtest results
+    CLOCK_START = _dtm.date(2026, 7, 10)   # dividend + trajectory_pass fixes landed
+    SIGNAL_COHORTS = 6                      # ~6 monthly cohorts for a first hint
+    TRADING_PER_MONTH = 21
+
+    # ── The clock ────────────────────────────────────────────────────────
+    clean_snaps = 0
+    last_snap = None
     try:
-        bt_df = pd.read_csv("backtest_results.csv")
-        has_results = len(bt_df) >= 2
+        with open("archive_manifest.json") as _mf:
+            _recs = _json.load(_mf)
+        _clean = [r for r in _recs
+                  if r.get("schema_version", 0) >= 1
+                  and str(r.get("date", "")) >= CLOCK_START.isoformat()]
+        clean_snaps = len(_clean)
+        if _clean:
+            last_snap = _clean[-1].get("date")
     except Exception:
-        bt_df = None
-        has_results = False
+        clean_snaps = 0
 
-    if not has_results:
-        st.info("Backtest results not yet available. The backtest runs via GitHub Actions (manual trigger).")
-        st.markdown("""
-        **What this will show:**
-        - Strategy vs Nifty 50 performance chart
-        - CAGR, alpha, max drawdown statistics
-        - Full methodology with honest disclaimers
-
-        **How it works:**
-        - Universe: Nifty 200 constituents
-        - Strategy: Top 15 stocks by 5-framework composite score
-        - Rebalance: Quarterly (Jan/Apr/Jul/Oct)
-        - Benchmark: Nifty 50 buy-and-hold
-        - Starting capital: ₹10,00,000
-        """)
+    _days_elapsed = (_dtm.date.today() - CLOCK_START).days
+    _snaps_needed = SIGNAL_COHORTS * TRADING_PER_MONTH
+    _snaps_left = max(0, _snaps_needed - clean_snaps)
+    # Projection basis: the archive commits ~1/weekday, a KNOWN cadence. Only
+    # trust the *observed* accrual rate once there's enough of it (>= 15 snaps);
+    # before that the observed rate is noise and would wildly mis-project.
+    _known_rate = TRADING_PER_MONTH / 30.0            # ~0.7 snapshots/calendar-day
+    if clean_snaps >= 15 and _days_elapsed > 0:
+        _rate = clean_snaps / _days_elapsed
     else:
-        bt_df["date"] = pd.to_datetime(bt_df["date"])
-        start_val = bt_df["portfolio_value"].iloc[0]
-        end_val = bt_df["portfolio_value"].iloc[-1]
-        bench_end = bt_df["benchmark_value"].iloc[-1]
-        start_date = bt_df["date"].iloc[0]
-        end_date = bt_df["date"].iloc[-1]
-        years = (end_date - start_date).days / 365.25
+        _rate = _known_rate
+    _days_to_signal = int(_snaps_left / _rate) if _rate > 0 else None
+    _signal_date = (_dtm.date.today() + _dtm.timedelta(days=_days_to_signal)) if _days_to_signal is not None else None
 
-        total_return = (end_val / start_val - 1) * 100
-        bench_return = (bench_end / start_val - 1) * 100
+    st.markdown(
+        "**We can't yet tell you whether this works — and we won't pretend to.**  \n"
+        "A strategy that asks you to hold quality businesses for years cannot be "
+        "judged on a few weeks of data. So instead of a fabricated backtest, here "
+        "is exactly where the real evidence stands today, and the date it starts "
+        "to mean something.")
 
-        if years > 0:
-            strategy_cagr = ((end_val / start_val) ** (1 / years) - 1) * 100
-            benchmark_cagr = ((bench_end / start_val) ** (1 / years) - 1) * 100
-            alpha = strategy_cagr - benchmark_cagr
+    _c1, _c2, _c3 = st.columns(3)
+    with _c1:
+        st.metric("Clean daily snapshots", f"{clean_snaps}",
+                  help="Point-in-time archives of the whole universe, scored by "
+                       "the current (post-fix) system. This is the raw material "
+                       "for an honest backtest. It grows by one every weekday.")
+    with _c2:
+        st.metric("First signal at", f"{_snaps_needed} snapshots",
+                  delta=f"{_snaps_left} to go" if _snaps_left else "reached",
+                  delta_color="off",
+                  help=f"~{SIGNAL_COHORTS} independent monthly cohorts — the "
+                       "minimum to distinguish the ranking from luck.")
+    with _c3:
+        st.metric("Projected date",
+                  _signal_date.strftime("%b %Y") if _signal_date else "—",
+                  help="Extrapolated from how fast snapshots are actually "
+                       "accruing. Moves earlier as the archive fills.")
+
+    if clean_snaps == 0:
+        st.info("The clock starts at zero on purpose. Every screener on the "
+                "internet claims backtested alpha. We're showing you the archive "
+                "filling up in real time instead.")
+    st.caption(f"Clock started {CLOCK_START.strftime('%d %b %Y')}"
+               + (f" · last snapshot {last_snap}" if last_snap else ""))
+
+    st.divider()
+
+    # ── What we CAN say today: descriptive stats about the scorer ────────
+    st.markdown("#### What we can measure today")
+    st.caption("These describe the **scorer** — how it sorts the market right "
+               "now. None of them is a claim about returns; that needs the clock "
+               "above to fill. A base rate is how often a test fires, never "
+               "whether firing predicts profit.")
+
+    try:
+        import stats as _kstats
+        _udf = globals().get("universe_df")
+        if _udf is not None and len(_udf):
+            _us = _kstats.compute_universe_stats(_udf)
+
+            # base rates
+            _br = _us.get("base_rates", {})
+            if _br:
+                st.markdown("**How selective each framework is**")
+                _spread = _us.get("base_rate_spread", {})
+                _rows = "".join(
+                    f"| {v['label']} | {v['pass_rate']*100:.1f}% | {v['pass_count']:,} |\n"
+                    for v in _br.values())
+                st.markdown(
+                    "| Framework | Passes | Count |\n|---|---|---|\n" + _rows)
+                if _spread:
+                    st.caption(
+                        f"The rarest test ({_br.get(_spread.get('rarest',''),{}).get('label','')}) "
+                        f"fires {_spread.get('ratio','?')}× less often than the "
+                        f"commonest. Rarity is not merit — it's shown so you can "
+                        f"see how much each filter actually removes.")
+
+            # correlation cluster — the real finding
+            _cl = _us.get("least_orthogonal_pair", {})
+            _cluster = _us.get("correlated_cluster", [])
+            if _cl and _cl.get("labels"):
+                _a, _b = _cl["labels"]
+                st.markdown("**Are the five frameworks independent?**")
+                st.markdown(
+                    f"Mostly — but not entirely. **{_a}** and **{_b}** tend to "
+                    f"pass the same stocks (φ = {_cl.get('phi')}). "
+                    + (f"They're part of a cluster of {len(_cluster)} correlated "
+                       f"pairs. " if len(_cluster) > 1 else "")
+                    + "That matters: a stock clearing three *correlated* tests is "
+                      "a weaker signal than one clearing three *independent* ones. "
+                      "We'd rather you know that than hide it.")
+
+            # score pyramid — why 2/5 and 3/5 matter
+            _sd = _us.get("score_distribution", {})
+            if _sd:
+                st.markdown("**How the whole market scores (0–5)**")
+                import plotly.graph_objects as _go
+                _fig = _go.Figure(_go.Bar(
+                    x=[str(k) for k in _sd.keys()],
+                    y=list(_sd.values()),
+                    marker_color="#1D4ED8"))
+                _fig.update_layout(
+                    height=240, margin=dict(l=10, r=10, t=10, b=10),
+                    xaxis_title="Score", yaxis_title="Stocks",
+                    plot_bgcolor="white", paper_bgcolor="white")
+                st.plotly_chart(_fig, use_container_width=True, key="diw_score_dist")
+                _top = _sd.get(4, 0) + _sd.get(5, 0)
+                _mid = _sd.get(2, 0) + _sd.get(3, 0)
+                st.caption(
+                    f"Only {_top:,} stocks score 4 or 5 — any screener can find "
+                    f"those. The {_mid:,} stocks at 2 and 3 are where matching the "
+                    f"right business to the right investor actually earns its keep.")
+
+            # trajectory cliff
+            _tc = _us.get("trajectory_cliff", {})
+            if _tc and _tc.get("at_boundary"):
+                st.markdown("**A known rough edge**")
+                st.markdown(
+                    f"The Trajectory gate is a hard cut at {_tc['gate']}. "
+                    f"**{_tc['at_boundary']:,} stocks sit at exactly "
+                    f"{_tc['boundary_score']}** — one point short — versus "
+                    f"{_tc['passing']:,} that clear it. That's a cliff, not a "
+                    f"slope, and it's on our list to revisit. We show our sharp "
+                    f"edges, not just our clean ones.")
         else:
-            strategy_cagr = benchmark_cagr = alpha = 0.0
+            st.warning("Universe not loaded — descriptive stats unavailable.")
+    except Exception as _e:
+        st.warning(f"Descriptive stats unavailable: {type(_e).__name__}: {_e}")
 
-        # Max drawdown
-        peak = bt_df["portfolio_value"].expanding().max()
-        drawdown = (bt_df["portfolio_value"] - peak) / peak * 100
-        max_dd = drawdown.min()
+    st.divider()
 
-        # ── Stats Cards ──
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            st.metric("Strategy CAGR", f"{strategy_cagr:.1f}%")
-        with c2:
-            st.metric("Nifty 50 CAGR", f"{benchmark_cagr:.1f}%")
-        with c3:
-            st.metric("Alpha", f"{alpha:+.1f}%")
-        with c4:
-            st.metric("Max Drawdown", f"{max_dd:.1f}%")
+    # ── What we CAN'T say yet, and why ───────────────────────────────────
+    with st.expander("Why isn't there a backtest here yet?"):
+        st.markdown("""
+A backtest needs two things we don't yet have honestly:
 
-        st.divider()
+**Point-in-time data.** To ask "what would this have picked in 2023, and how did
+it do?", we need the scores *as they were then* — not today's numbers applied to
+the past, which is look-ahead, not a test. That archive only started
+accumulating cleanly on **10 July 2026**, the day two scoring bugs were fixed.
+It grows one snapshot per weekday. The counter above is that archive filling up.
 
-        # ── Performance Chart ──
-        import plotly.graph_objects as go
+**A horizon that matches the thesis.** Kordent asks you to hold durable
+businesses for years. A one-month forward return says nothing about that — it
+measures one-month momentum, a different and arguably worse question. The first
+*hint* about the ranking arrives at roughly six monthly cohorts; a defensible
+answer takes about a year.
 
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=bt_df["date"], y=bt_df["portfolio_value"],
-            mode="lines+markers", name="Kordent Strategy",
-            line=dict(color="#2E86AB", width=2),
-        ))
-        fig.add_trace(go.Scatter(
-            x=bt_df["date"], y=bt_df["benchmark_value"],
-            mode="lines+markers", name="Nifty 50",
-            line=dict(color="#A23B72", width=2, dash="dash"),
-        ))
-        fig.update_layout(
-            title="Strategy vs Nifty 50 (₹10L starting capital)",
-            xaxis_title="Date",
-            yaxis_title="Portfolio Value (₹)",
-            yaxis_tickformat=",.0f",
-            template="plotly_white",
-            height=450,
-            legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
-        )
-        st.plotly_chart(fig, use_container_width=True, key="backtest_chart")
+**On free data, the past can't be bought back.** Reconstructing history from
+free financial feeds fails on restatement (today's numbers aren't what was
+filed then) and the four-year data window. So we wait, with a clean clock,
+rather than ship a number that looks precise and means nothing.
 
-        # ── Return Summary ──
-        st.markdown(f"""
-        **Period:** {start_date.strftime('%b %Y')} → {end_date.strftime('%b %Y')} ({years:.1f} years)
-
-        | | Strategy | Nifty 50 |
-        |---|---|---|
-        | Starting Capital | ₹{start_val:,.0f} | ₹{start_val:,.0f} |
-        | Ending Value | ₹{end_val:,.0f} | ₹{bench_end:,.0f} |
-        | Total Return | {total_return:+.1f}% | {bench_return:+.1f}% |
-        | CAGR | {strategy_cagr:.1f}% | {benchmark_cagr:.1f}% |
-        """)
-
-        # ── Trades History ──
-        try:
-            trades_df = pd.read_csv("backtest_trades.csv")
-            with st.expander("📋 Trade History"):
-                st.dataframe(trades_df, use_container_width=True)
-        except Exception:
-            pass
-
-        # ── Methodology ──
-        with st.expander("📖 Methodology & Disclaimers"):
-            st.markdown("""
-            **Strategy Rules:**
-            - Score stocks using 5 frameworks: Graham, Greenblatt, Dorsey+Buffett, Trajectory, Lynch
-            - Quality gate: accruals ratio < 0.10, manipulation score ≤ 3/10, ECM trend stable
-            - Select top 15 stocks by composite score (0-5)
-            - Equal-weight allocation, quarterly rebalance
-            - 6-month publication lag to prevent look-ahead bias
-
-            **Honest Disclaimers:**
-            - ⚠ **Retrospective reconstruction** — this is NOT a live track record
-            - Uses current Nifty 200 constituent list (survivorship bias present)
-            - Financial data from yfinance (4 years); longer history would improve accuracy
-            - Transaction costs and slippage not modeled
-            - Past performance does not guarantee future results
-
-            **Prospective tracking:**
-            Live score_history has been accumulating since [launch date].
-            Once sufficient data exists, prospective results will be shown separately
-            with clear distinction from retrospective results.
-            """)
+When the clock is ready, this page will show the one test that matters: does the
+ranking beat picking blindly from the same stocks that already cleared the
+filters? Both sides drawn from the same universe, so survivorship bias cancels.
+Until then, zero — honestly.
+""")
