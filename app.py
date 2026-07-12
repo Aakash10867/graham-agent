@@ -4373,7 +4373,7 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str,
         if len(_tk) >= 2:
             _end = datetime.date.today()
             _start = _end - datetime.timedelta(days=365)
-            print(f"[BUILD] price_download_start: {len(_tk)} tickers", flush=True)
+            print(f"[BUILD] price_download_start: {len(_tk)} tickers", file=sys.stderr, flush=True)
             _hist = yf.download(_tk, start=_start.strftime("%Y-%m-%d"),
                                 end=_end.strftime("%Y-%m-%d"), progress=False,
                                 auto_adjust=True, group_by="column")
@@ -4388,9 +4388,9 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str,
         # substitute a stale frame.
         print(f"Price history unavailable, selecting without covariance: {_e}")
 
-    print("[BUILD] price_stage_done; entering selector", flush=True)
+    print("[BUILD] price_stage_done; entering selector", file=sys.stderr, flush=True)
     result = selector.select_portfolio(universe_df, policy, _price_history)
-    print(f"[BUILD] select_done: {len(result.get('holdings', []))} holdings", flush=True)
+    print(f"[BUILD] select_done: {len(result.get('holdings', []))} holdings", file=sys.stderr, flush=True)
 
     # ── Firm-distress gate
     # Asymmetric by design: dropping a candidate at build time is cheap and
