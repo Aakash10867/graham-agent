@@ -9,19 +9,7 @@ construction, systematic risk minimization, and macro-aware monitoring.
 Streamlit web app with Gemini LLM, ChromaDB RAG, and yfinance tools.
 """
 
-# --- SQLITE PATCH FOR STREAMLIT CLOUD ---
-# ChromaDB needs sqlite >= 3.35; Streamlit Cloud's system sqlite3 is older, so we
-# swap pysqlite3-binary in when present. A missing pysqlite3 must NOT take the
-# whole app down at boot — degrade to system sqlite3 and let RAG fail where it's
-# actually used, not at import time.
-try:
-    __import__('pysqlite3')
-    import sys
-    sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
-except ModuleNotFoundError:
-    import sys
-    print("WARN: pysqlite3 unavailable — falling back to system sqlite3; RAG may be degraded.")
-# ----------------------------------------
+import sys
 
 import os
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
