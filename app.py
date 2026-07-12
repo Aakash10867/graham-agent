@@ -2230,6 +2230,16 @@ def _commit_portfolio(portfolio: dict) -> dict:
         allocated, unallocated = allocate_shares(stocks_for_alloc, portfolio["sip_amount"])
         
         # BULK INSERT HOLDINGS
+        # Recover the deterministic entry thesis. select_portfolio stashed the full
+        # holdings (each carrying _trace) at _last_candidates; join by ticker so the
+        # recorded REASON a stock was bought is persisted verbatim and out of the
+        # LLM's hands. A manually-added ticker absent from the last selection gets
+        # null — diff_thesis treats that as "no_trace" and skips it, never crashes.
+        _trace_by_ticker = {
+            h.get("ticker"): h.get("_trace")
+            for h in (st.session_state.get("_last_candidates") or [])
+            if h.get("ticker")
+        }
         holdings_data = []
         for s in allocated:
             holdings_data.append({
@@ -2237,6 +2247,7 @@ def _commit_portfolio(portfolio: dict) -> dict:
                 "sector": s["sector"], "allocation_pct": s["allocation_pct"], "shares": s["shares"],
                 "sip_amount_inr": s["actual_amount"], "price_at_entry": s["price"],
                 "pe_at_entry": s["pe"], "roe_at_entry": s["roe"], "score_at_entry": s["score"],
+                "entry_trace": _sanitize_for_json(_trace_by_ticker.get(s["ticker"])),
             })
             
         if holdings_data:
