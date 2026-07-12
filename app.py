@@ -7499,7 +7499,23 @@ elif st.session_state.sb_view_mode == "build_result":
                 "Alloc %": _s.get("allocation_pct", ""),
                 "Why": _expl.get(_s["ticker"], ""),
             })
-        st.dataframe(_pd.DataFrame(_rows), width="stretch", hide_index=True)
+        # Render as Markdown, NOT st.dataframe. st.dataframe serializes every
+        # column through pyarrow, and pyarrow 25.0.0 on the Cloud runtime
+        # segfaults (native, uncatchable) inside pandas_compat.convert_column
+        # on this table — confirmed by the faulthandler dump. A segfault can't
+        # be caught, so the only reliable fix is to not call the crashing path.
+        # Markdown touches no pyarrow. Cells are scrubbed of invalid unicode
+        # (lone surrogates from LLM 'Why' text) and pipe/newline chars.
+        def _md_cell(_v):
+            _t = "" if _v is None else str(_v)
+            _t = _t.encode("utf-8", "replace").decode("utf-8")
+            return _t.replace("|", "\\|").replace("\n", " ").strip()
+        _cols = ["Stock", "Ticker", "Sector", "Score", "Alloc %", "Why"]
+        _md = "| " + " | ".join(_cols) + " |\n"
+        _md += "| " + " | ".join(["---"] * len(_cols)) + " |\n"
+        for _row in _rows:
+            _md += "| " + " | ".join(_md_cell(_row[_c]) for _c in _cols) + " |\n"
+        st.markdown(_md)
 
         # ── Shortfall disclosure at DECISION time (before saving) ──
         # If the deterministic selector could not reach the IPS target even from
