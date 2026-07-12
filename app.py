@@ -14,6 +14,9 @@ import sys
 import os
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
+import faulthandler
+faulthandler.enable()  # SIGSEGV → dump the Python stack at the crash site to stderr (Cloud logs)
+
 from supabase import create_client
 import datetime
 import streamlit as st
