@@ -37,6 +37,24 @@ import verdict_engine
 import deep_metrics
 import selector
 
+# One-time environment fingerprint → stderr (Cloud reliably captures stderr at
+# boot, unlike stdout). Reveals the exact resolved native stack so an ABI
+# mismatch (e.g. a pyarrow built against a different numpy) is visible without
+# needing to capture a post-build crash.
+try:
+    import pyarrow as _pa
+    _pa_v = _pa.__version__
+except Exception as _e:
+    _pa_v = f"MISSING({_e})"
+try:
+    import curl_cffi as _cc
+    _cc_v = _cc.__version__
+except Exception as _e:
+    _cc_v = f"MISSING({_e})"
+print(f"[ENV] python={sys.version.split()[0]} pandas={pd.__version__} "
+      f"numpy={np.__version__} pyarrow={_pa_v} curl_cffi={_cc_v} "
+      f"streamlit={st.__version__}", file=sys.stderr, flush=True)
+
 SECTOR_INDEX_MAP = {
     "Technology": "^CNXIT",
     "Financial Services": "^NSEBANK",
