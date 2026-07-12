@@ -4367,32 +4367,54 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str,
     # ── Price history for the staleness filter and the covariance tiebreak ──
     # Only for Tier-1 survivors. investable_tickers() applies the SAME floor the
     # selector will, so the turnover threshold lives in exactly one place.
+    #
+    # Batched + single-threaded ON PURPOSE. One yf.download of 250 tickers fans
+    # curl_cffi across many threads and peaks memory assembling one wide frame.
+    # Both are fine on a dev box but are exactly the two things that differ on
+    # the 1 GB Linux container where the build segfaulted: curl_cffi's threaded
+    # native path (different backend than Windows) and a memory spike. Chunks of
+    # 50 with threads off, concatenated on the date index: identical data, flat
+    # memory, no concurrent native calls.
     _price_history = None
     try:
         _tk = selector.investable_tickers(universe_df, sip_amount, _avoid, limit=250)
         if len(_tk) >= 2:
             _end = datetime.date.today()
             _start = _end - datetime.timedelta(days=365)
-            print(f"[BUILD] price_download_start: {len(_tk)} tickers", file=sys.stderr, flush=True)
-            _hist = yf.download(_tk, start=_start.strftime("%Y-%m-%d"),
-                                end=_end.strftime("%Y-%m-%d"), progress=False,
-                                auto_adjust=True, group_by="column")
-            if not _hist.empty:
-                _c = _hist["Close"]
-                if isinstance(_c, pd.Series):
-                    _c = _c.to_frame(_tk[0])
-                _price_history = _c
+            print(f"[BUILD] price_download_start: {len(_tk)} tickers (batched, threads off)",
+                  file=sys.stderr, flush=True)
+            _closes = []
+            for _i in range(0, len(_tk), 50):
+                _batch = _tk[_i:_i + 50]
+                _h = yf.download(_batch, start=_start.strftime("%Y-%m-%d"),
+                                 end=_end.strftime("%Y-%m-%d"), progress=False,
+                                 auto_adjust=True, group_by="column", threads=False)
+                if _h is None or _h.empty:
+                    continue
+                _cl = _h["Close"] if "Close" in _h else _h
+                if isinstance(_cl, pd.Series):
+                    _cl = _cl.to_frame(_batch[0])
+                _closes.append(_cl)
+                print(f"[BUILD]   batch {_i // 50 + 1}: {len(_batch)} tickers -> {_cl.shape}",
+                      file=sys.stderr, flush=True)
+            if _closes:
+                _price_history = pd.concat(_closes, axis=1)
+            print(f"[BUILD] price_download_done: "
+                  f"{None if _price_history is None else _price_history.shape}",
+                  file=sys.stderr, flush=True)
     except Exception as _e:
         # Non-blocking. Without prices the selector skips staleness and the
         # correlation tiebreak; the merit ranking is unaffected. Never silently
         # substitute a stale frame.
-        print(f"Price history unavailable, selecting without covariance: {_e}")
+        print(f"Price history unavailable, selecting without covariance: {_e}",
+              file=sys.stderr, flush=True)
 
-    print("[BUILD] price_stage_done; entering selector", file=sys.stderr, flush=True)
+    print("[BUILD] entering selector", file=sys.stderr, flush=True)
     result = selector.select_portfolio(universe_df, policy, _price_history)
-    print(f"[BUILD] select_done: {len(result.get('holdings', []))} holdings", file=sys.stderr, flush=True)
+    print(f"[BUILD] select_done: {len(result.get('holdings', []))} holdings",
+          file=sys.stderr, flush=True)
 
-    # ── Firm-distress gate
+    # ── Firm-distress gate ──────────────────────────────────────────────────
     # Asymmetric by design: dropping a candidate at build time is cheap and
     # reversible, so "medium" confidence suffices. Rather than patching a
     # replacement into the finished list (the old code's approach, which could
