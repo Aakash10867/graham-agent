@@ -2,7 +2,7 @@ name: Daily Universe Update
 
 on:
   schedule:
-    - cron: '30 12 * * 1-5'
+    - cron: '30 11 * * 1-5'
   workflow_dispatch:
     inputs:
       skip_universe:
