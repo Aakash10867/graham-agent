@@ -1570,6 +1570,56 @@ def get_nifty_return(days):
     except Exception:
         return None
 
+def _format_thesis_drift(diff):
+    """Render a diff_thesis result as a deterministic drift line — the diff,
+    NOT a fresh explanation. Returns (badge, markdown) or None to skip."""
+    if not diff:
+        return None
+    d = diff.get("drift"); entry = diff.get("entry") or {}; curr = diff.get("current") or {}
+    changes = diff.get("changes") or []
+
+    def _sr(f):
+        r, depth, sec = f.get("rank_in_sector"), f.get("sector_depth"), f.get("sector") or "its sector"
+        return f"#{r} of {depth} in {sec}" if r and depth else None
+
+    if d == "no_trace":
+        return ("neutral", "_No entry thesis on record — bought before drift tracking or added manually._")
+    if d == "no_longer_investable":
+        er = _sr(entry)
+        return ("broken", "**Thesis broken.** Fallen out of the investable pool (turnover/quality floor) — "
+                          "would **not** be bought today." + (f" Entered as {er}." if er else ""))
+    if d == "outranked":
+        er = _sr(entry)
+        return ("weak", "**Outranked.** Still investable, but other names now rank above it — "
+                        "not in today's portfolio." + (f" Entered as {er}." if er else ""))
+
+    lines = []; cr = _sr(curr)
+    if d == "now_merit":
+        lines.append("**Thesis strengthened.** Entered on conviction (merit had left it behind); "
+                     "today it clears the gate on merit.")
+    elif d == "now_conviction":
+        lines.append("**Thesis weakened.** Entered on merit; today it survives only via the conviction sleeve.")
+    else:
+        lines.append("**Thesis intact.** Same basis as at entry.")
+    if cr:
+        lines.append(f"Now {cr}.")
+    for ch in changes:
+        f = ch["field"]
+        if f == "rank_in_sector":
+            (er, ed), (crk, cd) = ch["from"], ch["to"]
+            if er and crk and er != crk:
+                lines.append(f"Sector rank {er}→{crk} (of {cd}).")
+        elif f == "score_applicable":
+            lines.append(f"Passes {ch['from']}→{ch['to']} of its applicable frameworks.")
+        elif f == "newly_passing" and ch["to"]:
+            lines.append(f"Now also passes: {', '.join(ch['to'])}.")
+        elif f == "newly_failing" and ch["to"]:
+            lines.append(f"No longer passes: {', '.join(ch['to'])}.")
+        elif f == "conviction_rank":
+            lines.append(f"Conviction rank {ch['from']}→{ch['to']}.")
+    badge = {"now_merit": "strong", "now_conviction": "weak", "still_selected": "intact"}.get(d, "neutral")
+    return (badge, " ".join(lines))
+
 
 def build_review_context(holdings, port):
     """Gather enriched data per holding: market context, earnings quality, ROE trend, book passage."""
@@ -8872,6 +8922,11 @@ elif st.session_state.sb_view_mode == "portfolios":
                                     st.session_state[f"_macro_diff_{port['id']}"] = {}
 
                                 enriched = build_review_context(holdings, port)
+                                _drift = selector.compute_thesis_drift(
+                                    holdings,
+                                    (port.get("portfolio_profile") or {}).get("ips_policy"),
+                                    universe_df,
+                                )
                                 llm_recs = generate_review_recommendations(
                                     enriched, port.get("investor_type", "balanced"),
                                     port.get("time_horizon", "medium"),
@@ -9030,6 +9085,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                         "_sell_qty": sell_qty, "_holding_id": h["holding_id"],
                                         "_ticker": h["ticker"], "_sector": h["sector"],
                                         "_entry_price": h["entry_price"], "_now_price": h["now_price"],
+                                        "_thesis_drift": _drift.get(h["ticker"]),
                                     })
 
                                 # Auto-run health check during review
@@ -9088,6 +9144,12 @@ elif st.session_state.sb_view_mode == "portfolios":
                             st.success(f"**{r['Stock']}** — {r['Action']}\n\n{r['_reasoning']}")
                         else:
                             st.info(f"**{r['Stock']}** — {r['Action']}\n\n{r['_reasoning']}")
+                        _dfmt = _format_thesis_drift(r.get("_thesis_drift"))
+                        if _dfmt:
+                            _badge, _dmd = _dfmt
+                            _icon = {"broken": "🔴", "weak": "🟠", "strong": "🟢",
+                                     "intact": "🟢", "neutral": "⚪"}.get(_badge, "⚪")
+                            st.markdown(f"{_icon} **Thesis drift** — {_dmd}")
                         matching = next((h for h in enriched_data if h.get("ticker") == r["_ticker"]), None)
                         if matching:
                             flags = matching.get('quality_flags', 'N/A')
