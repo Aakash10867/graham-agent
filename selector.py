@@ -1017,3 +1017,56 @@ def compute_thesis_drift(holdings, policy, universe_df, price_history=None):
                                current_by_ticker.get(tkr),
                                still_investable=(tkr in pool))
     return out
+
+# ══════════════════════════════════════════════════════════════════════════
+# BENCHMARK SELECTION  (Sprint 13 §1)
+#
+# One benchmark per portfolio, matched to the cap profile the IPS MANDATES —
+# not to what the selector picked. Written once at registration and never
+# recomputed: re-deriving at review time is benchmark shopping (a portfolio
+# that drifts small-cap would get re-benchmarked to a small-cap index and
+# suddenly look good), and sip_transactions rows hold units of a SPECIFIC ETF,
+# so switching the ticker later values one ETF's units at another's price.
+#
+# ETFs, not indices: the counterfactual is "what if I'd SIP'd into an index
+# fund", so the benchmark must be a thing that trades — tracking error and
+# expense ratio included. Tickers measured clean (1y history, 0 NaN, current)
+# by probe_benchmark.py on 2026-07-13.
+# ══════════════════════════════════════════════════════════════════════════
+BENCHMARKS = {
+    "nifty50":     {"ticker": "NIFTYBEES.NS",  "label": "Nifty 50"},
+    "midcap150":   {"ticker": "MID150BEES.NS", "label": "Nifty Midcap 150"},
+    "smallcap250": {"ticker": "SMALLCAP.NS",   "label": "Nifty Smallcap 250"},
+}
+
+
+def choose_benchmark(ips_policy: dict) -> dict:
+    """
+    Pick the ONE benchmark ETF whose cap profile matches the IPS mandate.
+    Pure, deterministic. Returns {"ticker", "label", "reason"}: ticker is
+    stored once at registration; label + reason drive the UI line that shows
+    the user WHY, and that it was not chosen after the fact.
+
+    large_pct = mandated large-cap floor; smid_pct = mandated small+micro
+    allowance (micro is always 0). Thresholds per R&B Ch. 25 / the spec:
+      large_pct >= 60  -> Nifty 50            (a majority-large mandate)
+      smid_pct  >= 40  -> Nifty Smallcap 250
+      otherwise        -> Nifty Midcap 150    (the typical Kordent portfolio)
+    """
+    alloc = (ips_policy or {}).get("allocation_policy") or {}
+    large_pct = float(alloc.get("large_cap_min_pct", 30) or 0)
+    smid_pct = float(alloc.get("small_cap_max_pct", 25) or 0)  # + micro (always 0)
+
+    if large_pct >= 60:
+        key = "nifty50"
+        reason = f"your IPS mandates a {large_pct:.0f}% large-cap floor"
+    elif smid_pct >= 40:
+        key = "smallcap250"
+        reason = f"your IPS allows up to {smid_pct:.0f}% small-cap"
+    else:
+        key = "midcap150"
+        reason = (f"a mid-cap-tilted mandate (large-cap floor {large_pct:.0f}%, "
+                  f"small-cap allowance {smid_pct:.0f}%)")
+
+    b = BENCHMARKS[key]
+    return {"ticker": b["ticker"], "label": b["label"], "reason": reason}
