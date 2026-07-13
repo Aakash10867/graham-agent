@@ -8152,6 +8152,80 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 m5.metric(f"vs {_bench['label']}", f"{alpha_simple:+.1f}%", delta=f"{_bench['label']} {nifty_simple:+.1f}%")
                             else:
                                 m5.metric(f"vs {_bench['label']}", "—")
+                            # ── Sprint 13 §3: risk metrics — three a retail SIP
+                            # investor can act on up front, the other eight behind
+                            # a methodology expander, and Jensen's alpha in plain
+                            # English (what a layman means by "is this better than
+                            # the market — or did I just get lucky with small caps?").
+                            _jensen = port.get("jensen_alpha")
+                            _mkt = port.get("market_return")
+                            _dd = port.get("max_drawdown")
+                            _dd_prov = port.get("max_drawdown_provisional")
+                            _sharpe_v = port.get("sharpe_ratio")
+
+                            if _sharpe_v is not None or _dd is not None:
+                                r1, r2 = st.columns(2)
+                                if _sharpe_v is not None:
+                                    r1.metric("Sharpe (risk-adjusted)", f"{_sharpe_v:.2f}",
+                                              help="Return earned per unit of total risk. Above 1 is "
+                                                   "good; negative means the volatility wasn't paid for.")
+                                if _dd is not None:
+                                    if _dd_prov:
+                                        r2.metric("Worst fall so far", f"{_dd*100:.1f}%",
+                                                  help="Short history (under ~6 months) — not yet a "
+                                                       "reliable risk estimate; the real worst fall is "
+                                                       "likely deeper than this.")
+                                        r2.caption("⚠️ short history — provisional")
+                                    else:
+                                        r2.metric("Max drawdown", f"{_dd*100:.1f}%",
+                                                  help="Deepest peak-to-trough fall over the period.")
+
+                            if _jensen is not None:
+                                _jp = _jensen * 100
+                                _dir = "ahead of" if _jp >= 0 else "behind"
+                                _tail = ("Genuine selection edge, if it holds up."
+                                         if _jp >= 0 else "The picks have lagged so far.")
+                                st.caption(
+                                    f"📈 About **{_jp:+.1f} points** {_dir} what your risk level alone "
+                                    f"would predict — the part that came from *which stocks were picked*, "
+                                    f"after stripping out how the market moved and how much risk you took. "
+                                    f"{_tail}"
+                                )
+
+                            _adv = [
+                                ("Portfolio beta (β)", port.get("portfolio_beta"), "{:.2f}",
+                                 "Sensitivity to the market. 1.0 moves with it; below 1 is calmer."),
+                                ("Sortino ratio", port.get("sortino_ratio"), "{:.2f}",
+                                 "Like Sharpe, but penalises only downside volatility."),
+                                ("Treynor ratio", port.get("treynor_ratio"), "{:.4f}",
+                                 "Excess return per unit of market risk. Not directly actionable for a SIP."),
+                                ("Information ratio", port.get("information_ratio"), "{:.2f}",
+                                 "Consistency of out/under-performance vs your assigned benchmark ETF."),
+                                ("CAPM expected return", port.get("capm_expected_return"), "{:.1%}",
+                                 "What the model says you 'should' earn for your beta."),
+                                ("Semi-deviation", port.get("semi_deviation"), "{:.1%}",
+                                 "Volatility of below-average returns only."),
+                                ("Annualised return", port.get("annual_return"), "{:.1%}",
+                                 "Simulated on these holdings' PRIOR year — not this portfolio's own track record yet."),
+                                ("Annualised volatility", port.get("annual_std"), "{:.1%}",
+                                 "Standard deviation of returns, annualised."),
+                            ]
+                            if any(v is not None for _, v, _f, _n in _adv):
+                                with st.expander("Methodology & advanced metrics"):
+                                    for _label, _val, _fmt, _note in _adv:
+                                        if _val is not None:
+                                            st.markdown(f"**{_label}: {_fmt.format(_val)}** — {_note}")
+                                    _rfr = port.get("rfr_used")
+                                    _hd = port.get("metrics_history_days")
+                                    _foot = []
+                                    if _rfr is not None:
+                                        _foot.append(f"risk-free rate used: {_rfr*100:.1f}%")
+                                    if _hd is not None:
+                                        _foot.append(f"history: {_hd} trading days")
+                                    if _foot:
+                                        st.caption(" · ".join(_foot))
+                                    st.caption("Ratios are shown as single points here; the honest "
+                                               "ranges that widen on short history are stored per metric.")
                         else:
                             st.caption(f"Portfolio: ₹{last_val:,.0f} · {days_tracked} days tracked")
 
