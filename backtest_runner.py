@@ -1,589 +1,471 @@
 """
-BACKTEST RUNNER
-===============
-Sprint 6, Phase 4 — Retrospective simulation.
+BACKTEST RUNNER  (Sprint 13 rewrite — point-in-time, archive-driven)
+====================================================================
+Replaces the old yfinance-reconstruction backtest. That approach walked TODAY's
+restated 4-year financials backwards to "reconstruct" past scores; Sprint 12
+established it produces a progressively distorted impostor (restated financials
++ survivorship from a current index list). This runner does the honest thing
+instead: it reads the point-in-time score archive we already commit every
+weekday and measures FORWARD returns.
 
-Uses current yfinance 4Y financials to reconstruct framework scores at
-quarterly decision dates, then tracks portfolio performance vs Nifty 50.
+The question this answers, and the only one it answers:
+    Did the stocks we scored 3+ on a given day go on to beat the benchmark over
+    the following ~quarter — and did the low-scored ones not?
 
-Universe: Nifty 200 constituents (current list as proxy)
-Decision dates: Quarterly (Jan/Apr/Jul/Oct), from earliest usable date
-Publication lag: 6 months (Indian FY ends March; results published ~Sep)
-Strategy: Top 15 stocks by composite score, equal-weight, quarterly rebalance
-Sell rule: Score < 2 OR quality_pass flipped
-Benchmark: Nifty 50 buy-and-hold
-Starting capital: ₹10,00,000
+Method — BUY-AND-HOLD BY ENTRY SCORE (score drift within the horizon is ignored
+on purpose):
+  1. Each clean daily snapshot of universe_scored.csv (read from git history) is
+     a cohort: {ticker -> score} exactly as known on date D. No restatement.
+  2. Bucket the cohort by entry score. Measure each bucket's mean forward return
+     from D to D+HORIZON using real historical prices, held untouched.
+  3. Benchmark = NIFTYBEES buy-and-hold over the same window.
+  4. Aggregate across matured cohorts. A cohort counts only once its horizon has
+     fully elapsed.
 
-Honest framing: This is a RETROSPECTIVE reconstruction using current financials.
-It tells us whether the deep metrics would have been useful, not what we would
-have actually done (survivorship bias from using current Nifty 200 list).
+Honesty, baked in not bolted on:
+  - Until enough MATURED clean cohorts exist, the runner refuses to emit a
+    return claim and reports "insufficient data — first signal ~<date>".
+  - Delisted names with no forward price are dropped and COUNTED; that biases
+    surviving-bucket returns UPWARD, and the output says so.
+  - Reads only the point-in-time snapshot, so there is no current-list
+    survivorship bias — the residual is delisting only.
 
-Output: backtest_results.csv
+Data source (A): git history of universe_scored.csv. Requires the workflow to
+checkout with fetch-depth: 0 (full history), else only today's snapshot exists.
+
+Outputs:
+  backtest_results.csv  — one row per (cohort, score_bucket): forward return,
+                          benchmark return, alpha, n_priced, n_missing.
+  backtest_summary.json — aggregate per-bucket means + status + caveats.
 """
 
 import os
 import sys
+import json
 import math
 import time
-import requests
+import random
+import subprocess
+from datetime import datetime, timedelta, date
+
 import pandas as pd
 import numpy as np
 import yfinance as yf
-from datetime import datetime, timedelta
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
-import deep_metrics
 
 # ─── Config ───
-STARTING_CAPITAL = 10_00_000  # ₹10 lakh
-TOP_N = 15
-MIN_SCORE_TO_HOLD = 2
-NIFTY50_TICKER = "^NSEI"
-NIFTY200_URL = "https://archives.nseindia.com/content/indices/ind_nifty200list.csv"
+ARCHIVE_FILE = "universe_scored.csv"          # the git-versioned snapshot
+MANIFEST_FILE = "archive_manifest.json"       # the clock (clean-snapshot record)
+BENCHMARK = "NIFTYBEES.NS"                     # buyable ETF, consistent with §1
+HORIZON_TRADING_DAYS = 63                      # ~1 quarter; configurable
+PRICE_BUCKETS = [3, 4, 5]                      # priced in full (few names)
+CONTROL_BUCKETS = [0, 1, 2]                    # sampled — control group
+CONTROL_SAMPLE_PER_BUCKET = 100               # cap per control bucket per cohort
+MIN_MATURED_COHORTS = 6                        # below this: "insufficient data"
+MIN_CLEAN_SCHEMA = 1                            # snapshot schema_version floor
+PRICE_CACHE_FILE = "backtest_price_cache.csv"  # immutable historical closes
+FETCH_CHUNK = 40                               # tickers per yfinance batch
+SAMPLE_SEED = 20260713                          # reproducible control sampling
 
-# Quarterly decision dates (1st trading day of each quarter)
-# We go back as far as our 4Y financials allow with 6-month lag
-DECISION_MONTHS = [1, 4, 7, 10]
-
-global_session = requests.Session()
-global_session.headers.update({
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    "Accept": "*/*",
-})
+# Allow a forced research run even when the archive can't be read (e.g. a
+# shallow checkout locally). Never wire this into a committing workflow.
+FORCE = os.environ.get("KORDENT_BACKTEST_FORCE") == "1"
 
 
-# ─── Nifty 200 Fetcher ───
-
-def fetch_nifty200_tickers():
-    """Fetch current Nifty 200 constituent tickers."""
-    tickers = []
-
-    # Try NSE CSV
+# ══════════════════════════════════════════════════════════════════════════
+# 1. READ THE POINT-IN-TIME ARCHIVE FROM GIT HISTORY
+# ══════════════════════════════════════════════════════════════════════════
+def _git(args):
+    """Run a git command, return stdout (str) or None on failure."""
     try:
-        session = requests.Session()
-        session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-            "Accept": "text/html,application/xhtml+xml",
-        })
-        session.get("https://www.nseindia.com", timeout=10)
-        time.sleep(1)
-        resp = session.get(NIFTY200_URL, timeout=15)
-        resp.raise_for_status()
-        df = pd.read_csv(pd.io.common.StringIO(resp.text))
-        symbol_col = [c for c in df.columns if "symbol" in c.lower()]
-        if symbol_col:
-            for sym in df[symbol_col[0]]:
-                tickers.append(f"{sym.strip()}.NS")
-        print(f"[NIFTY200] Fetched {len(tickers)} tickers from NSE")
+        out = subprocess.run(["git"] + args, capture_output=True, text=True,
+                             timeout=60)
+        if out.returncode != 0:
+            print(f"[GIT] {' '.join(args)} -> rc={out.returncode}: {out.stderr.strip()[:200]}")
+            return None
+        return out.stdout
     except Exception as e:
-        print(f"[NIFTY200] CSV fetch failed: {e}")
+        print(f"[GIT] {' '.join(args)} failed: {e}")
+        return None
 
-    if not tickers:
-        # Fallback: use universe_scored.csv if available, take top 200 by market cap
+
+def list_snapshot_commits():
+    """Every commit that touched universe_scored.csv, newest first, as
+    (sha, commit_date). Each such commit is one daily snapshot."""
+    raw = _git(["log", "--format=%H|%cI", "--", ARCHIVE_FILE])
+    if not raw:
+        return []
+    commits = []
+    for line in raw.strip().splitlines():
+        if "|" not in line:
+            continue
+        sha, iso = line.split("|", 1)
         try:
-            df = pd.read_csv("universe_scored.csv")
-            df = df.dropna(subset=["market_cap"]).sort_values("market_cap", ascending=False)
-            tickers = df["ticker"].head(200).tolist()
-            print(f"[NIFTY200] Fallback: top {len(tickers)} from universe_scored.csv by market cap")
+            d = datetime.fromisoformat(iso.strip()).date()
         except Exception:
-            print("[NIFTY200] ERROR: No source for Nifty 200 tickers")
-            sys.exit(1)
-
-    return tickers
-
-
-# ─── Financial Data Fetcher ───
-
-def fetch_stock_data(ticker):
-    """
-    Fetch 4Y financials + 4Y price history for a single stock.
-    Returns dict with raw financial columns per fiscal year + price series.
-    """
-    try:
-        stock = yf.Ticker(ticker, session=global_session)
-        info = stock.info or {}
-
-        if not info.get("regularMarketPrice"):
-            return None
-
-        income_stmt = stock.financials
-        balance_sheet = stock.balance_sheet
-        cashflow = stock.cashflow
-
-        if income_stmt is None or income_stmt.empty:
-            return None
-
-        # Get price history (4+ years)
-        hist = stock.history(period="5y")
-        if hist is None or hist.empty or len(hist) < 250:
-            return None
-
-        is_cols = sorted(income_stmt.columns)
-        bs_cols = sorted(balance_sheet.columns) if balance_sheet is not None and not balance_sheet.empty else []
-        cf_cols = sorted(cashflow.columns) if cashflow is not None and not cashflow.empty else []
-
-        # Build per-fiscal-year snapshots
-        fy_data = {}
-        for i, col in enumerate(is_cols):
-            fy_end = col  # Timestamp of fiscal year end
-            fy_key = fy_end.strftime("%Y-%m")
-
-            snapshot = {"ticker": ticker, "fy_end": fy_end, "sector": info.get("sector", "")}
-            shares = info.get("sharesOutstanding") or 1
-
-            # Income statement
-            for row, key in [("Total Revenue", "revenue"), ("Net Income", "net_income"),
-                             ("EBIT", "ebit"), ("Operating Income", "operating_income")]:
-                val = deep_metrics._bs_row(income_stmt, [row], col)
-                snapshot[key] = val
-
-            # Balance sheet (match by closest date)
-            if bs_cols:
-                # Find the BS column closest to this FY end
-                bs_col = min(bs_cols, key=lambda x: abs((x - col).days))
-                for row, key in [("Total Assets", "total_assets"),
-                                 ("Stockholders Equity", "equity"),
-                                 ("Total Debt", "total_debt"),
-                                 ("Current Assets", "current_assets"),
-                                 ("Current Liabilities", "current_liabilities"),
-                                 ("Goodwill", "goodwill")]:
-                    val = deep_metrics._bs_row(balance_sheet, [row, f"Total {row}"], bs_col)
-                    snapshot[key] = val
-
-            # Cash flow
-            if cf_cols:
-                cf_col = min(cf_cols, key=lambda x: abs((x - col).days))
-                for row, key in [("Operating Cash Flow", "ocf"),
-                                 ("Capital Expenditure", "capex")]:
-                    val = deep_metrics._bs_row(cashflow,
-                        [row, "Total Cash From Operating Activities",
-                         "Cash Flow From Continuing Operating Activities",
-                         "Purchase Of PPE"], cf_col)
-                    snapshot[key] = val
-
-            snapshot["shares"] = shares
-            snapshot["dividend_yield"] = info.get("dividendYield")
-            snapshot["book_value"] = info.get("bookValue")
-            fy_data[fy_key] = snapshot
-
-        return {
-            "ticker": ticker,
-            "info": info,
-            "fy_data": fy_data,
-            "price_history": hist["Close"],
-            "fy_dates": sorted(fy_data.keys()),
-        }
-
-    except Exception as e:
-        return None
-
-
-# ─── Score Reconstruction ───
-
-def reconstruct_score(stock_data, decision_date, available_fy_key):
-    """
-    Reconstruct deep metrics for a stock at a specific decision date
-    using the fiscal year data that would have been available.
-    """
-    ticker = stock_data["ticker"]
-    info = stock_data["info"]
-    fy = stock_data["fy_data"].get(available_fy_key)
-
-    if fy is None:
-        return None
-
-    # Get price at decision date
-    prices = stock_data["price_history"]
-    # Find closest trading day to decision date
-    target = pd.Timestamp(decision_date)
-    mask = prices.index <= target
-    if mask.sum() == 0:
-        return None
-    price_at_date = float(prices[mask].iloc[-1])
-
-    shares = fy.get("shares") or 1
-    revenue = fy.get("revenue")
-    ni = fy.get("net_income")
-    ebit = fy.get("ebit") or fy.get("operating_income")
-    total_assets = fy.get("total_assets")
-    equity = fy.get("equity")
-    total_debt = fy.get("total_debt") or 0
-    ocf = fy.get("ocf")
-    capex = fy.get("capex")
-    ca = fy.get("current_assets")
-    cl = fy.get("current_liabilities")
-
-    if ni is None or revenue is None:
-        return None
-
-    eps = ni / shares if shares > 0 else 0
-    bvps = equity / shares if equity and shares > 0 else None
-    pe = price_at_date / eps if eps > 0 else None
-    pb = price_at_date / bvps if bvps and bvps > 0 else None
-    roe = ni / equity if equity and equity > 0 else None
-    de = (total_debt / equity * 100) if equity and equity > 0 else None
-    market_cap = price_at_date * shares
-
-    # Compute key metrics for scoring
-    result = {
-        "ticker": ticker,
-        "decision_date": decision_date.strftime("%Y-%m-%d"),
-        "price": price_at_date,
-        "sector": fy.get("sector", ""),
-        "market_cap": market_cap,
-        "pe": pe,
-        "pb": pb,
-        "roe": roe,
-        "de": de,
-        "eps": eps,
-        "revenue": revenue,
-        "net_income": ni,
-        "profit_margin": ni / revenue if revenue and revenue > 0 else None,
-        "current_ratio": (ca / cl) if ca and cl and cl > 0 else None,
-        "dividend_yield": fy.get("dividend_yield"),
-    }
-
-    # ── Simplified scoring for backtest (key metrics only) ──
-    score = 0
-
-    # Graham: PE ≤ 15, PB ≤ 1.5, PE×PB ≤ 22.5
-    graham_points = 0
-    if revenue and revenue >= 2_000_000_000: graham_points += 1
-    if result["current_ratio"] and result["current_ratio"] >= 2.0: graham_points += 1
-    if ni and ni > 0: graham_points += 1  # Earnings positive
-    if pe and 0 < pe <= 15: graham_points += 1
-    if pb and 0 < pb <= 1.5: graham_points += 1
-    if pe and pb and 0 < pe * pb <= 22.5: graham_points += 1
-    result["graham_defensive_score"] = graham_points
-    if graham_points >= 4: score += 1
-
-    # Greenblatt: EBIT/EV and ROIC
-    if ebit and ebit > 0 and market_cap > 0:
-        ev = market_cap + total_debt - (fy.get("total_cash") or 0)
-        if ev and ev > 0:
-            result["greenblatt_ey"] = ebit / ev * 100
-            if ca and cl:
-                tangible_cap = (ca - cl) + (total_assets - ca if total_assets else 0) - (fy.get("goodwill") or 0)
-                if tangible_cap and tangible_cap > 0:
-                    result["greenblatt_roic"] = ebit / tangible_cap * 100
-    # Greenblatt pass is rank-based; simplified here to top 30% EY
-    if result.get("greenblatt_ey") and result["greenblatt_ey"] > 10:
-        score += 1
-
-    # Dorsey+Buffett: ROE > 15%, margin > 10%, low debt
-    db_points = 0
-    if roe and roe > 0.15: db_points += 1
-    if result["profit_margin"] and result["profit_margin"] > 0.10: db_points += 1
-    if de is not None and de < 100: db_points += 1
-    if ocf and ni and ni > 0 and ocf / ni > 0.8: db_points += 1
-    if ocf and capex:
-        fcf = ocf + capex
-        if revenue and revenue > 0 and fcf / revenue > 0.05: db_points += 1
-    result["dorsey_buffett_score"] = db_points
-    if db_points >= 3: score += 1
-
-    # Trajectory: growth
-    if ni > 0 and revenue > 0:
-        score += 1  # Simplified: positive earnings = trajectory pass for backtest
-
-    # Lynch: PEG
-    lynch_points = 0
-    ni_cagr = None  # Can't compute multi-year CAGR from single FY snapshot
-    # Use basic growth heuristics
-    if pe and 0 < pe < 20: lynch_points += 2
-    if de is not None and de <= 33: lynch_points += 2
-    if ni and ni > 0: lynch_points += 1
-    result["lynch_score"] = lynch_points
-    if lynch_points >= 4: score += 1
-
-    # Quality gate (simplified)
-    quality = True
-    if ocf and ni and ni > 0:
-        accruals = (ni - ocf) / total_assets if total_assets and total_assets > 0 else None
-        if accruals is not None and accruals > 0.10: quality = False
-        cfo_ni = ocf / ni
-        if cfo_ni < 0.5: quality = False
-    result["quality_pass"] = quality
-    result["score"] = score
-
-    return result
-
-
-# ─── Backtest Engine ───
-
-def run_backtest(all_stock_data):
-    """Run the quarterly rebalancing backtest."""
-
-    # Determine decision dates
-    # Start from Jan 2023 (need FY2022 data, published ~Sep 2022, 6-month lag OK by Jan 2023)
-    today = datetime.now()
-    decision_dates = []
-    for year in range(2023, today.year + 1):
-        for month in DECISION_MONTHS:
-            dt = datetime(year, month, 1)
-            if dt < today - timedelta(days=30):  # At least 1 month of forward data needed
-                decision_dates.append(dt)
-
-    print(f"\n[BACKTEST] {len(decision_dates)} decision dates: {decision_dates[0].strftime('%b %Y')} → {decision_dates[-1].strftime('%b %Y')}")
-
-    # Map decision dates to available fiscal year
-    # Indian FY ends March. Results published by Sep. With 6-month lag:
-    # Jan 2023 → use FY ending ≤ Jul 2022 → FY Mar 2022
-    # Oct 2023 → use FY ending ≤ Apr 2023 → FY Mar 2023
-    def get_usable_fy(decision_dt):
-        cutoff = decision_dt - timedelta(days=180)  # 6 month lag
-        # Find latest FY end before cutoff
-        # Most Indian companies: March FY
-        for fy_year in range(decision_dt.year, decision_dt.year - 5, -1):
-            fy_end = datetime(fy_year, 3, 31)
-            if fy_end <= cutoff:
-                return fy_end.strftime("%Y-%m")
-        return None
-
-    # Track portfolio
-    portfolio = {}  # ticker → {shares, buy_price}
-    capital = STARTING_CAPITAL
-    portfolio_values = []  # [{date, portfolio_value, benchmark_value}]
-
-    # Get Nifty 50 prices for benchmark
-    print("[BACKTEST] Fetching Nifty 50 benchmark...")
-    try:
-        nifty = yf.Ticker(NIFTY50_TICKER, session=global_session)
-        nifty_hist = nifty.history(period="5y")["Close"]
-    except Exception as e:
-        print(f"[BACKTEST] Nifty 50 fetch failed: {e}")
-        nifty_hist = pd.Series(dtype=float)
-
-    nifty_start = None
-    all_trades = []
-
-    for dd_idx, decision_date in enumerate(decision_dates):
-        fy_key = get_usable_fy(decision_date)
-        if not fy_key:
             continue
+        commits.append((sha.strip(), d))
+    return commits
 
-        print(f"\n[{decision_date.strftime('%b %Y')}] Using FY {fy_key} data")
 
-        # Score all stocks at this decision date
-        scored = []
-        for sd in all_stock_data:
-            if sd is None:
-                continue
-            # Check if this stock has the needed FY data
-            if fy_key not in sd.get("fy_data", {}):
-                # Try adjacent FY
-                available = sd.get("fy_dates", [])
-                usable = [k for k in available if k <= fy_key]
-                if usable:
-                    fy_key_use = usable[-1]
-                else:
-                    continue
-            else:
-                fy_key_use = fy_key
+def load_snapshot(sha):
+    """Read universe_scored.csv AS OF a commit into a DataFrame, or None."""
+    raw = _git(["show", f"{sha}:{ARCHIVE_FILE}"])
+    if not raw:
+        return None
+    try:
+        from io import StringIO
+        return pd.read_csv(StringIO(raw))
+    except Exception as e:
+        print(f"[ARCHIVE] parse failed for {sha[:8]}: {e}")
+        return None
 
-            result = reconstruct_score(sd, decision_date, fy_key_use)
-            if result and result.get("quality_pass") and result.get("score", 0) > 0:
-                scored.append(result)
 
-        # Rank and select top N
-        scored.sort(key=lambda x: x.get("score", 0), reverse=True)
-        # Among equal scores, prefer lower PE
-        scored.sort(key=lambda x: (-(x.get("score", 0)), x.get("pe") or 999))
-        picks = scored[:TOP_N]
-
-        if not picks:
-            print(f"  No qualifying stocks at {decision_date.strftime('%Y-%m-%d')}")
+def load_cohorts():
+    """Build one cohort per clean snapshot date: {'date', 'scores': {ticker:score}}.
+    De-duplicates to the LAST commit per calendar date. Filters to snapshots whose
+    own schema_version column is clean (>= MIN_CLEAN_SCHEMA) — the snapshot is
+    self-describing, so we don't need the manifest to judge cleanliness."""
+    commits = list_snapshot_commits()
+    if not commits:
+        return []
+    seen_dates = set()
+    cohorts = []
+    for sha, d in commits:                      # newest first
+        if d in seen_dates:
             continue
-
-        print(f"  Qualified: {len(scored)} stocks | Selected top {len(picks)}")
-        print(f"  Score distribution: " +
-              ", ".join(f"{s}/5: {sum(1 for p in picks if p['score']==s)}" for s in range(5, 0, -1)))
-
-        # ── Rebalance ──
-        # Sell everything, buy new picks equal-weight
-        # First, compute current portfolio value
-        if portfolio:
-            # Get prices at this decision date
-            port_val = 0
-            for t, holding in portfolio.items():
-                sd_match = next((sd for sd in all_stock_data if sd and sd["ticker"] == t), None)
-                if sd_match:
-                    prices = sd_match["price_history"]
-                    target = pd.Timestamp(decision_date)
-                    mask = prices.index <= target
-                    if mask.sum() > 0:
-                        current_price = float(prices[mask].iloc[-1])
-                        port_val += holding["shares"] * current_price
-
-            if port_val > 0:
-                capital = port_val
-                all_trades.append({
-                    "date": decision_date.strftime("%Y-%m-%d"),
-                    "action": "REBALANCE",
-                    "portfolio_value": round(capital, 2),
-                })
-
-        # Buy new portfolio
-        per_stock = capital / len(picks)
-        portfolio = {}
-        for pick in picks:
-            price = pick["price"]
-            if price and price > 0:
-                num_shares = per_stock / price
-                portfolio[pick["ticker"]] = {
-                    "shares": num_shares,
-                    "buy_price": price,
-                    "score": pick["score"],
-                }
-                all_trades.append({
-                    "date": decision_date.strftime("%Y-%m-%d"),
-                    "action": "BUY",
-                    "ticker": pick["ticker"],
-                    "price": round(price, 2),
-                    "score": pick["score"],
-                    "amount": round(per_stock, 2),
-                })
-
-        # Record portfolio value and benchmark
-        if not nifty_hist.empty:
-            target = pd.Timestamp(decision_date)
-            mask = nifty_hist.index <= target
-            if mask.sum() > 0:
-                nifty_price = float(nifty_hist[mask].iloc[-1])
-                if nifty_start is None:
-                    nifty_start = nifty_price
-                benchmark_val = STARTING_CAPITAL * (nifty_price / nifty_start)
-            else:
-                benchmark_val = STARTING_CAPITAL
-        else:
-            benchmark_val = STARTING_CAPITAL
-
-        portfolio_values.append({
-            "date": decision_date.strftime("%Y-%m-%d"),
-            "portfolio_value": round(capital, 2),
-            "benchmark_value": round(benchmark_val, 2),
-            "num_holdings": len(portfolio),
-        })
-
-    # ── Final valuation (today) ──
-    if portfolio:
-        final_val = 0
-        for t, holding in portfolio.items():
-            sd_match = next((sd for sd in all_stock_data if sd and sd["ticker"] == t), None)
-            if sd_match:
-                prices = sd_match["price_history"]
-                if not prices.empty:
-                    current_price = float(prices.iloc[-1])
-                    final_val += holding["shares"] * current_price
-
-        if final_val > 0:
-            capital = final_val
-
-        if not nifty_hist.empty and nifty_start:
-            benchmark_final = STARTING_CAPITAL * (float(nifty_hist.iloc[-1]) / nifty_start)
-        else:
-            benchmark_final = STARTING_CAPITAL
-
-        portfolio_values.append({
-            "date": datetime.now().strftime("%Y-%m-%d"),
-            "portfolio_value": round(capital, 2),
-            "benchmark_value": round(benchmark_final, 2),
-            "num_holdings": len(portfolio),
-        })
-
-    return portfolio_values, all_trades
-
-
-# ─── Main ───
-
-def main():
-    print("=" * 60)
-    print("KORDENT BACKTEST RUNNER")
-    print(f"Run date: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    print("=" * 60)
-    print(f"\nStarting capital: ₹{STARTING_CAPITAL:,.0f}")
-    print(f"Strategy: Top {TOP_N} by composite score, equal-weight, quarterly rebalance")
-    print(f"Benchmark: Nifty 50 buy-and-hold")
-    print(f"Publication lag: 6 months (no look-ahead bias)")
-    print()
-
-    # Step 1: Get Nifty 200 tickers
-    print("--- STEP 1: Fetching Nifty 200 constituents ---")
-    tickers = fetch_nifty200_tickers()
-
-    # Step 2: Fetch all stock data
-    print(f"\n--- STEP 2: Fetching financial data for {len(tickers)} stocks ---")
-    all_stock_data = []
-    completed = 0
-    failed = 0
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        futures = {executor.submit(fetch_stock_data, t): t for t in tickers}
-        for future in as_completed(futures):
-            completed += 1
+        df = load_snapshot(sha)
+        if df is None or "ticker" not in df.columns or "score" not in df.columns:
+            continue
+        # Clean-scorer gate: schema_version stamped on every row by universe_updater.
+        if "schema_version" in df.columns:
             try:
-                result = future.result()
-                if result:
-                    all_stock_data.append(result)
-                else:
-                    failed += 1
+                sv = int(pd.to_numeric(df["schema_version"], errors="coerce").dropna().mode().iloc[0])
             except Exception:
-                failed += 1
-
-            if completed % 20 == 0:
-                print(f"  [{completed}/{len(tickers)}] Valid: {len(all_stock_data)} | Failed: {failed}")
-
-    print(f"\n  Total usable: {len(all_stock_data)} stocks")
-
-    # Step 3: Run backtest
-    print("\n--- STEP 3: Running quarterly backtest ---")
-    portfolio_values, all_trades = run_backtest(all_stock_data)
-
-    # Step 4: Save results
-    print("\n--- STEP 4: Saving results ---")
-
-    if portfolio_values:
-        pv_df = pd.DataFrame(portfolio_values)
-        pv_df.to_csv("backtest_results.csv", index=False)
-        print(f"Saved {len(pv_df)} data points to backtest_results.csv")
-
-        trades_df = pd.DataFrame(all_trades)
-        trades_df.to_csv("backtest_trades.csv", index=False)
-        print(f"Saved {len(trades_df)} trades to backtest_trades.csv")
-
-        # Summary stats
-        start_val = STARTING_CAPITAL
-        end_val = pv_df["portfolio_value"].iloc[-1]
-        bench_end = pv_df["benchmark_value"].iloc[-1]
-        start_date = pv_df["date"].iloc[0]
-        end_date = pv_df["date"].iloc[-1]
-
-        years = (pd.to_datetime(end_date) - pd.to_datetime(start_date)).days / 365.25
-        if years > 0:
-            strategy_cagr = ((end_val / start_val) ** (1 / years) - 1) * 100
-            benchmark_cagr = ((bench_end / start_val) ** (1 / years) - 1) * 100
-            alpha = strategy_cagr - benchmark_cagr
+                sv = 0
+            if sv < MIN_CLEAN_SCHEMA:
+                continue
         else:
-            strategy_cagr = benchmark_cagr = alpha = 0
+            # Pre-schema snapshots ran the broken scorer (Sprint 12). Skip.
+            continue
+        scores = {}
+        for t, s in zip(df["ticker"], df["score"]):
+            if pd.notna(t) and pd.notna(s):
+                scores[str(t)] = int(s)
+        if scores:
+            seen_dates.add(d)
+            cohorts.append({"date": d, "scores": scores})
+    cohorts.sort(key=lambda c: c["date"])       # oldest first
+    return cohorts
 
-        total_return = (end_val / start_val - 1) * 100
-        bench_return = (bench_end / start_val - 1) * 100
 
-        print(f"\n{'='*50}")
-        print(f"BACKTEST RESULTS ({start_date} → {end_date})")
-        print(f"{'='*50}")
-        print(f"  Strategy:  ₹{start_val:>12,.0f} → ₹{end_val:>12,.0f}  ({total_return:+.1f}%)")
-        print(f"  Nifty 50:  ₹{start_val:>12,.0f} → ₹{bench_end:>12,.0f}  ({bench_return:+.1f}%)")
-        print(f"  CAGR:      Strategy {strategy_cagr:.1f}% | Benchmark {benchmark_cagr:.1f}%")
-        print(f"  Alpha:     {alpha:+.1f}% annualized")
-        print(f"  Period:    {years:.1f} years")
-        print(f"\n  ⚠ RETROSPECTIVE RECONSTRUCTION — not a live track record.")
-        print(f"  Uses current Nifty 200 list (survivorship bias present).")
-        print(f"  Live prospective tracking begins with score_history.")
-    else:
-        print("  No backtest results generated.")
+def load_manifest():
+    """The clock. Used only for reporting/projection, not for correctness."""
+    if not os.path.exists(MANIFEST_FILE):
+        return []
+    try:
+        with open(MANIFEST_FILE) as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else data.get("snapshots", [])
+    except Exception:
+        return []
 
-    print("\nDone.")
+
+# ══════════════════════════════════════════════════════════════════════════
+# 2. PRICES — fetch once per ticker over the full window, cache immutably
+# ══════════════════════════════════════════════════════════════════════════
+def _load_price_cache():
+    if not os.path.exists(PRICE_CACHE_FILE):
+        return {}, {}
+    try:
+        c = pd.read_csv(PRICE_CACHE_FILE, parse_dates=["date"])
+        series = {}
+        maxdate = {}
+        for tkr, g in c.groupby("ticker"):
+            s = g.set_index("date")["close"].sort_index()
+            series[str(tkr)] = s
+            maxdate[str(tkr)] = s.index.max().date()
+        return series, maxdate
+    except Exception as e:
+        print(f"[CACHE] load failed, starting fresh: {e}")
+        return {}, {}
+
+
+def _save_price_cache(series):
+    rows = []
+    for tkr, s in series.items():
+        for dt, px in s.items():
+            rows.append({"ticker": tkr, "date": pd.Timestamp(dt).date(), "close": px})
+    if rows:
+        pd.DataFrame(rows).to_csv(PRICE_CACHE_FILE, index=False)
+
+
+def fetch_prices(tickers, start, end):
+    """Return {ticker: close Series} over [start, end], using and extending the
+    on-disk cache. Historical closes are immutable, so a ticker already cached
+    through >= end is reused untouched; only missing/short ones are fetched."""
+    series, maxdate = _load_price_cache()
+    need = [t for t in tickers
+            if t not in series or maxdate.get(t, date.min) < (end - timedelta(days=3))]
+    print(f"[PRICES] {len(tickers)} needed | {len(tickers) - len(need)} cached | "
+          f"{len(need)} to fetch")
+
+    for i in range(0, len(need), FETCH_CHUNK):
+        batch = need[i:i + FETCH_CHUNK]
+        try:
+            # threads=False on purpose — curl_cffi's threaded path is the one that
+            # differs on Linux (see the §1 tracker note); single-threaded is stable.
+            hist = yf.download(batch, start=start.isoformat(), end=end.isoformat(),
+                               progress=False, auto_adjust=True, group_by="column",
+                               threads=False)
+        except Exception as e:
+            print(f"[PRICES] batch {i // FETCH_CHUNK + 1} failed: {e}")
+            continue
+        if hist is None or hist.empty:
+            continue
+        close = hist["Close"] if "Close" in hist else hist
+        if isinstance(close, pd.Series):        # single ticker
+            close = close.to_frame(batch[0])
+        for t in close.columns:
+            s = close[t].dropna()
+            if len(s):
+                s.index = pd.to_datetime(s.index)
+                series[t] = s
+        time.sleep(0.5)                          # be gentle with the rate limiter
+
+    _save_price_cache(series)
+    return series
+
+
+def price_asof(s, d, tol_days=10):
+    """Close on the last trading day <= d. Returns None if the series doesn't
+    REACH near d (last bar > tol_days before d) — i.e. the stock delisted or
+    stopped trading, so there is genuinely no price at d. Without this a dead
+    stock's last-ever price would masquerade as its exit price and silently
+    readmit the very survivorship losses we drop-and-count."""
+    if s is None or len(s) == 0:
+        return None
+    ts = pd.Timestamp(d)
+    up_to = s[s.index <= ts]
+    if len(up_to) == 0:
+        return None
+    if (ts - up_to.index[-1]).days > tol_days:
+        return None
+    return float(up_to.iloc[-1])
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 3. FORWARD RETURNS BY ENTRY SCORE BUCKET  (buy-and-hold)
+# ══════════════════════════════════════════════════════════════════════════
+def build_calendar(bench_series):
+    """Canonical trading-day index from the benchmark. Cohort exit = the bar
+    HORIZON_TRADING_DAYS after entry on THIS calendar, identical for every stock
+    in the cohort."""
+    return list(bench_series.index) if bench_series is not None else []
+
+
+def exit_date_for(calendar, d):
+    """The trading date HORIZON_TRADING_DAYS after d, or None if not enough
+    calendar has elapsed yet (cohort not matured)."""
+    ts = pd.Timestamp(d)
+    pos = None
+    for i, cd in enumerate(calendar):
+        if cd >= ts:
+            pos = i
+            break
+    if pos is None:
+        return None
+    tgt = pos + HORIZON_TRADING_DAYS
+    if tgt >= len(calendar):
+        return None                              # horizon hasn't elapsed
+    return calendar[tgt].date()
+
+
+def bucket_tickers(scores, rng):
+    """{bucket: [tickers]} — 3/4/5 in full, 0/1/2 sampled to the control cap."""
+    by = {b: [] for b in PRICE_BUCKETS + CONTROL_BUCKETS}
+    for t, s in scores.items():
+        if s in by:
+            by[s].append(t)
+    for b in CONTROL_BUCKETS:
+        if len(by[b]) > CONTROL_SAMPLE_PER_BUCKET:
+            by[b] = rng.sample(sorted(by[b]), CONTROL_SAMPLE_PER_BUCKET)
+    return by
+
+
+def cohort_returns(cohort, calendar, prices):
+    """Per-bucket forward return for one matured cohort. Returns a list of row
+    dicts, or [] if the cohort has not matured."""
+    d = cohort["date"]
+    xdate = exit_date_for(calendar, d)
+    if xdate is None:
+        return []                                 # not matured
+
+    bench = prices.get(BENCHMARK)
+    b_in, b_out = price_asof(bench, d), price_asof(bench, xdate)
+    if not b_in or not b_out or b_in <= 0:
+        return []                                 # can't benchmark this cohort
+    bench_ret = b_out / b_in - 1.0
+
+    rng = random.Random(f"{SAMPLE_SEED}-{d.isoformat()}")
+    buckets = bucket_tickers(cohort["scores"], rng)
+
+    rows = []
+    for b, tks in buckets.items():
+        rets, missing = [], 0
+        for t in tks:
+            s = prices.get(t)
+            p_in, p_out = price_asof(s, d), price_asof(s, xdate)
+            if p_in and p_out and p_in > 0:
+                rets.append(p_out / p_in - 1.0)
+            else:
+                missing += 1                       # delisted / no price — counted
+        n = len(rets)
+        rows.append({
+            "cohort_date": d.isoformat(),
+            "exit_date": xdate.isoformat(),
+            "score_bucket": b,
+            "n_priced": n,
+            "n_missing": missing,
+            "fwd_return": round(float(np.mean(rets)), 4) if n else None,
+            "bench_return": round(bench_ret, 4),
+            "alpha": round(float(np.mean(rets)) - bench_ret, 4) if n else None,
+            "sampled": b in CONTROL_BUCKETS,
+        })
+    return rows
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 4. AGGREGATE + HONEST GATING
+# ══════════════════════════════════════════════════════════════════════════
+def project_first_signal(cohorts, matured):
+    """When will we have MIN_MATURED_COHORTS matured clean cohorts? Projected
+    from the observed clean-snapshot cadence + the horizon."""
+    if len(cohorts) < 2:
+        return "unknown (need more snapshots to estimate cadence)"
+    span = (cohorts[-1]["date"] - cohorts[0]["date"]).days
+    per_day = len(cohorts) / max(span, 1)
+    needed = MIN_MATURED_COHORTS - matured
+    if needed <= 0:
+        return "now"
+    # extra calendar days to accrue `needed` more snapshots, plus one horizon to mature
+    days = needed / per_day + HORIZON_TRADING_DAYS * (7 / 5)
+    return (date.today() + timedelta(days=round(days))).isoformat()
+
+
+def aggregate(all_rows, cohorts, matured_cohorts):
+    """Per-bucket means across matured cohorts, with the survivorship caveat and
+    an honest status."""
+    status = "OK" if matured_cohorts >= MIN_MATURED_COHORTS else "INSUFFICIENT_DATA"
+    summary = {
+        "status": status,
+        "matured_cohorts": matured_cohorts,
+        "min_required": MIN_MATURED_COHORTS,
+        "horizon_trading_days": HORIZON_TRADING_DAYS,
+        "benchmark": BENCHMARK,
+        "generated": datetime.now().isoformat(timespec="seconds"),
+        "caveats": [
+            "Buy-and-hold by ENTRY score; mid-horizon score changes are ignored.",
+            "Delisted names with no forward price are dropped and counted in "
+            "n_missing; this biases surviving-bucket returns UPWARD.",
+            "Point-in-time snapshot => no current-list survivorship bias; the "
+            "residual is delisting only.",
+        ],
+        "buckets": {},
+    }
+    if all_rows:
+        df = pd.DataFrame(all_rows)
+        df = df[df["fwd_return"].notna()]
+        for b in sorted(set(PRICE_BUCKETS + CONTROL_BUCKETS)):
+            sub = df[df["score_bucket"] == b]
+            if len(sub):
+                summary["buckets"][str(b)] = {
+                    "cohorts": int(sub["cohort_date"].nunique()),
+                    "mean_fwd_return": round(float(sub["fwd_return"].mean()), 4),
+                    "mean_alpha": round(float(sub["alpha"].mean()), 4),
+                    "total_missing": int(sub["n_missing"].sum()),
+                    "sampled": bool(b in CONTROL_BUCKETS),
+                }
+    if status == "INSUFFICIENT_DATA":
+        summary["first_signal_projected"] = project_first_signal(cohorts, matured_cohorts)
+    return summary
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 5. MAIN
+# ══════════════════════════════════════════════════════════════════════════
+def main():
+    print("=" * 64)
+    print("KORDENT BACKTEST — point-in-time, buy-and-hold by entry score")
+    print(f"Run: {datetime.now():%Y-%m-%d %H:%M} | horizon {HORIZON_TRADING_DAYS}td "
+          f"| benchmark {BENCHMARK}")
+    print("=" * 64)
+
+    print("\n--- STEP 1: Load clean snapshots from git history ---")
+    cohorts = load_cohorts()
+    manifest = load_manifest()
+    print(f"Clean cohorts in archive: {len(cohorts)} | manifest records: {len(manifest)}")
+    if not cohorts:
+        msg = ("No clean point-in-time snapshots in git history. Either the "
+               "checkout is shallow (need fetch-depth: 0) or the clean-scorer "
+               "archive hasn't started. Nothing to backtest.")
+        print(f"[HALT] {msg}")
+        json.dump({"status": "NO_ARCHIVE", "detail": msg},
+                  open("backtest_summary.json", "w"), indent=2)
+        if not FORCE:
+            return
+
+    print("\n--- STEP 2: Fetch prices (cached, immutable historical closes) ---")
+    all_tickers = set([BENCHMARK])
+    _rng = random.Random(SAMPLE_SEED)
+    for c in cohorts:
+        for b, tks in bucket_tickers(c["scores"],
+                                     random.Random(f"{SAMPLE_SEED}-{c['date'].isoformat()}")).items():
+            all_tickers.update(tks)
+    start = (min(c["date"] for c in cohorts) - timedelta(days=7)) if cohorts else date.today()
+    prices = fetch_prices(sorted(all_tickers), start, date.today())
+
+    print("\n--- STEP 3: Forward returns by entry-score bucket ---")
+    calendar = build_calendar(prices.get(BENCHMARK))
+    if not calendar:
+        print("[HALT] No benchmark price series; cannot define the horizon calendar.")
+        json.dump({"status": "NO_BENCHMARK"}, open("backtest_summary.json", "w"), indent=2)
+        return
+
+    all_rows, matured = [], 0
+    for c in cohorts:
+        rows = cohort_returns(c, calendar, prices)
+        if rows:
+            matured += 1
+            all_rows.extend(rows)
+            picks = next((r for r in rows if r["score_bucket"] == 3), None)
+            print(f"  {c['date']} matured -> 3/5 fwd "
+                  f"{picks['fwd_return'] if picks else '—'} vs bench {rows[0]['bench_return']}")
+        else:
+            print(f"  {c['date']} not matured yet (horizon not elapsed)")
+
+    print(f"\nMatured clean cohorts: {matured} / {MIN_MATURED_COHORTS} required")
+
+    print("\n--- STEP 4: Aggregate + honest gating ---")
+    summary = aggregate(all_rows, cohorts, matured)
+
+    pd.DataFrame(all_rows).to_csv("backtest_results.csv", index=False)
+    json.dump(summary, open("backtest_summary.json", "w"), indent=2)
+    print(f"Wrote backtest_results.csv ({len(all_rows)} bucket-cohort rows) "
+          f"and backtest_summary.json")
+
+    if summary["status"] == "INSUFFICIENT_DATA":
+        print(f"\n[STATUS] INSUFFICIENT DATA — {matured} matured cohorts "
+              f"(need {MIN_MATURED_COHORTS}). No return claim emitted.")
+        print(f"[STATUS] First honest signal projected ~{summary['first_signal_projected']}.")
+    elif summary["status"] == "OK":
+        print("\n[RESULT] mean forward return / alpha by entry-score bucket:")
+        for b, v in sorted(summary["buckets"].items()):
+            tag = " (sampled)" if v["sampled"] else ""
+            print(f"  {b}/5: fwd {v['mean_fwd_return']:+.2%} | "
+                  f"alpha {v['mean_alpha']:+.2%} | {v['cohorts']} cohorts{tag}")
+        print("  Survivorship note: n_missing dropped upward-biases these; see caveats.")
+
+    print("\nBacktest complete.")
 
 
 if __name__ == "__main__":
