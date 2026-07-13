@@ -1070,3 +1070,18 @@ def choose_benchmark(ips_policy: dict) -> dict:
 
     b = BENCHMARKS[key]
     return {"ticker": b["ticker"], "label": b["label"], "reason": reason}
+
+def describe_benchmark(port: dict) -> dict:
+    """UI helper: label + reason for a portfolio's STORED benchmark ticker.
+    Read-only — the label comes from the frozen ticker (authoritative), the
+    reason is re-derived from the frozen IPS allocation for display. If the
+    stored ticker and the IPS-implied ticker disagree (legacy rows backfilled
+    to NIFTYBEES before per-mandate benchmarking), we say "locked at
+    registration" rather than print a cap-tilt claim that contradicts the label.
+    """
+    ticker = (port or {}).get("benchmark_ticker") or "NIFTYBEES.NS"
+    label = next((v["label"] for v in BENCHMARKS.values() if v["ticker"] == ticker), ticker)
+    ips = (port.get("portfolio_profile") or {}).get("ips_policy")
+    rec = choose_benchmark(ips)
+    reason = rec["reason"] if rec["ticker"] == ticker else "locked at registration"
+    return {"ticker": ticker, "label": label, "reason": reason}
