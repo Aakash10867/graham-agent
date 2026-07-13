@@ -2271,6 +2271,12 @@ def _commit_portfolio(portfolio: dict) -> dict:
         if not stocks_for_alloc:
             return {"ok": False, "error": "No stocks could be priced — portfolio not saved."}
 
+        # Benchmark chosen ONCE from the IPS mandate and frozen here. Never
+        # recomputed at review time (that is benchmark shopping), and the
+        # transactions below buy units of THIS specific ETF at THIS price.
+        _bench = selector.choose_benchmark(
+            (portfolio.get("portfolio_profile") or {}).get("ips_policy"))
+
         port_resp = sb.table("portfolios").insert({
             "user_id": st.session_state.sb_user_id,
             "name": portfolio["name"],
@@ -2281,7 +2287,8 @@ def _commit_portfolio(portfolio: dict) -> dict:
             "next_review_date": next_review,
             "next_sip_date": next_sip,
             "is_paper": portfolio.get("is_paper", False),
-            "portfolio_profile": portfolio.get("portfolio_profile", {})
+            "portfolio_profile": portfolio.get("portfolio_profile", {}),
+            "benchmark_ticker": _bench["ticker"],
         }).execute()
         portfolio_id = port_resp.data[0]["id"]
 
@@ -2313,9 +2320,12 @@ def _commit_portfolio(portfolio: dict) -> dict:
             sb.table("holdings").insert(holdings_data).execute()
 
         # BULK INSERT TRANSACTIONS
+        # Shadow priced against the CHOSEN benchmark ETF, not always Nifty 50.
+        # nifty_price/nifty_units are legacy column names; here they hold units
+        # of _bench["ticker"], and benchmark_ticker (below) disambiguates them.
         nifty_px = None
         try:
-            nifty_px = yf.Ticker("NIFTYBEES.NS").fast_info.last_price
+            nifty_px = yf.Ticker(_bench["ticker"]).fast_info.last_price
         except Exception:
             pass
             
@@ -2337,6 +2347,7 @@ def _commit_portfolio(portfolio: dict) -> dict:
                 "transaction_date": today_iso,
                 "nifty_price": round(nifty_px, 2) if nifty_px else None,
                 "nifty_units": nifty_u,
+                "benchmark_ticker": _bench["ticker"],
             })
             
         if txns_data:
