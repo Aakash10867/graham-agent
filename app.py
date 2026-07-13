@@ -8061,6 +8061,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                     if hist_data and len(hist_data) >= 2:
                         hist_df = pd.DataFrame(hist_data)
                         hist_df["date"] = pd.to_datetime(hist_df["date"])
+                        _bench = selector.describe_benchmark(port)
 
                         has_invested = "cumulative_invested" in hist_df.columns and hist_df["cumulative_invested"].notna().sum() >= 2
                         has_shadow = "nifty_shadow_value" in hist_df.columns and hist_df["nifty_shadow_value"].notna().sum() >= 2
@@ -8082,8 +8083,8 @@ elif st.session_state.sb_view_mode == "portfolios":
                             fig.add_trace(go.Scatter(
                                 x=hist_df["date"], y=hist_df["nifty_shadow_value"],
                                 line=dict(color="#9CA3AF", width=1.5, dash="dash"),
-                                name="Nifty Shadow",
-                                hovertemplate="₹%{y:,.0f}<extra>Nifty Shadow</extra>",
+                                name=f"{_bench['label']} shadow",
+                                hovertemplate="₹%{y:,.0f}<extra>" + _bench['label'] + " shadow</extra>",
                             ))
 
                         # 3. Reality Line (bold)
@@ -8106,6 +8107,11 @@ elif st.session_state.sb_view_mode == "portfolios":
                         )
 
                         st.plotly_chart(fig, use_container_width=True, key=f"stacked_{port['id']}")
+                        st.caption(
+                            f"Benchmark: {_bench['label']} — {_bench['reason']}. Locked at "
+                            f"registration; the shadow is what these same SIPs would be worth "
+                            f"in {_bench['label']} ({_bench['ticker']})."
+                        )
 
                         # ── Metrics below chart ──
                         last_val = float(hist_df["total_value"].iloc[-1])
@@ -8139,13 +8145,13 @@ elif st.session_state.sb_view_mode == "portfolios":
 
                             if port_xirr is not None and nifty_xirr is not None:
                                 alpha = round(port_xirr - nifty_xirr, 1)
-                                m5.metric("Alpha vs Nifty", f"{alpha:+.1f}%", delta=f"Nifty XIRR {nifty_xirr:+.1f}%")
+                                m5.metric(f"Alpha vs {_bench['label']}", f"{alpha:+.1f}%", delta=f"{_bench['label']} XIRR {nifty_xirr:+.1f}%")
                             elif has_shadow and last_shadow and last_invested > 0:
                                 nifty_simple = ((last_shadow - last_invested) / last_invested) * 100
                                 alpha_simple = simple_ret - nifty_simple
-                                m5.metric("vs Nifty", f"{alpha_simple:+.1f}%", delta=f"Nifty {nifty_simple:+.1f}%")
+                                m5.metric(f"vs {_bench['label']}", f"{alpha_simple:+.1f}%", delta=f"{_bench['label']} {nifty_simple:+.1f}%")
                             else:
-                                m5.metric("vs Nifty", "—")
+                                m5.metric(f"vs {_bench['label']}", "—")
                         else:
                             st.caption(f"Portfolio: ₹{last_val:,.0f} · {days_tracked} days tracked")
 
