@@ -971,3 +971,49 @@ def diff_thesis(entry_trace: dict | None, current_trace: dict | None,
             "entry": _trace_facts(entry_trace),
             "current": _trace_facts(current_trace),
             "changes": _thesis_changes(entry_trace, current_trace)}
+
+
+def compute_thesis_drift(holdings, policy, universe_df, price_history=None):
+    """
+    Diff every held position's stored entry thesis against a fresh selection
+    over today's universe. Pure: re-runs select_portfolio + investable_tickers,
+    no Streamlit and no network (unless a price_history is passed in). Returns
+    {ticker: diff_thesis(...)}.
+
+    holdings : stored holding dicts, each with "ticker" and ideally
+               "entry_trace" (missing -> drift "no_trace").
+    policy   : the IPS policy the portfolio was built under
+               (portfolio_profile.ips_policy). Falsy -> {}: drift is undefined
+               without the mandate that decides "would we buy this today".
+
+    price_history is left None on the review path by design. It only feeds the
+    correlation tiebreak, which nudges _rank_score at the margin; it does not
+    change pool membership or the conviction/merit split, which is what the
+    drift classes turn on. Passing None keeps the review fast and deterministic.
+    """
+    if not policy or universe_df is None or not len(universe_df):
+        return {}
+    try:
+        result = select_portfolio(universe_df, policy, price_history)
+    except Exception:
+        return {}
+    current_by_ticker = {h["ticker"]: h.get("_trace") for h in result.get("holdings", [])}
+
+    sip = policy.get("sip_amount", 0) or 0
+    avoid = policy.get("avoid_sectors", []) or []
+    try:
+        # limit=len(universe_df) => the FULL Tier-1 pool, not the top-250 slice.
+        # We need true pool membership to tell "outranked" from "fell out".
+        pool = set(investable_tickers(universe_df, sip, avoid, limit=len(universe_df)))
+    except Exception:
+        pool = set()
+
+    out = {}
+    for h in holdings:
+        tkr = h.get("ticker")
+        if not tkr:
+            continue
+        out[tkr] = diff_thesis(h.get("entry_trace"),
+                               current_by_ticker.get(tkr),
+                               still_investable=(tkr in pool))
+    return out
