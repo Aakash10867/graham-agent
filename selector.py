@@ -837,3 +837,125 @@ def improving_businesses(universe_df: pd.DataFrame, limit: int = 25) -> pd.DataF
             .sort_values(["trajectory_score", "revenue_cagr_3y", "pe"],
                          ascending=[False, False, True])
             .head(limit))
+
+# ══════════════════════════════════════════════════════════════════════════
+# THESIS DRIFT  (Sprint 13 §2)
+#
+# A review must show what CHANGED since purchase, not re-explain the holding.
+# diff_thesis compares the recorded reason a stock was bought (its entry _trace,
+# stored on holdings at registration) against its status in a fresh
+# select_portfolio run over today's universe. Pure: no Streamlit, no network,
+# no LLM. The caller renders the diff; the LLM, if used at all, only phrases
+# these deterministic facts into prose — it never decides the classification.
+# ══════════════════════════════════════════════════════════════════════════
+
+# The one slot_type that means "held only because the conviction sleeve fired" —
+# a specialist the merit passes left behind. The other four (cap_quota_large,
+# cap_quota_mid, breadth, free) all earned a seat without the sleeve.
+_CONVICTION_SLOTS = {"conviction"}
+
+
+def _on_conviction(trace: dict) -> bool:
+    return bool(trace) and trace.get("slot_type") in _CONVICTION_SLOTS
+
+
+def _trace_facts(trace: dict) -> dict:
+    """The subset of a _trace used to render a thesis line. Defensive to
+    partial/older traces and to manual holdings with no trace at all."""
+    if not trace:
+        return {}
+    return {
+        "slot_type": trace.get("slot_type"),
+        "gate_cleared": trace.get("gate_cleared"),
+        "conviction_framework": trace.get("conviction_framework"),
+        "conviction_rank": trace.get("conviction_rank"),
+        "conviction_pct": trace.get("conviction_pct"),
+        "sector": trace.get("sector"),
+        "rank_in_sector": trace.get("rank_in_sector"),
+        "sector_depth": trace.get("sector_depth"),
+        "score_applicable": trace.get("score_applicable"),
+        "effective_gate": trace.get("effective_gate"),
+        "passed": list(trace.get("passed", [])),
+        "failed": list(trace.get("failed", [])),
+    }
+
+
+def _thesis_changes(entry: dict, current: dict) -> list:
+    """Ordered, deterministic list of what moved between entry and today.
+    Each item is {"field", "from", "to"}. Empty when nothing tracked changed."""
+    changes = []
+    e, c = _trace_facts(entry), _trace_facts(current)
+
+    # Rank within the sector pool — the margin narrowing or widening.
+    if (e.get("rank_in_sector"), e.get("sector_depth")) != \
+       (c.get("rank_in_sector"), c.get("sector_depth")):
+        changes.append({"field": "rank_in_sector",
+                        "from": (e.get("rank_in_sector"), e.get("sector_depth")),
+                        "to": (c.get("rank_in_sector"), c.get("sector_depth"))})
+
+    # How many applicable frameworks it passes now.
+    if e.get("score_applicable") != c.get("score_applicable"):
+        changes.append({"field": "score_applicable",
+                        "from": e.get("score_applicable"),
+                        "to": c.get("score_applicable")})
+
+    # Which specific frameworks flipped, in each direction.
+    e_pass, c_pass = set(e.get("passed", [])), set(c.get("passed", []))
+    if sorted(c_pass - e_pass):
+        changes.append({"field": "newly_passing", "from": None,
+                        "to": sorted(c_pass - e_pass)})
+    if sorted(e_pass - c_pass):
+        changes.append({"field": "newly_failing", "from": None,
+                        "to": sorted(e_pass - c_pass)})
+
+    # Conviction rank drift, when both entry and today were conviction picks.
+    if e.get("conviction_rank") is not None and c.get("conviction_rank") is not None \
+       and e.get("conviction_rank") != c.get("conviction_rank"):
+        changes.append({"field": "conviction_rank",
+                        "from": e.get("conviction_rank"),
+                        "to": c.get("conviction_rank")})
+
+    # The seat itself changed character (e.g. large-cap floor -> pure merit).
+    if e.get("slot_type") != c.get("slot_type"):
+        changes.append({"field": "slot_type",
+                        "from": e.get("slot_type"), "to": c.get("slot_type")})
+
+    return changes
+
+
+def diff_thesis(entry_trace: dict | None, current_trace: dict | None) -> dict:
+    """
+    Classify how a holding's thesis has drifted since purchase.
+
+    entry_trace   : _trace stored at registration, or None if never recorded
+                    (manual holding, or bought before trace capture shipped).
+    current_trace : the same ticker's _trace in a fresh selection over today's
+                    universe, or None if it is no longer selected / has fallen
+                    out of Tier 1.
+
+    Returns {"drift", "entry", "current", "changes"} where drift is one of:
+      no_trace              no entry thesis to compare against.
+      no_longer_investable  would NOT be bought today; fell out of the pool.
+      now_merit             was held on conviction, now clears the gate on merit
+                            (thesis strengthened).
+      now_conviction        was a merit pick, now survives only via the
+                            conviction sleeve (thesis weakened).
+      still_selected        same basis; see `changes` for the delta.
+    """
+    if not entry_trace:
+        return {"drift": "no_trace", "entry": {},
+                "current": _trace_facts(current_trace), "changes": []}
+
+    if not current_trace:
+        return {"drift": "no_longer_investable",
+                "entry": _trace_facts(entry_trace), "current": None, "changes": []}
+
+    was_conv, now_conv = _on_conviction(entry_trace), _on_conviction(current_trace)
+    drift = ("now_merit" if (was_conv and not now_conv)
+             else "now_conviction" if (not was_conv and now_conv)
+             else "still_selected")
+
+    return {"drift": drift,
+            "entry": _trace_facts(entry_trace),
+            "current": _trace_facts(current_trace),
+            "changes": _thesis_changes(entry_trace, current_trace)}
