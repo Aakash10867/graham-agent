@@ -2,7 +2,7 @@ name: Telegram Bot Poll
 
 on:
   schedule:
-    - cron: '*/59 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch:  # Manual trigger for testing
 
 jobs:
