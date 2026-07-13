@@ -665,23 +665,31 @@ def run_daily_tracker():
     except Exception as e:
         print(f"Warning: Could not fetch Nifty 50: {e}")
 
-    # ── Fetch Nifty BeES for shadow portfolio ──
-    nifty_bees_price = None
-    try:
-        nifty_bees_price = _usable_close(
-            yf.Ticker("NIFTYBEES.NS").history(period="5d"), "NIFTYBEES.NS")
-    except Exception as e:
-        print(f"Warning: Could not fetch Nifty BeES: {e}")
+    # ── Fetch a current close for EACH benchmark ETF in use ──
+    # Portfolios no longer share one benchmark: each was locked at registration
+    # to the ETF its IPS mandate implied (Nifty 50 / Midcap 150 / Smallcap 250).
+    # Price every portfolio's shadow against the SAME ETF its nifty_units were
+    # bought in. The NaN discipline is unchanged, only applied per ticker: a
+    # missing close means that benchmark's shadow is NULL this run, never a guess.
+    _port_by_id = {p["id"]: p for p in portfolios}
+    bench_px = {}
+    for _bt in {(p.get("benchmark_ticker") or "NIFTYBEES.NS") for p in portfolios}:
+        try:
+            _px = _usable_close(yf.Ticker(_bt).history(period="5d"), _bt)
+        except Exception as e:
+            _px = None
+            print(f"Warning: Could not fetch benchmark {_bt}: {e}")
+        bench_px[_bt] = _px
+        if _px is None:
+            print(f"Warning: no usable {_bt} close. Shadow metrics are NULL this "
+                  f"run for portfolios on {_bt}; the ledger will NOT be written "
+                  f"with a guessed price.")
+        else:
+            print(f"{_bt} close: {_px:,.2f}")
 
-    if nifty_bees_price is None:
-        # Do NOT silently substitute a stale price. Every nifty-relative metric
-        # (shadow value, nifty_units, nifty_xirr) is skipped for this run and
-        # written as NULL. One missing day is recoverable; a ledger with a wrong
-        # entry price is not.
-        print("Warning: no usable NIFTYBEES close. Nifty shadow metrics are NULL "
-              "for this run; the ledger will NOT be written with a guessed price.")
-    else:
-        print(f"Nifty BeES close: {nifty_bees_price:,.2f}")
+    def _bench_price_for(port):
+        """Current close of a portfolio's assigned benchmark ETF, or None."""
+        return bench_px.get((port or {}).get("benchmark_ticker") or "NIFTYBEES.NS")
 
     # ── Fetch all transactions once ──
     txn_resp = supabase.table("sip_transactions").select("portfolio_id, amount_inr, transaction_type, nifty_units").execute()
@@ -699,10 +707,16 @@ def run_daily_tracker():
     # a NULL costs one day. Ledger rows are summed forever (see L564:
     # `float(t.get("nifty_units") or 0)`), so a NULL genesis row silently and
     # permanently understates the Nifty shadow. Skip and retry tomorrow.
-    if _ports_needing_bootstrap and not nifty_bees_price:
-        print(f"Skipping bootstrap of {len(_ports_needing_bootstrap)} portfolios: "
-              f"no NIFTYBEES close today. Will retry next run.")
-        _ports_needing_bootstrap = set()
+    # Only bootstrap portfolios whose OWN benchmark has a usable close today; a
+    # genesis row with NULL nifty_units would permanently understate that
+    # portfolio's shadow. The rest retry next run.
+    if _ports_needing_bootstrap:
+        _skip_boot = {pid for pid in _ports_needing_bootstrap
+                      if not _bench_price_for(_port_by_id.get(pid))}
+        if _skip_boot:
+            print(f"Skipping bootstrap of {len(_skip_boot)} portfolios: no usable "
+                  f"benchmark close today. Will retry next run.")
+        _ports_needing_bootstrap = _ports_needing_bootstrap - _skip_boot
 
     if _ports_needing_bootstrap:
         _bootstrap_today = date.today().isoformat()
@@ -715,12 +729,15 @@ def run_daily_tracker():
                     continue
                 _h_amt = round(_h_shares * _h_price, 2)
                 _h_date = (h.get("entry_date") or _bootstrap_today)[:10]
-                # `nifty_bees_price and ...` was TRUE for NaN — bool(nan) is True.
-                # This wrote nifty_units=NaN into the permanent ledger. The twin
-                # of this line at the paper-SIP site has `nifty_bees_price > 0`,
-                # which is False for NaN, and was saved by that accident.
-                _nifty_u = (round(_h_amt / nifty_bees_price, 6)
-                            if (nifty_bees_price and nifty_bees_price > 0 and _h_amt > 0)
+                # Price the genesis row off THIS portfolio's benchmark ETF, not a
+                # shared NIFTYBEES. `_bp and _bp > 0` also guards NaN — bool(nan)
+                # is True, so `_bp and ...` alone once wrote nifty_units=NaN into
+                # the permanent ledger; the `> 0` is what actually rejects NaN.
+                _pf = _port_by_id.get(h["portfolio_id"])
+                _bp = _bench_price_for(_pf)
+                _bt = (_pf or {}).get("benchmark_ticker") or "NIFTYBEES.NS"
+                _nifty_u = (round(_h_amt / _bp, 6)
+                            if (_bp and _bp > 0 and _h_amt > 0)
                             else None)
                 _port_user = next((p["user_id"] for p in portfolios if p["id"] == h["portfolio_id"]), None)
                 if _port_user:
@@ -733,8 +750,9 @@ def run_daily_tracker():
                         "amount_inr": _h_amt,
                         "transaction_type": "buy",
                         "transaction_date": _h_date,
-                        "nifty_price": nifty_bees_price,
+                        "nifty_price": _bp,
                         "nifty_units": _nifty_u,
+                        "benchmark_ticker": _bt,
                     })).execute()
         # Refresh transactions after bootstrap
         txn_resp = supabase.table("sip_transactions").select("portfolio_id, amount_inr, transaction_type, nifty_units").execute()
@@ -811,8 +829,9 @@ def run_daily_tracker():
                 cumulative_invested -= amt
             total_nifty_units += float(t.get("nifty_units") or 0)
 
-        nifty_shadow = (round(total_nifty_units * nifty_bees_price, 2)
-                        if (nifty_bees_price and nifty_bees_price > 0 and total_nifty_units > 0)
+        _bp = _bench_price_for(port)
+        nifty_shadow = (round(total_nifty_units * _bp, 2)
+                        if (_bp and _bp > 0 and total_nifty_units > 0)
                         else None)
         if nifty_shadow is not None and not math.isfinite(nifty_shadow):
             nifty_shadow = None
@@ -1504,12 +1523,14 @@ def run_daily_tracker():
                     if _new_shares <= 0:
                         continue
                     _new_amt = round(_new_shares * _cur_price, 2)
-                    if not nifty_bees_price or nifty_bees_price <= 0:
-                        print(f"  Skipping paper SIP for {_ticker}: no NIFTYBEES close. "
+                    _bp = _bench_price_for(pp)
+                    _bt = pp.get("benchmark_ticker") or "NIFTYBEES.NS"
+                    if not _bp or _bp <= 0:
+                        print(f"  Skipping paper SIP for {_ticker}: no {_bt} close. "
                               f"A ledger row with NULL nifty_units would permanently "
                               f"understate the shadow portfolio.")
                         continue
-                    _nifty_u = round(_new_amt / nifty_bees_price, 6)
+                    _nifty_u = round(_new_amt / _bp, 6)
                     # Record transaction
                     try:
                         supabase.table("sip_transactions").insert(_json_safe({
@@ -1521,8 +1542,9 @@ def run_daily_tracker():
                             "amount_inr": _new_amt,
                             "transaction_type": "paper_sip",
                             "transaction_date": today_str,
-                            "nifty_price": nifty_bees_price,
+                            "nifty_price": _bp,
                             "nifty_units": _nifty_u,
+                            "benchmark_ticker": _bt,
                         })).execute()
                     except Exception as e:
                         print(f"  Paper SIP txn failed for {_ticker}: {e}")
