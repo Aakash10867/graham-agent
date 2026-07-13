@@ -923,19 +923,27 @@ def _thesis_changes(entry: dict, current: dict) -> list:
     return changes
 
 
-def diff_thesis(entry_trace: dict | None, current_trace: dict | None) -> dict:
+def diff_thesis(entry_trace: dict | None, current_trace: dict | None,
+                still_investable: bool = True) -> dict:
     """
     Classify how a holding's thesis has drifted since purchase.
 
-    entry_trace   : _trace stored at registration, or None if never recorded
-                    (manual holding, or bought before trace capture shipped).
-    current_trace : the same ticker's _trace in a fresh selection over today's
-                    universe, or None if it is no longer selected / has fallen
-                    out of Tier 1.
+    entry_trace     : _trace stored at registration, or None if never recorded
+                      (manual holding, or bought before trace capture shipped).
+    current_trace   : the same ticker's _trace in a fresh selection over today's
+                      universe, or None if it was not selected today.
+    still_investable: is the ticker still in the Tier-1 pool today? Only consulted
+                      when current_trace is None, to tell "outranked" (still
+                      investable, just not top-N) apart from "fell out of the
+                      pool". Defaults True so a caller that cannot check pool
+                      membership never falsely claims the turnover floor failed.
 
     Returns {"drift", "entry", "current", "changes"} where drift is one of:
       no_trace              no entry thesis to compare against.
-      no_longer_investable  would NOT be bought today; fell out of the pool.
+      no_longer_investable  fell out of the Tier-1 pool (turnover/quality floor);
+                            would NOT be bought today.
+      outranked             still investable, but other names now rank above it;
+                            not in today's portfolio.
       now_merit             was held on conviction, now clears the gate on merit
                             (thesis strengthened).
       now_conviction        was a merit pick, now survives only via the
@@ -947,7 +955,11 @@ def diff_thesis(entry_trace: dict | None, current_trace: dict | None) -> dict:
                 "current": _trace_facts(current_trace), "changes": []}
 
     if not current_trace:
-        return {"drift": "no_longer_investable",
+        # Not selected in today's re-run. Distinguish two very different
+        # realities: still in the pool but outranked (soft) vs fell out of the
+        # pool entirely — the turnover/quality floor, the real sell signal.
+        drift = "outranked" if still_investable else "no_longer_investable"
+        return {"drift": drift,
                 "entry": _trace_facts(entry_trace), "current": None, "changes": []}
 
     was_conv, now_conv = _on_conviction(entry_trace), _on_conviction(current_trace)
