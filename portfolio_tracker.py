@@ -403,7 +403,8 @@ def _usable_close(hist, label):
         return None
 
 
-def compute_portfolio_risk_metrics(holdings, universe_df=None, nifty_history=None):
+def compute_portfolio_risk_metrics(holdings, universe_df=None, nifty_history=None,
+                                   benchmark_ticker=None):
     """Compute portfolio-level risk and performance metrics from Reilly & Brown.
     Ch 7: CAPM, Beta, Alpha (Jensen). Ch 18: Sharpe, Treynor, Sortino, IR.
 
@@ -547,14 +548,42 @@ def compute_portfolio_risk_metrics(holdings, universe_df=None, nifty_history=Non
                     if math.isfinite(alpha):
                         result["jensen_alpha"] = round(float(alpha), 4)
 
-                # ── 6. Information Ratio = (Rp - Rb) / σ(Rp - Rb) (Ch 18) ──
+                # ── 6. Information Ratio vs the ASSIGNED benchmark ETF (Ch 18) ──
+                # IR measures skill against the alternative the user would
+                # actually have bought — the assigned ETF, not the market index.
+                # jensen_alpha and market_return above stay on ^NSEI (the market
+                # portfolio, for CAPM); only IR switches to the ETF, consistent
+                # with the shadow, which is also priced in the ETF. Falls back to
+                # ^NSEI if no ETF is assigned or its series can't be fetched.
+                bench_returns = nifty_returns
+                bench_annual_return = market_annual_return
+                if benchmark_ticker and benchmark_ticker != "^NSEI":
+                    try:
+                        _etf = yf.download(benchmark_ticker,
+                                           start=start_date.strftime("%Y-%m-%d"),
+                                           end=end_date.strftime("%Y-%m-%d"),
+                                           progress=False, auto_adjust=True,
+                                           group_by="column")
+                        if not _etf.empty:
+                            _ec = _etf["Close"]
+                            if hasattr(_ec, "columns"):
+                                _ec = _ec.iloc[:, 0]
+                            _er = _ec.pct_change(fill_method=None).dropna()
+                            _ear = float(_er.mean() * trading_days)
+                            if len(_er) and math.isfinite(_ear):
+                                bench_returns = _er
+                                bench_annual_return = _ear
+                    except Exception as _ee:
+                        print(f"  IR benchmark {benchmark_ticker} fetch failed, "
+                              f"falling back to ^NSEI: {type(_ee).__name__}: {_ee}")
+
                 aligned = port_returns.to_frame("port").join(
-                    nifty_returns.to_frame("nifty"), how="inner")
+                    bench_returns.to_frame("bench"), how="inner")
                 if not aligned.empty:
-                    tracking_diff = aligned["port"] - aligned["nifty"]
+                    tracking_diff = aligned["port"] - aligned["bench"]
                     tracking_error = float(tracking_diff.std() * (trading_days ** 0.5))
                     if math.isfinite(tracking_error) and tracking_error > 0:
-                        ir = (port_annual_return - market_annual_return) / tracking_error
+                        ir = (port_annual_return - bench_annual_return) / tracking_error
                         if math.isfinite(ir):
                             result["information_ratio"] = round(float(ir), 3)
         except Exception as e:
@@ -881,7 +910,9 @@ def run_daily_tracker():
         print(f"Updated [{port['name']}]: Value {current_total_value:,.2f} | Return {return_pct:+.2f}%{_xirr_str} | Div {_div_label}{_div_score}")
         # Sprint 11: Portfolio risk & performance metrics (Reilly & Brown Ch 7, 18)
         try:
-            _risk = compute_portfolio_risk_metrics(port_holdings, universe_df)
+            _risk = compute_portfolio_risk_metrics(
+                port_holdings, universe_df,
+                benchmark_ticker=port.get("benchmark_ticker"))
             if _risk:
                 _risk_update = {}
                 for k in ["portfolio_beta", "sharpe_ratio", "sortino_ratio", "jensen_alpha",
