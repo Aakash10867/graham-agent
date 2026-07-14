@@ -4,12 +4,12 @@
   "min_required": 6,
   "horizon_trading_days": 63,
   "benchmark": "NIFTYBEES.NS",
-  "generated": "2026-07-13T21:40:49",
+  "generated": "2026-07-14T21:39:47",
   "caveats": [
     "Buy-and-hold by ENTRY score; mid-horizon score changes are ignored.",
     "Delisted names with no forward price are dropped and counted in n_missing; this biases surviving-bucket returns UPWARD.",
     "Point-in-time snapshot => no current-list survivorship bias; the residual is delisting only."
   ],
   "buckets": {},
-  "first_signal_projected": "unknown (need more snapshots to estimate cadence)"
+  "first_signal_projected": "2026-10-13"
 }
