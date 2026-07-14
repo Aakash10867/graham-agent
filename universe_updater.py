@@ -268,7 +268,19 @@ def fetch_fundamentals(ticker, retries=3):
                 calc_years_listed = round((datetime.now(tz=timezone.utc) - first_date).days / 365.25, 1)
             else:
                 calc_years_listed = None
-            pe = info.get("trailingPE")
+            def _f(x):
+                # yfinance's info dict occasionally returns numeric fields as
+                # strings ('123.4', 'Infinity', 'N/A'). Those pass the truthy
+                # guards below and then raise "'>' not supported between str and
+                # int" on a "> 0" comparison — the TypeError that silently failed
+                # 8 tickers. Coerce every numeric info field to float-or-None here.
+                try:
+                    v = float(x)
+                    return v if (v == v and v not in (float("inf"), float("-inf"))) else None
+                except (TypeError, ValueError):
+                    return None
+
+            pe = _f(info.get("trailingPE"))
 
             data = {
                 "ticker": ticker,
@@ -276,11 +288,11 @@ def fetch_fundamentals(ticker, retries=3):
                 "name": info.get("longName") or info.get("shortName", ticker),
                 "sector": info.get("sector", ""),
                 "industry": info.get("industry", ""),
-                "price": info.get("regularMarketPrice") or info.get("currentPrice"),
+                "price": _f(info.get("regularMarketPrice") or info.get("currentPrice")),
                 "pe": pe,
-                "pb": info.get("priceToBook"),
-                "roe": info.get("returnOnEquity"),
-                "de": info.get("debtToEquity"),
+                "pb": _f(info.get("priceToBook")),
+                "roe": _f(info.get("returnOnEquity")),
+                "de": _f(info.get("debtToEquity")),
                 # yfinance changed convention: dividendYield now returns PERCENT
                 # (3.29), not the fraction (0.0329) every consumer in this
                 # codebase assumes. Normalize once, here, at ingest.
@@ -290,16 +302,16 @@ def fetch_fundamentals(ticker, retries=3):
                 #   universe_updater:616 dividend_yield_pct = dy * 100
                 # All four are correct against a fraction. Fixing them
                 # individually would be four places to get wrong next time.
-                "dividend_yield": (info.get("dividendYield") / 100.0
-                                   if info.get("dividendYield") is not None else None),
-                "eps": info.get("trailingEps"),
+                "dividend_yield": (_f(info.get("dividendYield")) / 100.0
+                                   if _f(info.get("dividendYield")) is not None else None),
+                "eps": _f(info.get("trailingEps")),
                 "earnings_yield": round(1.0 / pe * 100, 2) if pe and pe > 0 else None,
-                "profit_margin": info.get("profitMargins"),
-                "market_cap": info.get("marketCap"),
-                "current_ratio": info.get("currentRatio"),
-                "beta": info.get("beta"),
-                "week52_high": info.get("fiftyTwoWeekHigh"),
-                "week52_low": info.get("fiftyTwoWeekLow"),
+                "profit_margin": _f(info.get("profitMargins")),
+                "market_cap": _f(info.get("marketCap")),
+                "current_ratio": _f(info.get("currentRatio")),
+                "beta": _f(info.get("beta")),
+                "week52_high": _f(info.get("fiftyTwoWeekHigh")),
+                "week52_low": _f(info.get("fiftyTwoWeekLow")),
                 "pct_from_high": None,
                 "pct_from_low": None,
                 "pe_4y_avg": None,
