@@ -1025,13 +1025,35 @@ def main():
         try:
             _prev = len(pd.read_csv(output_file))
             _delta = (len(df) - _prev) / _prev
-            print(f"\n[GUARD] universe size: {_prev} -> {len(df)} ({_delta:+.1%})")
-            if _delta < -0.02:
-                print("[GUARD] FATAL: universe shrank more than 2%. Not overwriting.")
-                print("[GUARD] Inspect universe_failures.csv. If the losses are "
-                      "'delisted'/'404_not_found', this is real and you can rerun "
-                      "with the guard relaxed. If they are 'rate_limited', rerun later.")
+            # Reason-based, not a raw % floor. The universe breathes daily (real
+            # delistings, new listings) so a fixed threshold blocks legitimate
+            # delisting days and forces a manual rerun. What we must NOT do is
+            # overwrite a good universe with one missing LIVE stocks because Yahoo
+            # timed out. So we ask WHY it shrank: TRANSIENT failures (rate limits /
+            # network errors) come back on a rerun; REAL losses (delisted / 404 /
+            # no price) are genuine and should overwrite. A catastrophic drop is
+            # blocked regardless — that is a systemic break, not a normal day.
+            _transient = sum(1 for _t, r in FAILURES
+                             if r == "rate_limited" or r.startswith("error:"))
+            _best = len(df) + _transient          # if every transient had succeeded
+            _delta_best = (_best - _prev) / _prev
+            print(f"\n[GUARD] universe size: {_prev} -> {len(df)} ({_delta:+.1%}); "
+                  f"transient failures {_transient} -> best-case {_best} "
+                  f"({_delta_best:+.1%})")
+            _CATASTROPHIC = -0.15    # systemic break — block whatever the labels say
+            _FLOOR = -0.02
+            if _delta < _CATASTROPHIC:
+                print(f"[GUARD] FATAL: catastrophic shrink ({_delta:+.1%}). Systemic "
+                      f"problem, not a normal day. Not overwriting.")
                 sys.exit(1)
+            elif _delta < _FLOOR and _delta_best >= _FLOOR:
+                print(f"[GUARD] FATAL: the shrink is TRANSIENT — recovering the "
+                      f"{_transient} timed-out/throttled tickers would restore the "
+                      f"universe. Not overwriting; rerun when Yahoo is healthy.")
+                sys.exit(1)
+            else:
+                print("[GUARD] shrink is real (delistings / no-price dominate; a "
+                      "rerun would not recover them) — accepting the overwrite.")
         except SystemExit:
             raise
         except Exception as _e:
