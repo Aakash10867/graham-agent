@@ -961,24 +961,51 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
     _drawdown = portfolio.get("max_drawdown")
     _capm = portfolio.get("capm_expected_return")
 
-    if any(v is not None for v in [_sortino, _treynor, _jensen, _ir, _drawdown, _capm]):
+    # Sprint 13 §3: two a retail investor acts on as plain-English headline
+    # (Jensen as prose; drawdown with its short-history caveat), the rest as a
+    # compact methodology line — the PDF equivalent of "behind the expander".
+    _dd_prov = portfolio.get("max_drawdown_provisional")
+    _semidev = portfolio.get("semi_deviation")
+    _rfr_used = portfolio.get("rfr_used")
+    _hist_days = portfolio.get("metrics_history_days")
+
+    if any(v is not None for v in [_sortino, _treynor, _jensen, _ir, _drawdown, _capm, _semidev]):
         story.append(Paragraph("Risk & Performance Metrics", s_heading))
-        _metrics_text = ""
-        if _capm is not None:
-            _metrics_text += f"CAPM expected return: {_capm*100:.1f}% p.a. "
+
         if _jensen is not None:
-            _sign = "+" if _jensen >= 0 else ""
-            _alpha_label = "outperforming" if _jensen >= 0 else "underperforming"
-            _metrics_text += f"Jensen's Alpha: {_sign}{_jensen*100:.1f}% ({_alpha_label} risk-adjusted expectation). "
-        if _sortino is not None:
-            _metrics_text += f"Sortino ratio: {_sortino:.2f} (downside-risk-adjusted). "
-        if _treynor is not None:
-            _metrics_text += f"Treynor ratio: {_treynor:.4f}. "
-        if _ir is not None:
-            _metrics_text += f"Information ratio: {_ir:.2f}. "
+            _jp = _jensen * 100
+            _dir = "ahead of" if _jp >= 0 else "behind"
+            _tail = "a selection edge, if it holds up" if _jp >= 0 else "the picks have lagged so far"
+            story.append(Paragraph(
+                f"<b>Selection alpha:</b> about {_jp:+.1f} points {_dir} what this portfolio's risk "
+                f"level alone would predict &mdash; the part attributable to which stocks were picked, "
+                f"after stripping out how the market moved and how much risk was taken ({_tail}).",
+                s_body))
         if _drawdown is not None:
-            _metrics_text += f"Maximum drawdown: {_drawdown*100:.1f}%."
-        story.append(Paragraph(_metrics_text, s_body))
+            if _dd_prov:
+                story.append(Paragraph(
+                    f"<b>Worst fall so far:</b> {_drawdown*100:.1f}% &mdash; on short history "
+                    f"(under ~6 months) this is not yet a reliable risk estimate; the true worst "
+                    f"fall is likely deeper.", s_body))
+            else:
+                story.append(Paragraph(
+                    f"<b>Maximum drawdown:</b> {_drawdown*100:.1f}% peak-to-trough.", s_body))
+
+        _method = []
+        if _sortino is not None: _method.append(f"Sortino {_sortino:.2f}")
+        if _treynor is not None: _method.append(f"Treynor {_treynor:.4f}")
+        if _ir is not None:      _method.append(f"Information ratio {_ir:.2f}")
+        if _capm is not None:    _method.append(f"CAPM expected {_capm*100:.1f}% p.a.")
+        if _semidev is not None: _method.append(f"Semi-deviation {_semidev*100:.1f}%")
+        if _method:
+            story.append(Paragraph("Methodology: " + " &middot; ".join(_method) + ".", s_small))
+
+        _stamp = []
+        if _rfr_used is not None:  _stamp.append(f"risk-free rate {_rfr_used*100:.1f}%")
+        if _hist_days is not None: _stamp.append(f"computed on {_hist_days} trading days of history")
+        if _stamp:
+            story.append(Paragraph("(" + "; ".join(_stamp) + ".)", s_small))
+
         story.append(Spacer(1, 4*mm))
  
     # ══════════════════════════════════════
@@ -8152,6 +8179,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 m5.metric(f"vs {_bench['label']}", f"{alpha_simple:+.1f}%", delta=f"{_bench['label']} {nifty_simple:+.1f}%")
                             else:
                                 m5.metric(f"vs {_bench['label']}", "—")
+
                             # ── Sprint 13 §3: risk metrics — three a retail SIP
                             # investor can act on up front, the other eight behind
                             # a methodology expander, and Jensen's alpha in plain
