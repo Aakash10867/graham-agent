@@ -3245,6 +3245,7 @@ div[data-baseweb] [aria-invalid] { box-shadow: none !important; }
 # ── Google OAuth callback handler ──
 _oa_access = st.query_params.get("access_token")
 _oa_refresh = st.query_params.get("refresh_token")
+_oa_picks = st.query_params.get("picks")   # picks carried through the OAuth redirect
 if _oa_access and not st.session_state.sb_user_email:
     try:
         sb = get_supabase()
@@ -3266,6 +3267,10 @@ if _oa_access and not st.session_state.sb_user_email:
             pass
     except Exception as e:
         st.error(f"Google login failed: {e}")
+    if _oa_picks:
+        # Restore the pre-login picks so the post-login flush (the _screen_pending
+        # block near line 6191) adds them to the watchlist — the whole point.
+        st.session_state._screen_pending = [t for t in _oa_picks.split(",") if t]
     st.query_params.clear()
     st.rerun()
 
@@ -3277,7 +3282,13 @@ if _oa_access and not st.session_state.sb_user_email:
 with st.sidebar:
     # ── Auth ──
     if st.session_state.sb_user_email is None:
-        _goog_url = f"{st.secrets['SUPABASE_URL']}/auth/v1/authorize?provider=google&redirect_to=https://aakash10867.github.io/graham-agent/auth-callback.html"
+        import urllib.parse as _url
+        _cb = "https://aakash10867.github.io/graham-agent/auth-callback.html"
+        _sp = st.session_state.get("_screen_pending")
+        if _sp:
+            _cb += "?picks=" + _url.quote(",".join(_sp))
+        _goog_url = (f"{st.secrets['SUPABASE_URL']}/auth/v1/authorize?provider=google"
+                     f"&redirect_to={_url.quote(_cb, safe='')}")
         st.link_button("🔵 Sign in with Google", _goog_url, use_container_width=True)
         st.divider()
         auth_mode = st.radio(
