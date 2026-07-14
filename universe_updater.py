@@ -536,6 +536,26 @@ def fetch_fundamentals(ticker, retries=3):
                 data["non_op_pct"] = None
                 data["quality_pass"] = True  
 
+            # ── Sprint 13 §4: guard an IMPOSSIBLE dividend yield ──
+            # info["dividendYield"] roughly doubles after a bonus/split (e.g.
+            # Wipro 1:1, Dec 2024): trailing DPS over a post-action price. A
+            # payout above 150% of a PROFITABLE company's earnings is
+            # arithmetically implausible, so rather than feed a value we know is
+            # wrong into Lynch / Graham payout / Dorsey, we FLAG it and NULL the
+            # yield for scoring — "unknown" beats "wrong". Payout is derived from
+            # the same numbers already in `data` (yield x market_cap / net income),
+            # so flag and null can't disagree, and only the handful of
+            # provably-broken rows are touched — clean yields, including
+            # legitimate >100% special/reserve-funded payers, are left alone.
+            data["dividend_yield_unreliable"] = False
+            _dy = data.get("dividend_yield")
+            _mc = data.get("market_cap")
+            _ni0 = data.get("net_income_y0")
+            if _dy and _dy > 0 and _mc and _mc > 0 and _ni0 and _ni0 > 0:
+                if (_dy * _mc) / _ni0 > 1.5:          # payout > 150% on a profit
+                    data["dividend_yield_unreliable"] = True
+                    data["dividend_yield"] = None      # do not trust it in scoring
+
             # 2. Be nice to Yahoo: Small delay between successful requests
             time.sleep(0.5) 
             return data, stock
@@ -872,7 +892,7 @@ def main():
         "is_unevaluable", "unevaluable_reason",
         "price", "market_cap", "years_listed",
         "pe", "pb", "roe_pct", "de", "eps",
-        "dividend_yield_pct", "profit_margin",
+        "dividend_yield_pct", "dividend_yield_unreliable", "profit_margin",
         "current_ratio", "beta",
         "week52_high", "week52_low", "pct_from_high", "pct_from_low",
         "pe_4y_avg", "pe_vs_avg",
