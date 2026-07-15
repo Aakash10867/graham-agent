@@ -1389,7 +1389,7 @@ def compute_greenblatt_ranks(all_data):
         d["_roic_rank"] = i + 1
 
     # Sort by Earnings Yield (descending = best gets rank 1)
-    rankable.sort(key=lambda x: _sf(x.get("greenblatt_earnings_yield")) or 0, reverse=True)
+    rankable.sort(key=lambda x: (-(_sf(x.get("greenblatt_earnings_yield")) or 0), str(x.get("ticker"))))
     for i, d in enumerate(rankable):
         d["_ey_rank"] = i + 1
 
@@ -1398,7 +1398,7 @@ def compute_greenblatt_ranks(all_data):
         d["greenblatt_combined_rank"] = d.get("_roic_rank", 0) + d.get("_ey_rank", 0)
 
     # Convert to percentile score (1-10)
-    rankable.sort(key=lambda x: x.get("greenblatt_combined_rank", 9999))
+    rankable.sort(key=lambda x: (x.get("greenblatt_combined_rank", 9999), str(x.get("ticker"))))
     n = len(rankable)
     for i, d in enumerate(rankable):
         percentile = (1 - i / n) * 10
