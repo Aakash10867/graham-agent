@@ -565,7 +565,6 @@ ticker,name,exchange
 516106.BO,Shree Karthik Papers Ltd.,BSE
 516108.BO,South India Paper Mills Ltd.,BSE
 516110.BO,FAMILY CARE HOSPITALS LIMITED,BSE
-517035.BO,RIR POWER ELECTRONICS LIMITED,BSE
 517063.BO,Jetking Infotrain Ltd.,BSE
 517077.BO,Ind-Agiv Commerce Ltd.,BSE
 517096.BO,Aplab Ltd.,BSE
@@ -808,7 +807,6 @@ ticker,name,exchange
 524576.BO,Vivid Global Industries Limited,BSE
 524580.BO,Priya Limited.,BSE
 524582.BO,Tirupati Starch & Chemicals Ltd.,BSE
-524590.BO,Hemo Organic Limited,BSE
 524592.BO,JAYSYNTH ORGOCHEM LIMITED,BSE
 524594.BO,Aeonx Digital Technology Limited,BSE
 524602.BO,BANDARAM PHARMA PACKTECH LIMITED,BSE
@@ -1447,6 +1445,7 @@ ticker,name,exchange
 532975.BO,TELOGICA LIMITED,BSE
 532985.BO,Kotak Mahindra Mutual Fund,BSE
 532992.BO,CHL Limited,BSE
+533006.BO,Birla Cotsyn (India) Limited,BSE
 533007.BO,LGB Forge Limited,BSE
 533018.BO,SIMPLEX MILLS COMPANY LIMITED,BSE
 533019.BO,SIMPLEX PAPERS LTD.,BSE
@@ -1672,7 +1671,6 @@ ticker,name,exchange
 539190.BO,Decillion Finance Ltd.,BSE
 539195.BO,POCL ENTERPRISES LTD,BSE
 539196.BO,Amba Enterprises Ltd.,BSE
-539198.BO,Capfin India Limited,BSE
 539200.BO,NOBLE POLYMERS LIMITED,BSE
 539206.BO,GENOMIC VALLEY BIOTECH LIMITED,BSE
 539216.BO,GARMENT MANTRA LIFESTYLE LIMITED,BSE
@@ -1806,7 +1804,6 @@ ticker,name,exchange
 540023.BO,COLORCHIPS NEW MEDIA LIMITED,BSE
 540026.BO,Ladam Affortable Housing Limited,BSE
 540062.BO,Golden Crest Education & Services Limited,BSE
-540063.BO,ECS Biztech Limited,BSE
 540066.BO,AMS POLYMERS LIMITED,BSE
 540072.BO,Shiva Granito Export Limited,BSE
 540078.BO,Mitsu Chem Plast Limited,BSE
@@ -3871,6 +3868,7 @@ KSOLVES.NS,Ksolves India Limited,NSE
 KSR.NS,KSR Footwear Limited,NSE
 KTKBANK.NS,The Karnataka Bank Limited,NSE
 KUANTUM.NS,Kuantum Papers Limited,NSE
+KUSUMGAR.NS,Kusumgar Limited,NSE
 KWIL.NS,Kwality Wall's (India) Limited,NSE
 LAGNAM.NS,Lagnam Spintex Limited,NSE
 LAHOTIOV.NS,Lahoti Overseas Limited,NSE
@@ -4420,6 +4418,7 @@ RHIM.NS,RHI MAGNESITA INDIA LIMITED,NSE
 RHL.NS,Robust Hotels Limited,NSE
 RICOAUTO.NS,Rico Auto Industries Limited,NSE
 RIIL.NS,Reliance Industrial Infrastructure Limited,NSE
+RIR.NS,RIR Power Electronics Limited,NSE
 RISHABH.NS,Rishabh Instruments Limited,NSE
 RITCO.NS,Ritco Logistics Limited,NSE
 RITES.NS,RITES Limited,NSE
