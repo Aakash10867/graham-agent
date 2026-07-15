@@ -4,7 +4,7 @@
   "min_required": 6,
   "horizon_trading_days": 63,
   "benchmark": "NIFTYBEES.NS",
-  "generated": "2026-07-15T07:31:06",
+  "generated": "2026-07-15T12:38:17",
   "caveats": [
     "Buy-and-hold by ENTRY score; mid-horizon score changes are ignored.",
     "Delisted names with no forward price are dropped and counted in n_missing; this biases surviving-bucket returns UPWARD.",
