@@ -1384,7 +1384,7 @@ def compute_greenblatt_ranks(all_data):
         return
 
     # Sort by ROIC (descending = best gets rank 1)
-    rankable.sort(key=lambda x: _sf(x.get("greenblatt_roic")) or 0, reverse=True)
+    rankable.sort(key=lambda x: (-(_sf(x.get("greenblatt_roic")) or 0), str(x.get("ticker"))))
     for i, d in enumerate(rankable):
         d["_roic_rank"] = i + 1
 
