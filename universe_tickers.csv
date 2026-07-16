@@ -600,7 +600,6 @@ ticker,name,exchange
 517514.BO,D & H India Limited,BSE
 517546.BO,Alfa Transformers ltd.,BSE
 517554.BO,NHC FOODS LIMITED,BSE
-517564.BO,CLENON ENTERPRISES LIMITED,BSE
 518011.BO,Keerthi Industries Ltd,BSE
 518053.BO,Sri Chakra Cement Limited,BSE
 518075.BO,Suraj Products Ltd.,BSE
@@ -2642,6 +2641,7 @@ ticker,name,exchange
 544818.BO,Kotak Mahindra Mutual Fund,BSE
 544819.BO,Kotak Mahindra Mutual Fund,BSE
 544820.BO,Kotak Mahindra Mutual Fund,BSE
+544823.BO,DEVSON CATALYST LIMITED,BSE
 555555.BO,ICICI Prudential Mutual Fund,BSE
 590103.BO,Reliance Mutual Fund-Permitted,BSE
 590104.BO,Reliance Mutual Fund-Permitted,BSE
@@ -3389,7 +3389,6 @@ GANECOS.NS,Ganesha Ecosphere Limited,NSE
 GANESHBE.NS,Ganesh Benzoplast Limited,NSE
 GANESHCP.NS,Ganesh Consumer Products Limited,NSE
 GANESHHOU.NS,GANESH HOUSING LIMITED,NSE
-GANGAFO-RE.NS,Ganga Forging Ltd-RE,NSE
 GANGAFORGE.NS,Ganga Forging Limited,NSE
 GANGESSECU.NS,Ganges Securities Limited,NSE
 GARFIBRES.NS,Garware Technical Fibres Limited,NSE
@@ -3881,6 +3880,7 @@ LANDMARK.NS,Landmark Cars Limited,NSE
 LANDSMILL.NS,Landsmill Green Limited,NSE
 LAOPALA.NS,La Opala RG Limited,NSE
 LASA.NS,Lasa Supergenerics Limited,NSE
+LASERPOWER.NS,Laser Power & Infra Limited,NSE
 LATENTVIEW.NS,Latent View Analytics Limited,NSE
 LATTEYS.NS,Latteys Industries Limited,NSE
 LAURUSLABS.NS,Laurus Labs Limited,NSE
@@ -4705,7 +4705,6 @@ SUDARSCHEM.NS,Sudarshan Chemical Industries Limited,NSE
 SUDEEPPHRM.NS,Sudeep Pharma Limited,NSE
 SUKHJITS.NS,Sukhjit Starch & Chemicals Limited,NSE
 SULA.NS,Sula Vineyards Limited,NSE
-SUMEET-RE.NS,Sumeet Industries Limited-RE,NSE
 SUMEETINDS.NS,Sumeet Industries Limited,NSE
 SUMICHEM.NS,Sumitomo Chemical India Limited,NSE
 SUMIT.NS,Sumit Woods Limited,NSE
