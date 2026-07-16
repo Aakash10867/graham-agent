@@ -2385,6 +2385,17 @@ def _commit_portfolio(portfolio: dict) -> dict:
         if holdings_data:
             sb.table("holdings").insert(holdings_data).execute()
 
+            # A stock that's now IN a portfolio shouldn't linger on the watchlist —
+            # the user acted on it. Remove those tickers from this user's watchlist.
+            try:
+                _uid = portfolio.get("user_id") or st.session_state.get("sb_user_id")
+                _new_tickers = [h["ticker"] for h in holdings_data if h.get("ticker")]
+                if _uid and _new_tickers:
+                    sb.table("watchlist").delete().eq("user_id", str(_uid)).in_(
+                        "ticker", _new_tickers).execute()
+            except Exception as _wle:
+                print(f"Watchlist cleanup after commit failed (non-blocking): {_wle}")
+
         # BULK INSERT TRANSACTIONS
         # Shadow priced against the CHOSEN benchmark ETF, not always Nifty 50.
         # nifty_price/nifty_units are legacy column names; here they hold units
@@ -6569,10 +6580,6 @@ if st.session_state.sb_view_mode == "chat":
                             _sh_chat_target = _sh_disambig.group(1)
                         elif len(_sh_chat_tickers) == 1:
                             _sh_chat_target = list(_sh_chat_tickers)[0]
-                        if _sh_chat_target:
-                            with st.expander("📊 Score Trend"):
-                                render_score_history_chart(get_supabase(), _sh_chat_target,
-                                    chart_key=f"sh_chat_{_sh_chat_target}")
 
                     # ── Chat → Watchlist bridge: store positive-verdict tickers for buttons ──
                     _positive_verdicts = {"STRONG BUY", "BUY", "CONDITIONAL BUY"}
@@ -7567,17 +7574,18 @@ elif st.session_state.sb_view_mode == "builder":
             # went in; philosophy, min_acceptable_score, acceptable_tradeoff and
             # framework_weights were dropped on the floor. That is why every
             # answer produced the same fifteen stocks.
-            _cand_result = get_sip_candidates(
-                sip_amount=_calc_sip,
-                time_horizon=_b_time,
-                investor_type=_b_inv_type,
-                review_freq=_b_rev_freq,
-                avoid_sectors=_json.dumps(_b_avoid or []),
-                min_acceptable_score=_b_min_score,
-                philosophy=_b_philosophy_val,
-                acceptable_tradeoff=_b_tradeoff_val,
-                framework_weights=_json.dumps(_framework_weights.get(_b_philosophy_val, {})),
-            )
+            with st.spinner("🏗️ Building your portfolio — scoring the universe and selecting your stocks. This takes a moment…"):
+                _cand_result = get_sip_candidates(
+                    sip_amount=_calc_sip,
+                    time_horizon=_b_time,
+                    investor_type=_b_inv_type,
+                    review_freq=_b_rev_freq,
+                    avoid_sectors=_json.dumps(_b_avoid or []),
+                    min_acceptable_score=_b_min_score,
+                    philosophy=_b_philosophy_val,
+                    acceptable_tradeoff=_b_tradeoff_val,
+                    framework_weights=_json.dumps(_framework_weights.get(_b_philosophy_val, {})),
+                )
             st.session_state._built_portfolio = _cand_result.get("recommended_portfolio", [])
             st.session_state._built_web_grounding = _cand_result.get("web_grounding", {})
             st.session_state._built_diagnostics = _cand_result.get("selection_diagnostics", {})
