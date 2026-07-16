@@ -294,6 +294,20 @@ def kite_buy_url(ticker, quantity=1, order_type="MARKET"):
     return f"{KITE_RELAY_URL}?api_key={urllib.parse.quote(key)}&data={urllib.parse.quote(data)}"
 
 
+def kite_sell_url(ticker, quantity=1, order_type="MARKET"):
+    """Single-stock Kite Publisher SELL URL via the GitHub Pages relay (mirror of
+    kite_buy_url with transaction_type=SELL). Used by the portfolio review's
+    per-holding 'Sell on Kite' button."""
+    import urllib.parse
+    symbol = ticker.replace(".NS", "").replace(".BO", "")
+    exchange = "NSE" if ".NS" in ticker else "BSE"
+    data = json.dumps([{"exchange": exchange, "tradingsymbol": symbol,
+             "transaction_type": "SELL", "quantity": int(quantity),
+             "order_type": order_type}])
+    key = st.secrets["KITE_PUBLISHER_KEY"]
+    return f"{KITE_RELAY_URL}?api_key={urllib.parse.quote(key)}&data={urllib.parse.quote(data)}"
+
+
 def kite_basket_url(stocks):
     """Multiple stocks in one Kite session via GitHub Pages relay (POST required by Kite).
     stocks: list of dicts with 'ticker' and 'quantity' keys. Max 10 per Kite limit."""
@@ -9290,40 +9304,62 @@ elif st.session_state.sb_view_mode == "portfolios":
                     else:
                         m4.metric("vs Nifty", "—")
 
-                    display_df = pd.DataFrame(review_rows).drop(columns=[c for c in review_rows[0] if c.startswith("_")])
-                    st.dataframe(display_df, hide_index=True, width="stretch")
-
-
-                    # Per-stock reasoning with quality data
+                    # ── Simplified review surface ──
+                    # The user sees a crisp SELL / HOLD verdict per holding with a
+                    # one-line takeaway. ALL the committee analysis — the exact
+                    # SELL ALL/HALF/BUY MORE nuance, full reasoning, confidence,
+                    # thesis drift, quality data, book passage — is preserved behind
+                    # the "Why?" expander. Nothing is dropped; only the surface is
+                    # simplified. SELL verdicts get a one-tap Kite sell.
                     enriched_data = review_state.get("enriched", [])
                     for r in review_rows:
-                        if "SELL" in r["Action"]:
-                            st.error(f"**{r['Stock']}** — {r['Action']}\n\n{r['_reasoning']}")
-                        elif "BUY" in r["Action"]:
-                            st.success(f"**{r['Stock']}** — {r['Action']}\n\n{r['_reasoning']}")
-                        else:
-                            st.info(f"**{r['Stock']}** — {r['Action']}\n\n{r['_reasoning']}")
-                        _dfmt = _format_thesis_drift(r.get("_thesis_drift"))
-                        if _dfmt:
-                            _badge, _dmd = _dfmt
-                            _icon = {"broken": "🔴", "weak": "🟠", "strong": "🟢",
-                                     "intact": "🟢", "neutral": "⚪"}.get(_badge, "⚪")
-                            st.markdown(f"{_icon} **Thesis drift** — {_dmd}")
-                        matching = next((h for h in enriched_data if h.get("ticker") == r["_ticker"]), None)
-                        if matching:
-                            flags = matching.get('quality_flags', 'N/A')
-                            ccr = matching.get('cash_conversion', 'N/A')
-                            red = matching.get('has_red_flags', False)
-                            roe_t = matching.get('roe_trend', [])
-                            st.markdown(
-                                f"<details><summary style='cursor:pointer;color:#6B7280;font-size:0.82rem;'>"
-                                f"Quality Data: {r['Stock']}</summary>"
-                                f"<p style='color:#6B7280;font-size:0.8rem;margin:4px 0;'>"
-                                f"Flags: {flags}<br>"
-                                f"Cash conversion: {ccr} · Red flags: {red}<br>"
-                                f"ROE trend: {roe_t}</p></details>",
-                                unsafe_allow_html=True
-                            )
+                        _act = r["Action"]
+                        _is_sell = "SELL" in _act
+                        _verdict = "SELL" if _is_sell else "HOLD"
+                        _vicon = "🔴" if _is_sell else "🟢"
+                        _one = (r.get("_reasoning") or "").strip()
+                        if _one:
+                            _one = _one.split(". ")[0].rstrip(".") + "."
+
+                        with st.container(border=True):
+                            _c1, _c2 = st.columns([3, 1])
+                            with _c1:
+                                st.markdown(f"### {_vicon} {_verdict} — {r['Stock']}")
+                                if _one:
+                                    st.markdown(_one)
+                                st.caption(f"Return {r.get('Return','—')} · Score {r.get('Score','—')} · {r.get('Shares','—')} shares")
+                            with _c2:
+                                if _is_sell:
+                                    _qty = int(r.get("_sell_qty") or r.get("Shares") or 0)
+                                    if _qty > 0:
+                                        try:
+                                            st.link_button(f"Sell {_qty} on Kite",
+                                                           kite_sell_url(r["_ticker"], _qty),
+                                                           use_container_width=True)
+                                        except Exception:
+                                            pass
+
+                            with st.expander("Why? — full analysis"):
+                                st.markdown(f"**Committee verdict:** {_act}  ·  confidence: {r.get('_confidence','—')}")
+                                if r.get("_reasoning"):
+                                    st.markdown(r["_reasoning"])
+                                if r.get("_market_note"):
+                                    st.caption(r["_market_note"])
+                                _dfmt = _format_thesis_drift(r.get("_thesis_drift"))
+                                if _dfmt:
+                                    _badge, _dmd = _dfmt
+                                    _icon = {"broken": "🔴", "weak": "🟠", "strong": "🟢",
+                                             "intact": "🟢", "neutral": "⚪"}.get(_badge, "⚪")
+                                    st.markdown(f"{_icon} **Thesis drift** — {_dmd}")
+                                matching = next((h for h in enriched_data if h.get("ticker") == r["_ticker"]), None)
+                                if matching:
+                                    st.caption(
+                                        f"Flags: {matching.get('quality_flags','N/A')} · "
+                                        f"Cash conversion: {matching.get('cash_conversion','N/A')} · "
+                                        f"Red flags: {matching.get('has_red_flags', False)} · "
+                                        f"ROE trend: {matching.get('roe_trend', [])}")
+                                if r.get("_book_passage"):
+                                    st.caption(f"📖 {r['_book_passage']}")
 
                     # ── Macro shift since last review (review-diff) ──
                     _mdiff = st.session_state.get(f"_macro_diff_{port['id']}")
