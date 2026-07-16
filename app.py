@@ -7742,6 +7742,30 @@ elif st.session_state.sb_view_mode == "portfolios":
                     _div_emoji = "🟢" if _div >= 70 else "🟡" if _div >= 40 else "🔴"
                     _header += f" · {_div_emoji} {_div}/100"
                 st.markdown(_header)
+                # ── Light refresh (#2): re-fetch live prices, recompute value &
+                # return only. Risk metrics (Sharpe/beta/drawdown) are left as the
+                # daily tracker wrote them — they don't move intraday and need a
+                # year of history to recompute. cache_key=None forces a fresh pull.
+                if st.button("↻ Refresh", key=f"refresh_port_{port['id']}",
+                             help="Re-fetch live prices and recompute value & return"):
+                    try:
+                        _rh = (sb.table("holdings")
+                               .select("ticker, shares, price_at_entry, sip_amount_inr")
+                               .eq("portfolio_id", port["id"]).execute().data) or []
+                        if _rh:
+                            _enr = enrich_holdings_live(_rh, cache_key=None)
+                            _cv = round(sum(h["current_value"] for h in _enr), 2)
+                            _inv = sum(h.get("sip_amount_inr", 0) for h in _rh)
+                            _rp = round((_cv - _inv) / _inv * 100, 2) if _inv else 0.0
+                            sb.table("portfolios").update(
+                                {"current_value": _cv, "current_return_pct": _rp}
+                            ).eq("id", port["id"]).execute()
+                            st.toast(f"Refreshed: {fmt_inr(_cv)} ({_rp:+.1f}%)")
+                            st.rerun()
+                        else:
+                            st.toast("No holdings to refresh.")
+                    except Exception as _e:
+                        st.error(f"Refresh failed: {_e}")
                 _px = port.get("xirr_pct")
                 if _px is not None:
                     _nx = port.get("nifty_xirr_pct")
