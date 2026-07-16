@@ -637,20 +637,10 @@ def compute_portfolio_risk_metrics(holdings, universe_df=None, nifty_history=Non
             result["semi_deviation"] = round(semi_dev, 4)
 
         # ── 9. Max drawdown ──
-        # A realized extreme, not an estimate — so a RANGE is wrong for it. But
-        # on short history it is falsely REASSURING: a young portfolio reports a
-        # comfortingly small "worst fall so far" that a user reads as safe. Flag
-        # it provisional below ~126 trading days (~6 months) so the report says
-        # "worst fall SO FAR (short history)" rather than a bare, trusted number.
         cumulative = (1 + port_returns).cumprod()
         peak = cumulative.cummax()
         drawdown = (cumulative - peak) / peak
         result["max_drawdown"] = round(drawdown.min(), 4)
-        result["max_drawdown_provisional"] = bool(len(port_returns) < 126)
-
-        # Stamp the risk-free rate every ratio above was computed with, so each
-        # stored metric row is self-auditable (Sprint 13 §3).
-        result["rfr_used"] = round(RFR, 4)
 
         # ── 10. CAPM expected return = RFR + β(Rm - RFR) (Ch 7) ──
         if "portfolio_beta" in result and "market_return" in result:
@@ -930,9 +920,7 @@ def run_daily_tracker():
                            "capm_expected_return", "semi_deviation", "annual_return", "annual_std",
                            # Sprint 12: honest ranges (band, not point) + history depth
                            "sharpe_low", "sharpe_high", "sortino_low", "sortino_high",
-                           "treynor_low", "treynor_high", "metrics_history_days",
-                           # Sprint 13 §3: short-history drawdown flag + RFR audit stamp
-                           "max_drawdown_provisional", "rfr_used"]:
+                           "treynor_low", "treynor_high", "metrics_history_days"]:
                     if k in _risk:
                         _risk_update[k] = _risk[k]
                 if _risk_update:
@@ -1492,6 +1480,12 @@ def run_daily_tracker():
     written = 0
     _failed_alerts = []
     for alert in all_alerts:
+        # overvalued / sector_headwind were IPS-blind heuristic cards (naive
+        # PE/PB and sector-index thresholds) that duplicated the portfolio
+        # review. Removed — the review is the single place a holding gets a
+        # sell/hold verdict.
+        if alert.get("alert_type") in ("overvalued", "sector_headwind"):
+            continue
         try:
             # Opportunity/new_entry collected silently — weekly_mentor activates the best ones Monday
             if alert.get("alert_type") in ("opportunity", "new_entry"):
