@@ -1322,15 +1322,31 @@ def run_daily_tracker():
                         "alert_date": today_str,
                     }
 
-                # Score up
-                if cur_score is not None and prev_score is not None and cur_score > prev_score:
+                # Score up — fire ONLY when the score sets a NEW high above what we
+                # last told the user about (last_notified_score), not every day it
+                # merely sits above the entry score. This is what kills the daily
+                # "KOTHARIA improved" repeat.
+                _last_notified = wl.get("last_notified_score")
+                if _last_notified is None:
+                    _last_notified = wl.get("score_when_added")
+                if cur_score is not None and _last_notified is not None and cur_score > _last_notified:
                     all_alerts.append(wl_alert(
                         "watchlist_score_up",
-                        f"👁 {wl_name} score improved {prev_score} → {cur_score}/5",
-                        {"prev_score": prev_score, "current_score": cur_score, "source": "watchlist"},
+                        f"👁 {wl_name} score improved {_last_notified} → {cur_score}/5",
+                        {"prev_score": _last_notified, "current_score": cur_score, "source": "watchlist"},
                         "watchlist_score_up"
                     ))
                     wl_alert_count += 1
+                    # Remember we told them, stamp the date, reset the reason rotation
+                    # so the email leads with THIS fresh improvement, then rotates.
+                    try:
+                        supabase.table("watchlist").update({
+                            "last_notified_score": int(cur_score),
+                            "score_improved_on": today_str,
+                            "reasons_shown": []
+                        }).eq("id", wl["id"]).execute()
+                    except Exception as _e:
+                        print(f"  watchlist state update failed for {wl_ticker}: {_e}")
 
                 # Score down
                 if cur_score is not None and prev_score is not None and cur_score < prev_score:
