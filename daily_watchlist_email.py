@@ -27,6 +27,7 @@ import pandas as pd
 import yfinance as yf
 from google import genai
 from supabase import create_client, Client
+import watchlist_reasons  # weekly rotating "reasons to buy" engine
 
 
 APP_URL = "https://kordent.streamlit.app"
@@ -111,6 +112,33 @@ def enrich_watchlist(watchlist_items, universe_df, price_cache):
             except Exception:
                 pass
 
+        # ── Weekly rotating "reasons to buy" (watchlist_reasons engine) ──
+        # Anchor rotation to when the score improved (or when added). Week 0 leads
+        # with the improvement; each later week surfaces the next 2 strongest
+        # top-quartile facts. When a stock runs out of genuine facts, it rests.
+        item["_reasons"] = []
+        item["_show_improvement"] = False
+        item["_improved_days"] = None
+        try:
+            _improved_on = wl.get("score_improved_on")
+            _anchor = _improved_on or added_date
+            _wk = 0
+            if _anchor:
+                try:
+                    _wk = max(0, (date.today() - date.fromisoformat(str(_anchor))).days // 7)
+                except Exception:
+                    _wk = 0
+            _R = watchlist_reasons.rank_reasons(ticker, universe_df) if universe_df is not None else []
+            item["_reasons"] = [r["text"] for r in _R[_wk * 2:_wk * 2 + 2]]
+            if _improved_on and _wk == 0:
+                try:
+                    item["_improved_days"] = (date.today() - date.fromisoformat(str(_improved_on))).days
+                    item["_show_improvement"] = True
+                except Exception:
+                    pass
+        except Exception as _re:
+            print(f"  reasons skipped for {ticker}: {_re}")
+
         enriched.append(item)
 
     return enriched
@@ -150,6 +178,17 @@ def build_mentor_prompt(name, stocks, alerts_for_user):
         roe_line = f"ROE: {s['roe_pct']}%" if s['roe_pct'] else ""
         note_line = f"Your note: \"{s['note']}\"" if s['note'] else ""
 
+        # This week's rotating angle: improvement headline + top-quartile facts
+        reasons_line = ""
+        if s.get("_show_improvement") and s.get("current_score") is not None:
+            _dd = s.get("_improved_days")
+            _when = "today" if _dd == 0 else (f"{_dd} days ago" if _dd else "recently")
+            reasons_line = f"THIS WEEK'S ANGLE — score improved to {s['current_score']}/5 {_when}."
+        if s.get("_reasons"):
+            _facts = "; ".join(s["_reasons"])
+            reasons_line += (f" Also notable: {_facts}." if reasons_line
+                             else f"THIS WEEK'S ANGLE — {_facts}.")
+
         stock_block += f"""
 {s['name']} ({s['ticker'].replace('.NS','').replace('.BO','')})
   Sector: {s['sector']} | Watching for {s['days_watched']} days
@@ -157,6 +196,7 @@ def build_mentor_prompt(name, stocks, alerts_for_user):
   {price_line}{low_line}
   {pe_line} | {roe_line}
   {note_line}
+  {reasons_line}
 """
 
     # Today's alerts for this user's watchlist
@@ -196,6 +236,7 @@ Write a warm, honest daily email. Rules:
 1. Address {name} by name. Open with one sentence about today's picture — not a greeting.
 2. Go through each stock briefly. For stocks with alerts today, explain what happened and what it means in simple terms. For stocks with no alerts, a one-liner ("still steady", "no change — patience pays") is enough.
 3. If a stock's score improved or is near its 52-week low, gently remind them this could be a buying opportunity — but don't push. Say something like "this is the kind of setup Graham looked for" or "Dorsey would call this buying quality at a discount."
+3a. If a stock has a "THIS WEEK'S ANGLE" line, LEAD that stock's mention with it — it is a real, verified fact about where this stock ranks in the whole market (e.g. top 10% on earnings yield). State it plainly and explain the term simply. These angles ROTATE weekly so the stock stays fresh; do NOT invent facts beyond the angle given, and do NOT hype — if the angle reads implausibly strong (e.g. a >80% discount), soften to "unusually cheap" rather than quoting the raw number. If a stock has no angle line, keep it to a brief one-liner; it is resting this cycle.
 4. If a stock's quality flipped to FAIL or score dropped, be honest. Explain what it means and whether it's a red flag or just noise. A mentor doesn't sugarcoat.
 5. If the user left a personal note on a stock, reference it naturally. E.g., "You said you're waiting for PE below 12 — it's at 14 today, getting closer."
 6. End with ONE short educational nugget — a concept from Graham, Greenblatt, or Dorsey explained simply (e.g., "Here's what 'margin of safety' actually means in practice..."). Rotate topics daily. Don't repeat what you've said before.
