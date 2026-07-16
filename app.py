@@ -7910,37 +7910,6 @@ elif st.session_state.sb_view_mode == "portfolios":
                                         st.rerun()
 
                         
-                        elif a_type == "overvalued":
-                            st.warning(f"📈 **{alert['headline']}**")
-                            with st.container(border=True):
-                                pe_val = detail.get("pe")
-                                pb_val = detail.get("pb")
-                                metrics = []
-                                if pe_val: metrics.append(f"PE {pe_val:.1f}")
-                                if pb_val: metrics.append(f"PB {pb_val:.1f}")
-                                st.markdown(f"Graham's margin of safety is thinning ({', '.join(metrics)}). This doesn't mean sell — but it's worth reviewing whether the price still makes sense.")
-                                c1, c2 = st.columns(2)
-                                with c1:
-                                    if st.button("📋 Review Now", key=f"overval_review_{a_id}", use_container_width=True):
-                                        sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
-                                        st.session_state["active_tab"] = "review"
-                                        st.rerun()
-                                with c2:
-                                    if st.button("✗ Dismiss", key=f"overval_dismiss_{a_id}", use_container_width=True):
-                                        sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
-                                        st.rerun()
-
-                        elif a_type == "sector_headwind":
-                            st.warning(f"🌊 **{alert['headline']}**")
-                            with st.container(border=True):
-                                idx_ret = detail.get("index_return_pct", 0)
-                                weight = detail.get("portfolio_weight_pct", 0)
-                                sector = detail.get("sector", "")
-                                st.markdown(f"The {sector} sector index dropped {idx_ret:.1f}% this month and makes up {weight:.0f}% of this portfolio. Keep an eye on it — if fundamentals hold, sector dips can be buying opportunities.")
-                                if st.button("✗ Dismiss", key=f"headwind_dismiss_{a_id}", use_container_width=True):
-                                    sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
-                                    st.rerun()
-
                         elif a_type == "goal_drift":
                             st.error(f"🎯 **{alert['headline']}**")
                             with st.container(border=True):
@@ -8233,6 +8202,9 @@ elif st.session_state.sb_view_mode == "portfolios":
                                     r1.metric("Sharpe (risk-adjusted)", f"{_sharpe_v:.2f}",
                                               help="Return earned per unit of total risk. Above 1 is "
                                                    "good; negative means the volatility wasn't paid for.")
+                                    _sl, _shi = port.get("sharpe_low"), port.get("sharpe_high")
+                                    if _sl is not None and _shi is not None:
+                                        r1.caption(f"range {_sl:.2f}–{_shi:.2f} (widens on short history)")
                                 if _dd is not None:
                                     if _dd_prov:
                                         r2.metric("Worst fall so far", f"{_dd*100:.1f}%",
@@ -8276,9 +8248,17 @@ elif st.session_state.sb_view_mode == "portfolios":
                             ]
                             if any(v is not None for _, v, _f, _n in _adv):
                                 with st.expander("Methodology & advanced metrics"):
+                                    _ranges = {"Sortino ratio": ("sortino_low", "sortino_high"),
+                                               "Treynor ratio": ("treynor_low", "treynor_high")}
                                     for _label, _val, _fmt, _note in _adv:
                                         if _val is not None:
-                                            st.markdown(f"**{_label}: {_fmt.format(_val)}** — {_note}")
+                                            _line = f"**{_label}: {_fmt.format(_val)}** — {_note}"
+                                            _rk = _ranges.get(_label)
+                                            if _rk:
+                                                _lo, _hi = port.get(_rk[0]), port.get(_rk[1])
+                                                if _lo is not None and _hi is not None:
+                                                    _line += f" (range {_fmt.format(_lo)}–{_fmt.format(_hi)})"
+                                            st.markdown(_line)
                                     _rfr = port.get("rfr_used")
                                     _hd = port.get("metrics_history_days")
                                     _foot = []
