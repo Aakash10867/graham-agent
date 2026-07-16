@@ -37,6 +37,31 @@ import verdict_engine
 import deep_metrics
 import selector
 
+def fmt_inr(value, decimals=0, symbol="₹"):
+    """Indian-system digit grouping for money: 12,34,567 not 1,234,567.
+    symbol defaults to the rupee sign; pass symbol='' to prefix your own."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return f"{symbol}0"
+    neg = v < 0
+    v = abs(v)
+    if decimals:
+        whole = int(v); frac = f"{v - whole:.{decimals}f}"[2:]
+    else:
+        whole = int(round(v)); frac = ""
+    _s = str(whole)
+    if len(_s) > 3:
+        last3, rest, parts = _s[-3:], _s[:-3], []
+        while len(rest) > 2:
+            parts.insert(0, rest[-2:]); rest = rest[:-2]
+        if rest: parts.insert(0, rest)
+        grouped = ",".join(parts) + "," + last3
+    else:
+        grouped = _s
+    out = grouped + (f".{frac}" if frac else "")
+    return f"{symbol}{'-' if neg else ''}{out}"
+
 # One-time environment fingerprint → stderr (Cloud reliably captures stderr at
 # boot, unlike stdout). Reveals the exact resolved native stack so an ABI
 # mismatch (e.g. a pyarrow built against a different numpy) is visible without
@@ -695,8 +720,8 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
  
     # Row 1: Value / Invested / P&L
     kpi_row1 = [
-        _kpi("Current Value", f"Rs. {current_val:,.0f}"),
-        _kpi("Total Invested", f"Rs. {total_invested:,.0f}"),
+        _kpi("Current Value", f"Rs. {fmt_inr(current_val, symbol='')}"),
+        _kpi("Total Invested", f"Rs. {fmt_inr(total_invested, symbol='')}"),
         _kpi("P&L", f"Rs. {pnl:+,.0f} ({return_pct:+.1f}%)", pnl_hex),
     ]
  
@@ -772,16 +797,16 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
     _review = f"Every {portfolio.get('review_freq', 90)} days"
     _next_rev = str(portfolio.get("next_review_date", "—"))
  
-    meta_parts = [f"SIP: Rs. {sip:,.0f}/mo", f"Type: {_inv_type}",
+    meta_parts = [f"SIP: Rs. {fmt_inr(sip, symbol='')}/mo", f"Type: {_inv_type}",
                   f"Horizon: {_horizon}", f"Review: {_review}", f"Next: {_next_rev}"]
     # Goal status
     if goal_data and goal_data.get("status"):
         _gs = goal_data
         _target = portfolio.get("target_amount", 0)
         _status_map = {
-            "on_track": f"Goal: On track — Rs. {_target:,.0f}",
-            "behind": f"Goal: Behind by Rs. {abs(_gs.get('gap', 0)):,.0f}",
-            "ahead": f"Goal: Ahead by Rs. {abs(_gs.get('gap', 0)):,.0f}",
+            "on_track": f"Goal: On track — Rs. {fmt_inr(_target, symbol='')}",
+            "behind": f"Goal: Behind by Rs. {fmt_inr(abs(_gs.get('gap', 0)), symbol='')}",
+            "ahead": f"Goal: Ahead by Rs. {fmt_inr(abs(_gs.get('gap', 0)), symbol='')}",
             "achieved": f"Goal: Achieved!",
         }
         meta_parts.append(_status_map.get(_gs["status"], ""))
@@ -823,9 +848,9 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
             rows.append([
                 Paragraph(stock_name, s_cell),
                 str(int(shares)),
-                f"Rs. {cmp:,.0f}",
-                f"Rs. {invested:,.0f}",
-                f"Rs. {value:,.0f}",
+                f"Rs. {fmt_inr(cmp, symbol='')}",
+                f"Rs. {fmt_inr(invested, symbol='')}",
+                f"Rs. {fmt_inr(value, symbol='')}",
                 pnl_para,
                 f"{h.get('actual_allocation_pct', h.get('allocation_pct', 0))}%",
             ])
@@ -833,7 +858,7 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
         _tot_pnl_para = Paragraph(f"Rs. {_tot_pnl:+,.0f}", s_cell_green if _tot_pnl >= 0 else s_cell_red)
         rows.append([
             Paragraph("Total", s_cell_bold), "", "",
-            f"Rs. {_tot_inv:,.0f}", f"Rs. {_tot_val:,.0f}", _tot_pnl_para, ""
+            f"Rs. {fmt_inr(_tot_inv, symbol='')}", f"Rs. {fmt_inr(_tot_val, symbol='')}", _tot_pnl_para, ""
         ])
  
         # 170mm total: Stock(48) + Shares(14) + CMP(20) + Invested(22) + Value(22) + P&L(28) + Alloc(16)
@@ -4887,9 +4912,9 @@ def build_user_context():
     if real_ports:
         lines.append(f"{len(real_ports)} active portfolio(s):")
         for p in real_ports:
-            val = f"₹{p.get('current_value', 0):,.0f}" if p.get('current_value') else "not yet valued"
+            val = f"{fmt_inr(p.get('current_value', 0))}" if p.get('current_value') else "not yet valued"
             ret = f"({p.get('current_return_pct', 0):+.1f}%)" if p.get('current_return_pct') is not None else ""
-            lines.append(f"  {p['name']} — {p.get('investor_type', '')} / {p.get('time_horizon', '')} / ₹{p.get('sip_amount', 0):,}/mo — {val} {ret}")
+            lines.append(f"  {p['name']} — {p.get('investor_type', '')} / {p.get('time_horizon', '')} / {fmt_inr(p.get('sip_amount', 0))}/mo — {val} {ret}")
     if paper_ports:
         lines.append(f"{len(paper_ports)} paper portfolio(s) (practice mode)")
     if wl_count:
@@ -6350,12 +6375,12 @@ if st.session_state.sb_view_mode == "chat":
                         "Ticker": s["ticker"],
                         "Sector": s.get("sector", "—"),
                         "Allocation": f"{s.get('allocation_pct', 0)}%",
-                        "Monthly": f"₹{portfolio['sip_amount'] * s.get('allocation_pct', 0) / 100:,.0f}",
+                        "Monthly": f"{fmt_inr(portfolio['sip_amount'] * s.get('allocation_pct', 0) / 100)}",
                     })
                 st.dataframe(pd.DataFrame(preview_data), hide_index=True, width="stretch")
                 _paper_tag = " · 👁 Paper Portfolio" if portfolio.get("is_paper") else ""
-                _goal_tag = f" · Goal: ₹{portfolio['target_amount']:,.0f}" if portfolio.get("target_amount") else ""
-                st.caption(f"Total SIP: ₹{portfolio['sip_amount']:,}/month · {portfolio.get('investor_type', '')} · {portfolio.get('time_horizon', '')} horizon{_goal_tag}{_paper_tag}")
+                _goal_tag = f" · Goal: {fmt_inr(portfolio['target_amount'])}" if portfolio.get("target_amount") else ""
+                st.caption(f"Total SIP: {fmt_inr(portfolio['sip_amount'])}/month · {portfolio.get('investor_type', '')} · {portfolio.get('time_horizon', '')} horizon{_goal_tag}{_paper_tag}")
                 _custom_name = st.text_input(
                     "Portfolio name",
                     value=portfolio["name"],
@@ -6369,17 +6394,17 @@ if st.session_state.sb_view_mode == "chat":
                     if not _r.get("ok"):
                         st.error(f"Save failed: {_r.get('error')}")
                     else:
-                        st.success(f"Portfolio saved! Invested ₹{_r['invested']:,.0f} of ₹{portfolio['sip_amount']:,}.")
+                        st.success(f"Portfolio saved! Invested {fmt_inr(_r['invested'])} of {fmt_inr(portfolio['sip_amount'])}.")
                         if _r["unallocated"] > 0:
-                            st.info(f"₹{_r['unallocated']:,.0f} unallocated (not enough for another share of any holding).")
+                            st.info(f"{fmt_inr(_r['unallocated'])} unallocated (not enough for another share of any holding).")
                         if _r.get("stale_priced"):
                             st.warning(f"⚠️ Live price unavailable for {', '.join(_r['stale_priced'])} — used last known close. Verify on Kite before paying.")
                         breakdown_data = []
                         for s in _r["allocated"]:
                             breakdown_data.append({
-                                "Stock": s["name"] or s["ticker"], "Price": f"₹{s['price']:,.2f}",
-                                "Shares": s["shares"], "Invested": f"₹{s['actual_amount']:,.0f}",
-                                "Target": f"₹{portfolio['sip_amount'] * s['allocation_pct'] / 100:,.0f}",
+                                "Stock": s["name"] or s["ticker"], "Price": f"{fmt_inr(s['price'], 2)}",
+                                "Shares": s["shares"], "Invested": f"{fmt_inr(s['actual_amount'])}",
+                                "Target": f"{fmt_inr(portfolio['sip_amount'] * s['allocation_pct'] / 100)}",
                             })
                         st.dataframe(pd.DataFrame(breakdown_data), hide_index=True, width="stretch")
                         if portfolio.get("is_paper"):
@@ -6680,7 +6705,7 @@ elif st.session_state.sb_view_mode == "watchlist":
                     with st.container(border=True):
                         _exp_tag = f" · ⏳ {_hours_left}h left" if _hours_left is not None else ""
                         st.markdown(f"**📋 {_rec_horizon} Horizon Picks**{_exp_tag}")
-                        st.caption(f"Based on your {_rec_type} profile · Budget: ₹{_rec_budget:,.0f}")
+                        st.caption(f"Based on your {_rec_type} profile · Budget: {fmt_inr(_rec_budget)}")
 
                         _rec_rows = []
                         _rec_total = 0
@@ -6690,13 +6715,13 @@ elif st.session_state.sb_view_mode == "watchlist":
                                 "Ticker": _rs["ticker"],
                                 "Score": f"{_rs['score']}/5",
                                 "Verdict": _rs["verdict"],
-                                "Price": f"₹{_rs['price']:,.0f}",
+                                "Price": f"{fmt_inr(_rs['price'])}",
                                 "Shares": _rs["shares"],
-                                "Amount": f"₹{_rs['amount']:,.0f}",
+                                "Amount": f"{fmt_inr(_rs['amount'])}",
                             })
                             _rec_total += _rs["amount"]
                         st.dataframe(pd.DataFrame(_rec_rows), hide_index=True, use_container_width=True)
-                        st.caption(f"Total: ₹{_rec_total:,.0f} of ₹{_rec_budget:,.0f} budget")
+                        st.caption(f"Total: {fmt_inr(_rec_total)} of {fmt_inr(_rec_budget)} budget")
 
                         _rc1, _rc2 = st.columns(2)
                         with _rc1:
@@ -6885,9 +6910,9 @@ elif st.session_state.sb_view_mode == "watchlist":
 
                             _pm1, _pm2, _pm3 = st.columns(3)
                             with _pm1:
-                                st.metric("Invested", f"₹{_pp_invested:,.0f}")
+                                st.metric("Invested", f"{fmt_inr(_pp_invested)}")
                             with _pm2:
-                                st.metric("Current Value", f"₹{_pp_current:,.0f}")
+                                st.metric("Current Value", f"{fmt_inr(_pp_current)}")
                             with _pm3:
                                 st.metric("Return", f"{_pp_ret:+.1f}%")
 
@@ -6901,9 +6926,9 @@ elif st.session_state.sb_view_mode == "watchlist":
                                 _pp_rows.append({
                                     "Stock": _h.get("name") or _h.get("ticker", ""),
                                     "Shares": _h_sh,
-                                    "Entry": f"₹{_h_entry:,.2f}",
-                                    "Now": f"₹{_h_now:,.2f}",
-                                    "P&L": f"₹{_h_pnl:,.0f}",
+                                    "Entry": f"{fmt_inr(_h_entry, 2)}",
+                                    "Now": f"{fmt_inr(_h_now, 2)}",
+                                    "P&L": f"{fmt_inr(_h_pnl)}",
                                     "Return": f"{_h_ret:+.1f}%",
                                 })
                             st.dataframe(pd.DataFrame(_pp_rows), hide_index=True, use_container_width=True)
@@ -6920,7 +6945,7 @@ elif st.session_state.sb_view_mode == "watchlist":
                             if _pp.get("time_horizon"):
                                 _pp_cap_parts.append(f"{_pp['time_horizon']} horizon")
                             if _pp.get("target_amount"):
-                                _pp_cap_parts.append(f"Goal: ₹{_pp['target_amount']:,.0f}")
+                                _pp_cap_parts.append(f"Goal: {fmt_inr(_pp['target_amount'])}")
                             st.caption(" · ".join(_pp_cap_parts))
                         else:
                             st.caption("No holdings recorded.")
@@ -7270,9 +7295,9 @@ elif st.session_state.sb_view_mode == "builder":
         _est_returns = _future_value - _total_invested
 
         _m1, _m2, _m3 = st.columns(3)
-        _m1.metric("Invested", f"₹{_total_invested:,.0f}")
-        _m2.metric("Est. Returns", f"₹{_est_returns:,.0f}")
-        _m3.metric("Total Value", f"₹{_future_value:,.0f}")
+        _m1.metric("Invested", f"{fmt_inr(_total_invested)}")
+        _m2.metric("Est. Returns", f"{fmt_inr(_est_returns)}")
+        _m3.metric("Total Value", f"{fmt_inr(_future_value)}")
 
         # Stacked bar chart — the compounding hockey stick
         _yr_range = list(range(1, _calc_years + 1))
@@ -7321,7 +7346,7 @@ elif st.session_state.sb_view_mode == "builder":
                 elif abs(_req_return - _calc_return) < 1:
                     st.success("✅ Your current settings already reach this goal!")
                 else:
-                    st.info(f"📊 To reach ₹{_calc_goal_amt:,.0f} in {_calc_years} years, you'd need ~{_req_return}% annual returns.")
+                    st.info(f"📊 To reach {fmt_inr(_calc_goal_amt)} in {_calc_years} years, you'd need ~{_req_return}% annual returns.")
             else:
                 st.success("✅ Your SIP already covers this goal even without any returns!")
 
@@ -7666,7 +7691,7 @@ elif st.session_state.sb_view_mode == "build_result":
                         if not _res.get("ok"):
                             st.error(f"Save failed: {_res.get('error')}")
                         else:
-                            st.success(f"Portfolio saved! Invested ₹{_res['invested']:,.0f} of ₹{_bprof.get('sip_amount', 5000):,}.")
+                            st.success(f"Portfolio saved! Invested {fmt_inr(_res['invested'])} of {fmt_inr(_bprof.get('sip_amount', 5000))}.")
                             if _res.get("stale_priced"):
                                 st.warning(f"⚠️ Live price unavailable for {', '.join(_res['stale_priced'])} — used last known close. Verify on Kite before paying.")
                             st.session_state.builder_profile = None
@@ -7709,7 +7734,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                 _pr = port.get("current_return_pct")
                 _header = f"**{port['name']}**"
                 if _pv:
-                    _header += f" · ₹{_pv:,.0f}"
+                    _header += f" · {fmt_inr(_pv)}"
                 if _pr is not None:
                     _header += f" ({_pr:+.1f}%)"
                 _div = port.get("diversification_score")
@@ -7824,13 +7849,13 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 suggested_qty = int(budget_left // live_price) if live_price > 0 and budget_left > 0 else 0
 
                                 if act_now and suggested_qty > 0:
-                                    st.markdown(f"Budget left this month: **₹{budget_left:,.0f}** · Price: **₹{live_price:,.2f}** · Suggested: **{suggested_qty} shares** (~₹{suggested_qty * live_price:,.0f})")
+                                    st.markdown(f"Budget left this month: **{fmt_inr(budget_left)}** · Price: **{fmt_inr(live_price, 2)}** · Suggested: **{suggested_qty} shares** (~{fmt_inr(suggested_qty * live_price)})")
                                 elif live_price > budget_left and budget_left > 0:
-                                    st.info(f"One share costs ₹{live_price:,.0f} but only ₹{budget_left:,.0f} left in this month's opportunity budget. Consider this at your next review.")
+                                    st.info(f"One share costs {fmt_inr(live_price)} but only {fmt_inr(budget_left)} left in this month's opportunity budget. Consider this at your next review.")
                                 elif budget_left <= 0:
                                     st.info("This month's opportunity budget is used up. Noted for your weekly summary.")
                                 else:
-                                    st.markdown(f"Price: **₹{live_price:,.2f}**")
+                                    st.markdown(f"Price: **{fmt_inr(live_price, 2)}**")
 
                                 if KITE_ENABLED and live_price > 0:
                                     _kite_qty = suggested_qty if suggested_qty > 0 else 1
@@ -7873,7 +7898,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                                     "sip_budget_remaining": round(new_budget, 2)
                                                 }).eq("id", port["id"]).execute()
                                                 sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
-                                                st.success(f"Tracked {buy_qty} shares of {opp_name}. Budget remaining: ₹{new_budget:,.0f}")
+                                                st.success(f"Tracked {buy_qty} shares of {opp_name}. Budget remaining: {fmt_inr(new_budget)}")
                                                 st.rerun()
                                             except Exception as e:
                                                 st.error(f"Failed: {e}")
@@ -7973,10 +7998,10 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 if new_sip > old_sip and _new_affordable > _current_count and _current_count < BOOK_MIN:
                                     # SIP increased AND can now support more stocks AND portfolio is under-diversified
                                     _can_add = min(_new_affordable, BOOK_MIN) - _current_count
-                                    st.success(f"SIP updated to ₹{new_sip:,}/mo!")
+                                    st.success(f"SIP updated to {fmt_inr(new_sip)}/mo!")
                                     st.info(
                                         f"📈 **Portfolio expansion recommended.** Your portfolio has {_current_count} stocks. "
-                                        f"With ₹{new_sip:,}/mo, you can support up to {min(_new_affordable, BOOK_MIN)} stocks "
+                                        f"With {fmt_inr(new_sip)}/mo, you can support up to {min(_new_affordable, BOOK_MIN)} stocks "
                                         f"(book minimum: {BOOK_MIN} for adequate diversification). "
                                         f"Adding {_can_add} diversifying stocks would reduce your unsystematic risk."
                                     )
@@ -7988,7 +8013,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                         "new_sip": new_sip,
                                     }
                                 elif new_sip > old_sip:
-                                    st.success(f"SIP updated to ₹{new_sip:,}/mo! Extra capital will be distributed proportionally.")
+                                    st.success(f"SIP updated to {fmt_inr(new_sip)}/mo! Extra capital will be distributed proportionally.")
                                 else:
                                     st.success("Updated!")
                                 st.rerun()
@@ -8014,7 +8039,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                         st.caption(
                             f"Created: {port['created_at'][:10]} · "
                             f"{port.get('investor_type', '—')} · "
-                            f"**₹{port.get('sip_amount', 0):,}/mo** · "
+                            f"**{fmt_inr(port.get('sip_amount', 0))}/mo** · "
                             f"{port.get('time_horizon', '—')} horizon · "
                             f"Review: every {port.get('review_freq', '90')} days · "
                             f"Next: {port.get('next_review_date', '—')}"
@@ -8048,7 +8073,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 _expand_prompt = (
                                     f"[EXPANSION] My portfolio '{port['name']}' currently has {_expand['current_count']} stocks "
                                     f"across these sectors: {dict(_sector_counts)}. "
-                                    f"I just increased my SIP to ₹{_expand['new_sip']:,}/mo. "
+                                    f"I just increased my SIP to {fmt_inr(_expand['new_sip'])}/mo. "
                                     f"I need {_expand['can_add']} MORE stocks to reach the book minimum of 12. "
                                     f"The portfolio philosophy is {port.get('investor_type', 'balanced')}. "
                                     f"CRITICAL: New stocks MUST be from sectors NOT already heavily represented. "
@@ -8168,9 +8193,9 @@ elif st.session_state.sb_view_mode == "portfolios":
                             simple_ret = (profit / last_invested) * 100
 
                             m1, m2, m3 = st.columns(3)
-                            m1.metric("Invested", f"₹{last_invested:,.0f}")
-                            m2.metric("Current Value", f"₹{last_val:,.0f}")
-                            m3.metric("P&L", f"₹{profit:,.0f}", delta=f"{simple_ret:+.1f}%")
+                            m1.metric("Invested", f"{fmt_inr(last_invested)}")
+                            m2.metric("Current Value", f"{fmt_inr(last_val)}")
+                            m3.metric("P&L", f"{fmt_inr(profit)}", delta=f"{simple_ret:+.1f}%")
 
                             m4, m5 = st.columns(2)
                             if port_xirr is not None:
@@ -8266,7 +8291,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                     st.caption("Ratios are shown as single points here; the honest "
                                                "ranges that widen on short history are stored per metric.")
                         else:
-                            st.caption(f"Portfolio: ₹{last_val:,.0f} · {days_tracked} days tracked")
+                            st.caption(f"Portfolio: {fmt_inr(last_val)} · {days_tracked} days tracked")
 
                     elif hist_data and len(hist_data) == 1:
                         st.caption("📈 Growth chart available after 2+ days of tracking.")
@@ -8331,15 +8356,15 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 _years = _months / 12
 
                                 if _status == "ahead":
-                                    st.success(f"You're ahead of target by ₹{abs(_gap):,.0f}")
+                                    st.success(f"You're ahead of target by {fmt_inr(abs(_gap))}")
                                 elif _status == "on_track":
-                                    st.success(f"On track — within 5% of your ₹{_goal_amt:,.0f} goal")
+                                    st.success(f"On track — within 5% of your {fmt_inr(_goal_amt)} goal")
                                 else:
-                                    st.warning(f"Behind target by ₹{abs(_gap):,.0f}")
+                                    st.warning(f"Behind target by {fmt_inr(abs(_gap))}")
 
                                 gc1, gc2, gc3 = st.columns(3)
-                                gc1.metric("Goal", f"₹{_goal_amt:,.0f}")
-                                gc2.metric("Projected", f"₹{_proj['projected_value']:,.0f}")
+                                gc1.metric("Goal", f"{fmt_inr(_goal_amt)}")
+                                gc2.metric("Projected", f"{fmt_inr(_proj['projected_value'])}")
                                 gc3.metric("Time Left", f"{_years:.1f} yrs" if _years >= 1 else f"{_months} mo")
 
                                 if _proj.get("using_default"):
@@ -8400,16 +8425,16 @@ elif st.session_state.sb_view_mode == "portfolios":
 
                                 # SIP adjustment suggestion
                                 if _status == "behind" and _proj.get("sip_increase") and _proj["sip_increase"] > 0:
-                                    st.caption(f"💡 Increasing your SIP by ₹{_proj['sip_increase']:,.0f}/mo (to ₹{_sip + _proj['sip_increase']:,.0f}) could close the gap at your current growth rate.")
+                                    st.caption(f"💡 Increasing your SIP by {fmt_inr(_proj['sip_increase'])}/mo (to {fmt_inr(_sip + _proj['sip_increase'])}) could close the gap at your current growth rate.")
 
                         elif _proj and _proj.get("status") == "achieved":
                             with st.container(border=True):
                                 st.markdown("**🎯 Goal Tracker**")
-                                st.success(f"Goal reached! Your portfolio (₹{_cur_val:,.0f}) exceeds your target of ₹{_goal_amt:,.0f}.")
+                                st.success(f"Goal reached! Your portfolio ({fmt_inr(_cur_val)}) exceeds your target of {fmt_inr(_goal_amt)}.")
                         elif _proj and _proj.get("status") == "missed":
                             with st.container(border=True):
                                 st.markdown("**🎯 Goal Tracker**")
-                                st.warning(f"Goal deadline passed. Current: ₹{_cur_val:,.0f} vs Target: ₹{_goal_amt:,.0f}. Gap: ₹{abs(_proj['gap']):,.0f}.")
+                                st.warning(f"Goal deadline passed. Current: {fmt_inr(_cur_val)} vs Target: {fmt_inr(_goal_amt)}. Gap: {fmt_inr(abs(_proj['gap']))}.")
                     except Exception:
                         pass
 
@@ -8745,8 +8770,8 @@ elif st.session_state.sb_view_mode == "portfolios":
 
                                             st.caption(
                                                 f"Sector: {act_sector} · Score: {act_score}/5 · "
-                                                f"PE: {act.get('pe', 'N/A')} · Price: ₹{_live_price:,.2f} · "
-                                                f"Budget ({suggested_pct}% of ₹{_sip:,}): ₹{_budget:,.0f}"
+                                                f"PE: {act.get('pe', 'N/A')} · Price: {fmt_inr(_live_price, 2)} · "
+                                                f"Budget ({suggested_pct}% of {fmt_inr(_sip)}): {fmt_inr(_budget)}"
                                             )
                                             ac1, ac2 = st.columns(2)
                                             with ac1:
@@ -8905,7 +8930,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                     else:
                         # STATE 2 & 3: FLEXIBLE SIP DEPLOYMENT (Due or Ad-hoc)
                         if sip_due_days <= 0:
-                            st.success(f"💰 Monthly SIP of ₹{port.get('sip_amount', 0):,} is due!")
+                            st.success(f"💰 Monthly SIP of {fmt_inr(port.get('sip_amount', 0))} is due!")
                             _deploy_btn = st.button("💵 Deploy SIP", key=f"deploy_sip_{port['id']}", width="stretch")
                         else:
                             st.caption(f"📅 Next Review due in {rev_due_days} days ({review_date.isoformat() if review_date else '—'})")
@@ -8981,11 +9006,11 @@ elif st.session_state.sb_view_mode == "portfolios":
                                             if affordable:
                                                 best_opt = sorted(affordable, key=lambda x: x["price"], reverse=True)[0]
                                                 extra_shares = int(live_unallocated // best_opt["price"])
-                                                st.info(f"💡 **₹{live_unallocated:,.0f} unallocated.** You can't hit exact target percentages, but you could buy **{extra_shares} more share(s) of {best_opt['name']}** (₹{best_opt['price']:,.2f}) to put that cash to work. Just increase the shares above.")
+                                                st.info(f"💡 **{fmt_inr(live_unallocated)} unallocated.** You can't hit exact target percentages, but you could buy **{extra_shares} more share(s) of {best_opt['name']}** ({fmt_inr(best_opt['price'], 2)}) to put that cash to work. Just increase the shares above.")
                                             else:
-                                                st.caption(f"ℹ️ ₹{live_unallocated:,.0f} unallocated (not enough to buy any of your holdings). Leave it in your bank.")
+                                                st.caption(f"ℹ️ {fmt_inr(live_unallocated)} unallocated (not enough to buy any of your holdings). Leave it in your bank.")
                                         elif live_unallocated < 0:
-                                            st.warning(f"⚠️ You have exceeded your deployment amount by ₹{abs(live_unallocated):,.0f}.")
+                                            st.warning(f"⚠️ You have exceeded your deployment amount by {fmt_inr(abs(live_unallocated))}.")
                                         else:
                                             st.success("✅ Perfect allocation! Zero unallocated cash.")
                                         if KITE_ENABLED:
@@ -9207,8 +9232,8 @@ elif st.session_state.sb_view_mode == "portfolios":
 
                                     review_rows.append({
                                         "Stock": h["name"], "Shares": h["shares"],
-                                        "Entry": f"₹{h['entry_price']:,.2f}", "Now": f"₹{h['now_price']:,.2f}",
-                                        "P&L": f"₹{h['pnl']:,.0f}", "Return": f"{h['stock_return']:+.1f}%",
+                                        "Entry": f"{fmt_inr(h['entry_price'], 2)}", "Now": f"{fmt_inr(h['now_price'], 2)}",
+                                        "P&L": f"{fmt_inr(h['pnl'])}", "Return": f"{h['stock_return']:+.1f}%",
                                         "Score": f"{h['entry_score']}→{h['now_score']}", "Trend": h.get("score_trend", "—"), "Action": action,
                                         "_reasoning": reasoning, "_confidence": confidence,
                                         "_market_note": mkt_note, "_book_passage": h["book_passage"],
@@ -9248,9 +9273,9 @@ elif st.session_state.sb_view_mode == "portfolios":
                     port_ret = (port_pnl / total_entry * 100) if total_entry > 0 else 0
 
                     m1, m2, m3, m4 = st.columns(4)
-                    m1.metric("Invested", f"₹{total_entry:,.0f}")
-                    m2.metric("Current Value", f"₹{total_current:,.0f}")
-                    m3.metric("P&L", f"₹{port_pnl:,.0f}", delta=f"{port_ret:+.1f}%")
+                    m1.metric("Invested", f"{fmt_inr(total_entry)}")
+                    m2.metric("Current Value", f"{fmt_inr(total_current)}")
+                    m3.metric("P&L", f"{fmt_inr(port_pnl)}", delta=f"{port_ret:+.1f}%")
 
                     # Portfolio-level Nifty alpha
                     _enriched_data = review_state.get("enriched", [])
@@ -9472,9 +9497,9 @@ elif st.session_state.sb_view_mode == "portfolios":
                         allocated, unallocated_sip = allocate_shares(sip_stocks, cycle_amount, existing_shares=_existing)
                         for a in allocated:
                             sip_alloc[a["ticker"]] = a["shares"]
-                        st.caption(f"💰 This cycle ({review_days} days): ₹{cycle_amount:,} to invest — suggested shares pre-filled below")
+                        st.caption(f"💰 This cycle ({review_days} days): {fmt_inr(cycle_amount)} to invest — suggested shares pre-filled below")
                         if unallocated_sip > 0:
-                            st.caption(f"₹{unallocated_sip:,.0f} unallocatable (not enough for another share)")
+                            st.caption(f"{fmt_inr(unallocated_sip)} unallocatable (not enough for another share)")
                     else:
                         st.caption("Update what you actually did at your broker since last review:")
 
@@ -9540,7 +9565,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                         if candidates:
                             st.markdown("---")
                             total_repl_budget = freed + unallocated_sip
-                            st.markdown(f"**Replacement candidates** (₹{freed:,.0f} freed + ₹{unallocated_sip:,.0f} SIP = **₹{total_repl_budget:,.0f}** to deploy)")
+                            st.markdown(f"**Replacement candidates** ({fmt_inr(freed)} freed + {fmt_inr(unallocated_sip)} SIP = **{fmt_inr(total_repl_budget)}** to deploy)")
                             cand_df = pd.DataFrame(candidates)
                             cand_display = cand_df[["name", "ticker", "sector", "price", "score", "pe", "roe_pct"]].rename(columns={
                                 "name": "Stock", "ticker": "Ticker", "sector": "Sector",
@@ -9572,9 +9597,9 @@ elif st.session_state.sb_view_mode == "portfolios":
                                     spent += rq * rp
                             remaining = total_repl_budget - spent
                             if remaining >= 0:
-                                st.caption(f"💰 Budget: ₹{total_repl_budget:,.0f} — Allocated: ₹{spent:,.0f} = ₹{remaining:,.0f} remaining")
+                                st.caption(f"💰 Budget: {fmt_inr(total_repl_budget)} — Allocated: {fmt_inr(spent)} = {fmt_inr(remaining)} remaining")
                             else:
-                                st.warning(f"Over-allocated by ₹{abs(remaining):,.0f}. Budget: ₹{total_repl_budget:,.0f}, Allocated: ₹{spent:,.0f}")
+                                st.warning(f"Over-allocated by {fmt_inr(abs(remaining))}. Budget: {fmt_inr(total_repl_budget)}, Allocated: {fmt_inr(spent)}")
 
                     # ── Single update button ──
                     if st.button("✅ Portfolio Updated", key=f"apply_{port['id']}", width="stretch"):
