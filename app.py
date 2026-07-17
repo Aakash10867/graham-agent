@@ -8335,7 +8335,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                         _sec_weights = {s: round(v / _total_pv * 100, 1) for s, v in _sec_vals.items()}
                         _momentum = get_sector_momentum(tuple(sorted(_sec_vals.keys())))
                         if _momentum:
-                            with st.expander("📡 Sector Momentum (1 month)"):
+                            with st.expander("Sector Momentum (1 month)"):
                                 for _s in sorted(_sec_weights, key=_sec_weights.get, reverse=True):
                                     _w = _sec_weights[_s]
                                     _ret = _momentum.get(_s)
