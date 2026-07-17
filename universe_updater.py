@@ -33,14 +33,27 @@ import deep_metrics
 # ──────────────────────────────────────────────
 SCHEMA_VERSION = 1
 
-# --- ADD THIS GLOBAL SESSION BLOCK HERE ---
-global_session = requests.Session()
-global_session.headers.update({
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "*/*",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Connection": "keep-alive"
-})
+import random
+
+# --- BROWSER FINGERPRINT POOL ---
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14.3; rv:122.0) Gecko/20100101 Firefox/122.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/122.0.0.0"
+]
+
+def get_rotated_session():
+    """Returns a fresh session with a random modern user-agent to drop tracking cookies."""
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": random.choice(USER_AGENTS),
+        "Accept": "*/*",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive"
+    })
+    return session
 
 
 # ──────────────────────────────────────────────
@@ -299,8 +312,9 @@ def fetch_fundamentals(ticker, retries=3):
     """Fetch all metrics needed for the 4 frameworks. Returns dict or None. Includes backoff."""
     for attempt in range(retries):
         try:
-            # 1. CRITICAL: Explicitly pass the global session so Yahoo doesn't block us
-            stock = yf.Ticker(ticker, session=global_session)
+            # 1. CRITICAL: Generate a fresh, random session per ticker to evade session tracking
+            local_session = get_rotated_session()
+            stock = yf.Ticker(ticker, session=local_session)
             info = stock.info
             
             if not info or not info.get("regularMarketPrice"):
