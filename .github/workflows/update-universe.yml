@@ -31,6 +31,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
+          pip install --upgrade --no-cache-dir yfinance
 
       - name: Run universe updater
         if: inputs.skip_universe != 'true'
