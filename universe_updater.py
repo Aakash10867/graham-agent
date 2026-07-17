@@ -138,14 +138,24 @@ def fetch_bse_tickers():
     session.headers.update({
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                       "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json",
-        "Referer": "https://www.bseindia.com/",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
     })
 
     tickers = []
 
     try:
         print("[BSE] Attempting API method...")
+        
+        session.headers.update({"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"})
+        session.get("https://www.bseindia.com/", timeout=15)
+        time.sleep(2)
+        
+        session.headers.update({
+            "Accept": "application/json",
+            "Referer": "https://www.bseindia.com/",
+        })
+        
         url = (
             "https://api.bseindia.com/BseIndiaAPI/api/ListofScripData/w"
             "?Group=&Scripcode=&industry=&segment=Equity&status=Active"
