@@ -133,7 +133,7 @@ def fetch_nse_tickers():
 # BSE FETCHER
 # ──────────────────────────────────────────────
 def fetch_bse_tickers():
-    """Fetch all active equity tickers from BSE India."""
+    """Fetch all active equity tickers from BSE India, with a CI-safe mirror fallback."""
     session = requests.Session()
     session.headers.update({
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -146,7 +146,6 @@ def fetch_bse_tickers():
 
     try:
         print("[BSE] Attempting API method...")
-        
         session.headers.update({"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"})
         session.get("https://www.bseindia.com/", timeout=15)
         time.sleep(2)
@@ -188,7 +187,43 @@ def fetch_bse_tickers():
         return tickers
 
     except Exception as e:
-        print(f"[BSE] API method failed: {e}")
+        print(f"[BSE] API method blocked by WAF ({e}).")
+        print("[BSE] Falling back to CI-safe GitHub mirror...")
+        
+        # GitHub Actions IP bypass: Fetch from a daily-updated community mirror
+        try:
+            mirror_url = "https://raw.githubusercontent.com/RuchiTanmay/bseindia/main/bseindia/bse_security_list.csv"
+            df = pd.read_csv(mirror_url)
+            
+            # Normalize columns to handle minor upstream schema changes
+            df.columns = [str(c).strip().lower() for c in df.columns]
+            
+            code_col = next((c for c in df.columns if 'code' in c), None)
+            name_col = next((c for c in df.columns if 'name' in c or 'id' in c), None)
+            grp_col = next((c for c in df.columns if 'group' in c), None)
+            ind_col = next((c for c in df.columns if 'industry' in c), None)
+            isin_col = next((c for c in df.columns if 'isin' in c), None)
+            status_col = next((c for c in df.columns if 'status' in c), None)
+
+            if status_col:
+                df = df[df[status_col].astype(str).str.contains('Active', case=False, na=False)]
+
+            for _, row in df.iterrows():
+                scrip_code = str(row.get(code_col, "")).strip() if code_col else ""
+                name = str(row.get(name_col, "")).strip() if name_col else ""
+                
+                if scrip_code and scrip_code not in ("", "nan", "None"):
+                    tickers.append({
+                        "scrip_code": scrip_code,
+                        "name": name,
+                        "exchange": "BSE",
+                        "group": str(row.get(grp_col, "")).strip() if grp_col else "",
+                        "industry": str(row.get(ind_col, "")).strip() if ind_col else "",
+                        "isin": str(row.get(isin_col, "")).strip() if isin_col else "",
+                    })
+            print(f"[BSE] Mirror fallback: got {len(tickers)} tickers")
+        except Exception as mirror_err:
+            print(f"[BSE] Mirror method also failed: {mirror_err}")
 
     return tickers
 
