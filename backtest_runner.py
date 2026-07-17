@@ -60,7 +60,7 @@ HORIZON_TRADING_DAYS = 63                      # ~1 quarter; configurable
 PRICE_BUCKETS = [3, 4, 5]                      # priced in full (few names)
 CONTROL_BUCKETS = [0, 1, 2]                    # sampled — control group
 CONTROL_SAMPLE_PER_BUCKET = 100               # cap per control bucket per cohort
-MIN_MATURED_COHORTS = 6                        # below this: "insufficient data"
+MIN_MATURED_COHORTS = 1                        # show a reading at 1 matured cohort; certainty is the overlap-adjusted band's job, not a hard gate's
 MIN_CLEAN_SCHEMA = 1                            # snapshot schema_version floor
 PRICE_CACHE_FILE = "backtest_price_cache.csv"  # immutable historical closes
 FETCH_CHUNK = 40                               # tickers per yfinance batch
@@ -337,56 +337,130 @@ def cohort_returns(cohort, calendar, prices):
 # ══════════════════════════════════════════════════════════════════════════
 # 4. AGGREGATE + HONEST GATING
 # ══════════════════════════════════════════════════════════════════════════
-def project_first_signal(cohorts, matured):
-    """When will we have MIN_MATURED_COHORTS matured clean cohorts? Projected
-    from the observed clean-snapshot cadence + the horizon."""
-    if len(cohorts) < 2:
-        return "unknown (need more snapshots to estimate cadence)"
-    span = (cohorts[-1]["date"] - cohorts[0]["date"]).days
-    per_day = len(cohorts) / max(span, 1)
-    needed = MIN_MATURED_COHORTS - matured
-    if needed <= 0:
-        return "now"
-    # extra calendar days to accrue `needed` more snapshots, plus one horizon to mature
-    days = needed / per_day + HORIZON_TRADING_DAYS * (7 / 5)
-    return (date.today() + timedelta(days=round(days))).isoformat()
+def project_first_reading(cohorts):
+    """Projected date the FIRST cohort matures = earliest clean snapshot + one
+    horizon. 'now' once anything has matured (handled by the caller)."""
+    if not cohorts:
+        return "unknown (no clean snapshots yet)"
+    horizon_cal = round(HORIZON_TRADING_DAYS * 7 / 5)
+    return (cohorts[0]["date"] + timedelta(days=horizon_cal)).isoformat()
+
+
+def _is_monotonic(ladder_means):
+    """True iff mean fwd return is non-increasing from bucket 5 down to 0 across
+    the buckets present (>=2 needed to mean anything)."""
+    present = [ladder_means[b] for b in [5, 4, 3, 2, 1, 0] if b in ladder_means]
+    return len(present) >= 2 and all(present[i] >= present[i + 1]
+                                     for i in range(len(present) - 1))
+
+
+def _high_minus_low(bmeans):
+    """mean(buckets 4,5) - mean(buckets 0,1) for one cohort, or None if either
+    side is entirely absent that day."""
+    hi = [bmeans[b] for b in (4, 5) if b in bmeans]
+    lo = [bmeans[b] for b in (0, 1) if b in bmeans]
+    if not hi or not lo:
+        return None
+    return float(np.mean(hi) - np.mean(lo))
+
+
+def overlap_adjusted_ci(values, span_days, horizon_cal_days):
+    """95% CI on the mean of per-cohort statistics, with the sample size
+    discounted for window overlap. Daily cohorts overlap ~62/63 days, so the
+    honest denominator is the number of NON-overlapping horizons the cohorts
+    span, not the raw cohort count. Returns
+    (point, lo, hi, n_cohorts, independent_quarters); lo/hi are None until n>=2."""
+    xs = [v for v in values if v is not None]
+    n = len(xs)
+    if n == 0:
+        return None, None, None, 0, 0
+    point = float(np.mean(xs))
+    n_eff = max(1.0, span_days / horizon_cal_days) if horizon_cal_days else 1.0
+    n_eff_int = max(1, int(n_eff))
+    if n < 2:
+        return round(point, 4), None, None, n, n_eff_int
+    se = float(np.std(xs, ddof=1)) / math.sqrt(n_eff)
+    return round(point, 4), round(point - 1.96 * se, 4), round(point + 1.96 * se, 4), n, n_eff_int
 
 
 def aggregate(all_rows, cohorts, matured_cohorts):
-    """Per-bucket means across matured cohorts, with the survivorship caveat and
-    an honest status."""
+    """The ladder (mean fwd return per entry bucket) + the headline high-minus-low
+    spread with an overlap-adjusted band. Cross-sectional by design: buckets in a
+    cohort share the same market window, so a good/bad quarter cancels out of the
+    spread. Status flips to OK at the first matured cohort; the band, not a gate,
+    carries the uncertainty."""
     status = "OK" if matured_cohorts >= MIN_MATURED_COHORTS else "INSUFFICIENT_DATA"
+    horizon_cal = round(HORIZON_TRADING_DAYS * 7 / 5)
     summary = {
         "status": status,
         "matured_cohorts": matured_cohorts,
+        "snapshots_clean": len(cohorts),
         "min_required": MIN_MATURED_COHORTS,
         "horizon_trading_days": HORIZON_TRADING_DAYS,
-        "benchmark": BENCHMARK,
+        "benchmark": BENCHMARK,          # trading-day calendar spine only, not a signal
         "generated": datetime.now().isoformat(timespec="seconds"),
         "caveats": [
-            "Buy-and-hold by ENTRY score; mid-horizon score changes are ignored.",
+            "Cross-sectional ladder: within a cohort all buckets share the same "
+            "window, so a good/bad quarter lifts or sinks them together and "
+            "cancels out of the high-minus-low spread.",
+            "Daily cohorts overlap ~62/63 days — they sharpen the estimate but are "
+            "NOT independent. The band uses effective N = calendar span / horizon, "
+            "not the raw cohort count.",
             "Delisted names with no forward price are dropped and counted in "
             "n_missing; this biases surviving-bucket returns UPWARD.",
-            "Point-in-time snapshot => no current-list survivorship bias; the "
-            "residual is delisting only.",
+            "Point-in-time snapshot => no current-list survivorship bias; residual "
+            "is delisting only.",
         ],
-        "buckets": {},
+        "ladder": {},
     }
-    if all_rows:
-        df = pd.DataFrame(all_rows)
-        df = df[df["fwd_return"].notna()]
-        for b in sorted(set(PRICE_BUCKETS + CONTROL_BUCKETS)):
-            sub = df[df["score_bucket"] == b]
-            if len(sub):
-                summary["buckets"][str(b)] = {
-                    "cohorts": int(sub["cohort_date"].nunique()),
-                    "mean_fwd_return": round(float(sub["fwd_return"].mean()), 4),
-                    "mean_alpha": round(float(sub["alpha"].mean()), 4),
-                    "total_missing": int(sub["n_missing"].sum()),
-                    "sampled": bool(b in CONTROL_BUCKETS),
-                }
+
+    priced = pd.DataFrame(all_rows)
+    priced = priced[priced["fwd_return"].notna()] if len(priced) else priced
+
+    if not len(priced):
+        summary["ladder_monotonic"] = None
+        summary["independent_quarters"] = 0
+        summary["spread_high_minus_low"] = {
+            "definition": "mean(buckets 4,5) - mean(buckets 0,1) forward return",
+            "point": None, "ci95": None, "n_cohorts": 0, "independent_quarters": 0}
+        if status == "INSUFFICIENT_DATA":
+            summary["first_reading_date"] = project_first_reading(cohorts)
+        return summary
+
+    # ── aggregate ladder: mean fwd return per bucket across matured cohorts ──
+    ladder_means = {}
+    for b in sorted(set(PRICE_BUCKETS + CONTROL_BUCKETS)):
+        sub = priced[priced["score_bucket"] == b]
+        if len(sub):
+            m = round(float(sub["fwd_return"].mean()), 4)
+            ladder_means[b] = m
+            summary["ladder"][str(b)] = {
+                "cohorts": int(sub["cohort_date"].nunique()),
+                "mean_fwd_return": m,
+                "total_missing": int(sub["n_missing"].sum()),
+                "sampled": bool(b in CONTROL_BUCKETS),
+            }
+    summary["ladder_monotonic"] = _is_monotonic(ladder_means)
+
+    # ── per-cohort high-minus-low spread → overlap-adjusted band ──
+    spread_by_cohort = {}
+    for cd, g in priced.groupby("cohort_date"):
+        bmeans = {int(r["score_bucket"]): r["fwd_return"] for _, r in g.iterrows()}
+        spread_by_cohort[cd] = _high_minus_low(bmeans)
+    dates = sorted(pd.to_datetime(list(spread_by_cohort.keys())))
+    span_days = (dates[-1] - dates[0]).days if len(dates) > 1 else 0
+    point, lo, hi, n, m_eff = overlap_adjusted_ci(
+        list(spread_by_cohort.values()), span_days, horizon_cal)
+    summary["independent_quarters"] = m_eff
+    summary["spread_high_minus_low"] = {
+        "definition": "mean(buckets 4,5) - mean(buckets 0,1) forward return",
+        "point": point,
+        "ci95": [lo, hi] if lo is not None else None,
+        "n_cohorts": n,
+        "independent_quarters": m_eff,
+    }
     if status == "INSUFFICIENT_DATA":
-        summary["first_signal_projected"] = project_first_signal(cohorts, matured_cohorts)
+        summary["first_reading_date"] = project_first_reading(cohorts)
     return summary
 
 
@@ -454,16 +528,23 @@ def main():
           f"and backtest_summary.json")
 
     if summary["status"] == "INSUFFICIENT_DATA":
-        print(f"\n[STATUS] INSUFFICIENT DATA — {matured} matured cohorts "
-              f"(need {MIN_MATURED_COHORTS}). No return claim emitted.")
-        print(f"[STATUS] First honest signal projected ~{summary['first_signal_projected']}.")
+        print(f"\n[STATUS] INSUFFICIENT DATA — {matured} matured cohorts. No reading yet.")
+        print(f"[STATUS] First reading projected ~{summary.get('first_reading_date','?')}.")
     elif summary["status"] == "OK":
-        print("\n[RESULT] mean forward return / alpha by entry-score bucket:")
-        for b, v in sorted(summary["buckets"].items()):
-            tag = " (sampled)" if v["sampled"] else ""
-            print(f"  {b}/5: fwd {v['mean_fwd_return']:+.2%} | "
-                  f"alpha {v['mean_alpha']:+.2%} | {v['cohorts']} cohorts{tag}")
-        print("  Survivorship note: n_missing dropped upward-biases these; see caveats.")
+        print(f"\n[RESULT] ladder — mean forward return by entry score "
+              f"({matured} cohorts, ~{summary['independent_quarters']} independent quarters):")
+        for b in ["5", "4", "3", "2", "1", "0"]:
+            v = summary["ladder"].get(b)
+            if v:
+                tag = " (sampled)" if v["sampled"] else ""
+                print(f"  {b}/5: {v['mean_fwd_return']:+.2%}  ({v['cohorts']} cohorts){tag}")
+        print(f"  Ladder monotonic (5>=...>=0): {summary['ladder_monotonic']}")
+        sp = summary["spread_high_minus_low"]
+        if sp["point"] is not None:
+            band = (f"  95% CI {sp['ci95'][0]:+.2%}..{sp['ci95'][1]:+.2%}"
+                    if sp["ci95"] else "  (band forms at 2 cohorts)")
+            print(f"  High-low spread mean(4,5)-mean(0,1): {sp['point']:+.2%}{band}")
+        print("  Survivorship note: n_missing upward-biases these; see caveats.")
 
     print("\nBacktest complete.")
 
