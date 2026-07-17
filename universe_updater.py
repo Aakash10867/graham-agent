@@ -312,9 +312,8 @@ def fetch_fundamentals(ticker, retries=3):
     """Fetch all metrics needed for the 4 frameworks. Returns dict or None. Includes backoff."""
     for attempt in range(retries):
         try:
-            # 1. CRITICAL: Generate a fresh, random session per ticker to evade session tracking
-            local_session = get_rotated_session()
-            stock = yf.Ticker(ticker, session=local_session)
+            # 1. CRITICAL: Let modern yfinance handle the session and crumb natively
+            stock = yf.Ticker(ticker)
             info = stock.info
             
             if not info or not info.get("regularMarketPrice"):
