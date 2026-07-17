@@ -35,7 +35,7 @@ jobs:
 
       - name: Run universe updater
         if: inputs.skip_universe != 'true'
-        run: python universe_updater.py
+        run: python -u universe_updater.py
 
       # The tracker used to run HERE, in this job, under `bash -e`. On
       # 2026-07-09 it raised on a NaN and the commit step below never ran —
