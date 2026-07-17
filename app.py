@@ -8324,27 +8324,6 @@ elif st.session_state.sb_view_mode == "portfolios":
                 except Exception:
                     pass  # Fail silently if history table doesn't exist yet
 
-                # ── Sector Momentum ──
-                if holdings and len(display_holdings) > 1:
-                    _sec_vals = {}
-                    for _h in display_holdings:
-                        _s = _h.get("sector") or "Unknown"
-                        _sec_vals[_s] = _sec_vals.get(_s, 0) + _h.get("current_value", 0)
-                    _total_pv = sum(_sec_vals.values())
-                    if _total_pv > 0 and len(_sec_vals) > 0:
-                        _sec_weights = {s: round(v / _total_pv * 100, 1) for s, v in _sec_vals.items()}
-                        _momentum = get_sector_momentum(tuple(sorted(_sec_vals.keys())))
-                        if _momentum:
-                            with st.expander("Sector Momentum (1 month)"):
-                                for _s in sorted(_sec_weights, key=_sec_weights.get, reverse=True):
-                                    _w = _sec_weights[_s]
-                                    _ret = _momentum.get(_s)
-                                    if _ret is not None:
-                                        _icon = "🟢" if _ret >= 0 else ("🔴" if _ret < -5 else "🟡")
-                                        st.caption(f"{_icon} **{_s}** — {_w:.0f}% of portfolio · {_ret:+.1f}% this month")
-                                    else:
-                                        st.caption(f"⚪ **{_s}** — {_w:.0f}% of portfolio · no index data")
-
                 # ── Goal Tracker ──
                 _goal_amt = port.get("target_amount")
                 _goal_date = port.get("target_date")
