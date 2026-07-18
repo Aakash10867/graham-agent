@@ -9829,10 +9829,8 @@ elif st.session_state.sb_view_mode == "backtest":
     st.markdown("### 📊 Does It Work?")
 
     CLOCK_START = _dtm.date(2026, 7, 10)   # dividend + trajectory_pass fixes landed
-    SIGNAL_COHORTS = 6                      # ~6 monthly cohorts for a first hint
-    TRADING_PER_MONTH = 21
 
-    # ── The clock ────────────────────────────────────────────────────────
+    # ── Film: raw snapshots archived (collection cadence, ~1/weekday) ──
     clean_snaps = 0
     last_snap = None
     try:
@@ -9847,51 +9845,90 @@ elif st.session_state.sb_view_mode == "backtest":
     except Exception:
         clean_snaps = 0
 
-    _days_elapsed = (_dtm.date.today() - CLOCK_START).days
-    _snaps_needed = SIGNAL_COHORTS * TRADING_PER_MONTH
-    _snaps_left = max(0, _snaps_needed - clean_snaps)
-    # Projection basis: the archive commits ~1/weekday, a KNOWN cadence. Only
-    # trust the *observed* accrual rate once there's enough of it (>= 15 snaps);
-    # before that the observed rate is noise and would wildly mis-project.
-    _known_rate = TRADING_PER_MONTH / 30.0            # ~0.7 snapshots/calendar-day
-    if clean_snaps >= 15 and _days_elapsed > 0:
-        _rate = clean_snaps / _days_elapsed
-    else:
-        _rate = _known_rate
-    _days_to_signal = int(_snaps_left / _rate) if _rate > 0 else None
-    _signal_date = (_dtm.date.today() + _dtm.timedelta(days=_days_to_signal)) if _days_to_signal is not None else None
+    # ── Grades: the runner is the single authority on the reading ──
+    _bt = {}
+    try:
+        with open("backtest_summary.json") as _bf:
+            _bt = _json.load(_bf)
+    except Exception:
+        _bt = {}
+    _status = _bt.get("status", "NO_ARCHIVE")
+    _matured = _bt.get("matured_cohorts", 0)
+    _quarters = _bt.get("independent_quarters", 0)
+    _ladder = _bt.get("ladder", {}) or {}
+    _spread = _bt.get("spread_high_minus_low", {}) or {}
+    _first_reading = _bt.get("first_reading_date")
 
     st.markdown(
-        "**We can't yet tell you whether this works — and we won't pretend to.**  \n"
-        "A strategy that asks you to hold quality businesses for years cannot be "
-        "judged on a few weeks of data. So instead of a fabricated backtest, here "
-        "is exactly where the real evidence stands today, and the date it starts "
-        "to mean something.")
+        "**We can't hand you a fabricated backtest — so here is exactly where the "
+        "real evidence stands today.**  \n"
+        "The test is simple: photograph every stock's score, wait one holding "
+        "horizon, then check whether higher-scored buckets earned more. A good or "
+        "bad quarter lifts every bucket together, so it cancels out of the "
+        "high-vs-low spread. The reading below is real but noisy at first, and "
+        "sharpens as the archive spans more independent quarters.")
 
     _c1, _c2, _c3 = st.columns(3)
     with _c1:
-        st.metric("Clean daily snapshots", f"{clean_snaps}",
-                  help="Point-in-time archives of the whole universe, scored by "
-                       "the current (post-fix) system. This is the raw material "
-                       "for an honest backtest. It grows by one every weekday.")
+        st.metric("Snapshots archived", f"{clean_snaps}",
+                  help="Point-in-time archives of the whole scored universe — the "
+                       "raw film. Grows by one every weekday. Collection cadence, "
+                       "not evidence: overlapping days aren't independent.")
     with _c2:
-        st.metric("First signal at", f"{_snaps_needed} snapshots",
-                  delta=f"{_snaps_left} to go" if _snaps_left else "reached",
+        st.metric("Matured cohorts", f"{_matured}",
+                  delta=(f"≈{_quarters} independent quarter"
+                         f"{'s' if _quarters != 1 else ''}") if _matured else None,
                   delta_color="off",
-                  help=f"~{SIGNAL_COHORTS} independent monthly cohorts — the "
-                       "minimum to distinguish the ranking from luck.")
+                  help="Cohorts whose full holding horizon has elapsed, so they can "
+                       "be graded. The spread's band uses the independent-quarter "
+                       "count, never the raw cohort count.")
     with _c3:
-        st.metric("Projected date",
-                  _signal_date.strftime("%b %Y") if _signal_date else "—",
-                  help="Extrapolated from how fast snapshots are actually "
-                       "accruing. Moves earlier as the archive fills.")
+        if _status == "OK":
+            st.metric("Reading", "live",
+                      help="A cohort has matured. The ladder below is the current, "
+                           "still-noisy reading; it tightens over time.")
+        else:
+            st.metric("First reading", _first_reading or "—",
+                      help="Projected date the first cohort matures = earliest "
+                           "clean snapshot + one holding horizon.")
 
-    if clean_snaps == 0:
-        st.info("The clock starts at zero on purpose. Every screener on the "
-                "internet claims backtested alpha. We're showing you the archive "
-                "filling up in real time instead.")
+    if _status == "OK" and _ladder:
+        st.markdown("**Forward return by entry score** — buy-and-hold, one horizon, "
+                    "averaged across matured cohorts:")
+        _order = [b for b in ["5", "4", "3", "2", "1", "0"] if b in _ladder]
+        _cols = st.columns(len(_order))
+        for _col, _b in zip(_cols, _order):
+            _v = _ladder[_b]
+            _tag = " ·sampled" if _v.get("sampled") else ""
+            _col.metric(f"Score {_b}{_tag}", f"{_v['mean_fwd_return'] * 100:+.1f}%",
+                        help=f"{_v.get('cohorts', 0)} cohorts")
+        _pt = _spread.get("point")
+        if _pt is not None:
+            _ci = _spread.get("ci95")
+            _band = (f"95% CI {_ci[0] * 100:+.1f}% … {_ci[1] * 100:+.1f}%"
+                     if _ci else "band forms once a 2nd cohort matures")
+            st.metric("High-score minus low-score spread", f"{_pt * 100:+.1f}%",
+                      delta=_band, delta_color="off",
+                      help="mean(scores 4,5) − mean(scores 0,1) forward return — the "
+                           "one number for 'better score = better return', with the "
+                           "overlap-adjusted band.")
+        _mono = _bt.get("ladder_monotonic")
+        if _mono is not None:
+            st.caption(("✅ Ladder is monotonic (5 ≥ 4 ≥ … ≥ 0) on current means."
+                        if _mono else
+                        "⚠️ Ladder isn't cleanly monotonic yet — expected while the "
+                        "cohort count is low.")
+                       + "  Survivorship note: delisted names are dropped, biasing "
+                         "surviving buckets upward.")
+    else:
+        st.info("No cohort has matured yet, so there is no return reading to show. "
+                "The archive is filling in real time — every screener online claims "
+                "backtested alpha; we're showing you the film accumulate instead.")
+
     st.caption(f"Clock started {CLOCK_START.strftime('%d %b %Y')}"
-               + (f" · last snapshot {last_snap}" if last_snap else ""))
+               + (f" · last snapshot {last_snap}" if last_snap else "")
+               + (f" · horizon {_bt.get('horizon_trading_days', '?')} trading days"
+                  if _bt else ""))
 
     st.divider()
 
