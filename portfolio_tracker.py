@@ -1038,11 +1038,33 @@ def run_daily_tracker():
             row = universe_df[universe_df["ticker"] == ticker]
             if row.empty:
                 continue
+            # If the universe carries duplicate rows for a ticker (an earlier
+            # partial run left a zero-scored HBLENGINE that a later concat didn't
+            # overwrite; an NSE/BSE key collision), iloc[0] can grab the STALE
+            # copy. Prefer the best-scored, non-stale, freshest row so we never
+            # read a phantom 0 for a name that actually scored 5.
+            if len(row) > 1:
+                _r = row.copy()
+                if "is_stale" in _r.columns:
+                    _r = _r.sort_values("is_stale")            # False (fresh) first
+                _r = _r.sort_values("score", ascending=False, kind="stable")
+                row = _r
+                print(f"  [DEDUP] {ticker}: {len(row)} universe rows; using score="
+                      f"{row['score'].iloc[0]}")
 
-            current_score = int(row["score"].iloc[0]) if pd.notna(row["score"].iloc[0]) else 0
+            _raw_score = row["score"].iloc[0]
+            # A missing/blank score is NOT a zero — it's "no reading today". Skip
+            # the drop check entirely rather than manufacture a 5 -> 0 sell signal
+            # on a data gap.
+            if pd.isna(_raw_score):
+                continue
+            current_score = int(_raw_score)
+            _is_stale = bool(row["is_stale"].iloc[0]) if "is_stale" in row.columns and pd.notna(row["is_stale"].iloc[0]) else False
             quality_pass = bool(row["quality_pass"].iloc[0]) if "quality_pass" in row.columns and pd.notna(row["quality_pass"].iloc[0]) else True
 
-            if entry_score - current_score >= 2:
+            # Never fire a sell/defend alert off a carried-forward (stale) row:
+            # a throttle-day refill is for continuity, not for triggering trades.
+            if entry_score - current_score >= 2 and not _is_stale:
                 _dd_headline = f"{holding.get('name', ticker)} score dropped {entry_score} -> {current_score}"
                 all_alerts.append(make_alert(
                     "danger", ticker, _dd_headline,
