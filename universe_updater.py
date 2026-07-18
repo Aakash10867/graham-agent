@@ -864,9 +864,27 @@ def main():
     bse_tickers = fetch_bse_tickers()
     print()
 
-    if not nse_tickers and not bse_tickers:
-        print("ERROR: Could not fetch from either exchange. Check internet connection.")
-        return
+    # ── Fail-fast on COMPOSITION, before the 90-min scan ──
+    # The regression guard downstream checks size, not composition — and losing
+    # a whole exchange is invisible to it. When NSE fetch fails, dedup matches 0,
+    # every dual-listed major floods back as its .BO twin, and the row count
+    # lands at a plausible number while the universe is silently .BO-only. So we
+    # gate here: an exchange coming back near-empty is a STRUCTURAL break, not a
+    # small day. Floors sit well below known-good counts (NSE ~2,384, BSE mirror
+    # ~4,330) and far above any real delisting day. Abort BEFORE burning the scan
+    # budget and before risking a composition-swapped commit.
+    _NSE_FLOOR = 1500
+    _BSE_FLOOR = 3000
+    if len(nse_tickers) < _NSE_FLOOR:
+        print(f"FATAL: NSE returned {len(nse_tickers)} tickers (floor {_NSE_FLOOR}). "
+              f"NSE fetch failed — the universe would be .BO-only, breaking every "
+              f"downstream consumer that assumes .NS. Not scanning. Usually "
+              f"transient (NSE archive/API flaking on the CI IP); rerun later.")
+        sys.exit(1)
+    if len(bse_tickers) < _BSE_FLOOR:
+        print(f"FATAL: BSE returned {len(bse_tickers)} tickers (floor {_BSE_FLOOR}). "
+              f"BSE API WAF + GitHub mirror both failed. Not scanning; rerun later.")
+        sys.exit(1)
 
     combined = combine_and_deduplicate(nse_tickers, bse_tickers)
 
