@@ -197,6 +197,16 @@ def _tier1(df: pd.DataFrame, sip_amount: float, rejects: dict) -> pd.DataFrame:
         # `notna(de)` happened to drop them — banks report no debtToEquity.
         cut(~df["is_unevaluable"].fillna(False).astype(bool), "unevaluable_business_model")
 
+    if "is_stale" in df.columns:
+        # Carry-forward rows: a stock throttled by Yahoo today, filled from its
+        # last committed fundamentals so it doesn't vanish from monitoring. Fine
+        # for the tracker to SEE (position continuity), never eligible for a NEW
+        # buy — allocating fresh capital on stale numbers is the one thing
+        # carry-forward must not enable. The asymmetry is deliberate: skipping a
+        # good buy for a day costs a day; buying into a stale row is unrecoverable.
+        # .get-guarded so pre-Sprint-14 CSVs (no column) are unaffected.
+        cut(~df["is_stale"].fillna(False).astype(bool), "stale_carryforward")
+
     cut(df["market_cap"] >= MIN_MARKET_CAP, "below_market_cap_floor")
 
     _turnover = df["price"] * df["avg_daily_volume"]
