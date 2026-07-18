@@ -1051,6 +1051,60 @@ def main():
         r["is_unevaluable"] = bool(_ind in _UNEVALUABLE_INDUSTRIES)
         r["unevaluable_reason"] = _ind if _ind in _UNEVALUABLE_INDUSTRIES else ""
 
+    # ── Sprint 14: row-level carry-forward for THROTTLED tickers only ──
+    # A rate-limited (429) miss is Yahoo saying "slow down" about a stock that
+    # EXISTS; a no_price/404/delisted miss is Yahoo saying the stock is GONE.
+    # We carry the first kind forward from the last committed CSV so a healthy
+    # firm doesn't randomly vanish for a day — but NEVER the second kind, so a
+    # delisted shell can't be kept warm. The reason code is the guard: a
+    # delisted firm 404s, it never 429s, so it can't reach this branch. Carried
+    # rows are flagged is_stale (selector excludes them from NEW buys; the
+    # tracker still sees them for position continuity) and age out after
+    # MAX_STALE_DAYS. data_as_of preserves TRUE vintage — a row carried two days
+    # running ages 0→1→2, it does not reset, so staleness can't be laundered.
+    MAX_STALE_DAYS = 5
+    _today = datetime.now().strftime("%Y-%m-%d")
+
+    _fresh_tickers = set()
+    for r in scored_results:               # stamp every FRESH row
+        r["is_stale"] = False
+        r["data_as_of"] = _today
+        r["stale_days"] = 0
+        _fresh_tickers.add(r.get("ticker"))
+
+    _throttled = [t for t, rsn in FAILURES
+                  if rsn == "rate_limited" and t not in _fresh_tickers]
+    _carried = _aged = 0
+    if _throttled and os.path.exists("universe_scored.csv"):
+        try:
+            _prev = pd.read_csv("universe_scored.csv").set_index("ticker", drop=False)
+            _vcol = "data_as_of" if "data_as_of" in _prev.columns else "updated_date"
+            for _t in _throttled:
+                if _t not in _prev.index:
+                    continue               # never seen it fresh — nothing to carry
+                _row = _prev.loc[_t]
+                if isinstance(_row, pd.DataFrame):   # dup index guard
+                    _row = _row.iloc[0]
+                _row = _row.to_dict()
+                _vintage = str(_row.get(_vcol, "")).strip()
+                try:
+                    _sd = (datetime.strptime(_today, "%Y-%m-%d")
+                           - datetime.strptime(_vintage, "%Y-%m-%d")).days
+                except Exception:
+                    _sd = MAX_STALE_DAYS + 1         # unparseable vintage → drop
+                if _sd < 0 or _sd > MAX_STALE_DAYS:
+                    _aged += 1
+                    continue
+                _row["is_stale"] = True
+                _row["data_as_of"] = _vintage        # keep TRUE vintage, don't reset
+                _row["stale_days"] = int(_sd)
+                scored_results.append(_row)
+                _carried += 1
+        except Exception as _e:
+            print(f"[CARRY] non-fatal: {type(_e).__name__}: {_e}")
+    print(f"[CARRY] throttled: {len(_throttled)} | carried (<= {MAX_STALE_DAYS}d): "
+          f"{_carried} | aged out: {_aged}")
+
     # ── Existing columns ──
     base_columns = [
         "ticker", "name", "sector", "industry",
@@ -1065,6 +1119,7 @@ def main():
         "revenue_cagr_3y", "ni_cagr_3y",
         "price_1d_pct", "price_5d_pct", "rsi_14", "vol_spike_flag", "avg_daily_volume",
         "risk_tier", "liquidity_flag",
+        "is_stale", "data_as_of", "stale_days",
         "years_of_data",
         "revenue_y0", "revenue_y1", "revenue_y2", "revenue_y3",
         "net_income_y0", "net_income_y1", "net_income_y2", "net_income_y3",
