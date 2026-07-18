@@ -975,6 +975,8 @@ def main():
         print(f"[NSE] fresh list {len(nse_tickers)} < healthy {_NSE_HEALTHY}; "
               f"NOT refreshing cache (avoids poisoning last-known-good).")
 
+    combined = combine_and_deduplicate(nse_tickers, bse_tickers)
+
     # Save raw ticker list too (for reference)
     raw_df = pd.DataFrame(combined).sort_values("ticker").reset_index(drop=True)
     raw_df.to_csv("universe_tickers.csv", index=False)
