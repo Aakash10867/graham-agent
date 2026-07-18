@@ -55,6 +55,47 @@ def get_rotated_session():
     })
     return session
 
+# ──────────────────────────────────────────────
+# NSE LAST-KNOWN-GOOD CACHE
+# ──────────────────────────────────────────────
+# NSE blocks the Actions runner IP often enough that we keep the last FRESH
+# equity list on disk (committed to the repo) and fall back to it when a fetch
+# fails. Same dict shape fetch_nse_tickers() returns, so dedup is identical.
+LASTGOOD_NSE = "nse_tickers_lastgood.csv"
+
+
+def save_lastgood_nse(tickers):
+    """Persist a fresh, floor-passing NSE list as last-known-good. Never raises."""
+    try:
+        pd.DataFrame(tickers).to_csv(LASTGOOD_NSE, index=False)
+        print(f"[NSE] cached {len(tickers)} tickers -> {LASTGOOD_NSE} (last-known-good)")
+    except Exception as e:
+        print(f"[NSE] non-fatal: could not write cache: {type(e).__name__}: {e}")
+
+
+def load_lastgood_nse():
+    """Read the last committed good NSE list. Returns [] if absent/unreadable."""
+    if not os.path.exists(LASTGOOD_NSE):
+        print(f"[NSE] no {LASTGOOD_NSE} on disk — cannot fall back.")
+        return []
+    try:
+        df = pd.read_csv(LASTGOOD_NSE)
+        tickers = []
+        for _, row in df.iterrows():
+            symbol = str(row.get("symbol", "")).strip()
+            if symbol and symbol.lower() != "nan":
+                _isin = row.get("isin")
+                tickers.append({
+                    "symbol": symbol,
+                    "name": str(row.get("name", "")).strip(),
+                    "exchange": "NSE",
+                    "isin": str(_isin).strip() if pd.notna(_isin) else "",
+                })
+        return tickers
+    except Exception as e:
+        print(f"[NSE] non-fatal: could not read cache: {type(e).__name__}: {e}")
+        return []
+
 
 # ──────────────────────────────────────────────
 # NSE FETCHER
@@ -858,35 +899,65 @@ def main():
     print("=" * 60)
 
     # ── Step 1: Fetch ticker lists ──
-    print("\n--- STEP 1: Fetching ticker lists ---\n")
+    # Composition floors: an exchange returning below these is a STRUCTURAL
+    # break (its fetch was blocked), not a light delisting day. Set well below
+    # known-good counts (NSE ~2,384, BSE mirror ~4,330), well above any real
+    # delisting day.
+    _NSE_FLOOR = 1500
+    _BSE_FLOOR = 3000
+    _NSE_HEALTHY = 2000   # only (re)cache last-known-good from a clearly-complete fetch
+
     nse_tickers = fetch_nse_tickers()
+
+    # ── NSE last-known-good fallback ──
+    # NSE routinely IP-blocks the Actions runner (503 on the archive + timeout on
+    # the API), and it's a fresh runner IP each run, so retrying the same blocked
+    # IP in-process can't win. Instead of losing the whole day, fall back to the
+    # last FRESH NSE list we committed. The equity master moves slowly, so a
+    # days-stale list keeps composition correct and dedup identical (ISIN kept) —
+    # far better than a .BO-only universe.
+    _nse_from_cache = False
+    if len(nse_tickers) < _NSE_FLOOR:
+        print(f"[NSE] fresh fetch returned {len(nse_tickers)} (< floor "
+              f"{_NSE_FLOOR}); falling back to last-known-good committed list.")
+        _cached = load_lastgood_nse()
+        if len(_cached) >= _NSE_FLOOR:
+            nse_tickers = _cached
+            _nse_from_cache = True
+            print(f"[NSE] using {len(nse_tickers)} CACHED tickers (stale but "
+                  f"present — NSE was unreachable this run).")
     print()
+
     bse_tickers = fetch_bse_tickers()
     print()
 
-    # ── Fail-fast on COMPOSITION, before the 90-min scan ──
-    # The regression guard downstream checks size, not composition — and losing
-    # a whole exchange is invisible to it. When NSE fetch fails, dedup matches 0,
-    # every dual-listed major floods back as its .BO twin, and the row count
-    # lands at a plausible number while the universe is silently .BO-only. So we
-    # gate here: an exchange coming back near-empty is a STRUCTURAL break, not a
-    # small day. Floors sit well below known-good counts (NSE ~2,384, BSE mirror
-    # ~4,330) and far above any real delisting day. Abort BEFORE burning the scan
-    # budget and before risking a composition-swapped commit.
-    _NSE_FLOOR = 1500
-    _BSE_FLOOR = 3000
+    # ── Fail-fast on composition, before the 90-min scan ──
+    # Fatal now only when NSE is truly unrecoverable: fresh fetch failed AND no
+    # usable cache. A blocked-NSE morning WITH a cache proceeds on the cached
+    # list, so the downstream watchlist email still fires.
     if len(nse_tickers) < _NSE_FLOOR:
-        print(f"FATAL: NSE returned {len(nse_tickers)} tickers (floor {_NSE_FLOOR}). "
-              f"NSE fetch failed — the universe would be .BO-only, breaking every "
-              f"downstream consumer that assumes .NS. Not scanning. Usually "
-              f"transient (NSE archive/API flaking on the CI IP); rerun later.")
+        print(f"FATAL: NSE unavailable — fresh fetch failed and no usable "
+              f"last-known-good list (have {len(nse_tickers)}, floor {_NSE_FLOOR}). "
+              f"The universe would be .BO-only, breaking every consumer that "
+              f"assumes .NS. Not scanning; rerun later. NOTE: the cache is seeded "
+              f"by the first fully-successful run — until one lands, a blocked NSE "
+              f"still fatals here.")
         sys.exit(1)
     if len(bse_tickers) < _BSE_FLOOR:
         print(f"FATAL: BSE returned {len(bse_tickers)} tickers (floor {_BSE_FLOOR}). "
               f"BSE API WAF + GitHub mirror both failed. Not scanning; rerun later.")
         sys.exit(1)
 
-    combined = combine_and_deduplicate(nse_tickers, bse_tickers)
+    # Refresh last-known-good — but ONLY from a fresh, clearly-complete fetch.
+    # Never re-cache a fallback (resets its apparent age, snowballs staleness);
+    # never cache a marginal fetch (poisons the floor for future fallbacks).
+    if _nse_from_cache:
+        print("[NSE] ran on cached list; leaving last-known-good untouched.")
+    elif len(nse_tickers) >= _NSE_HEALTHY:
+        save_lastgood_nse(nse_tickers)
+    else:
+        print(f"[NSE] fresh list {len(nse_tickers)} < healthy {_NSE_HEALTHY}; "
+              f"NOT refreshing cache (avoids poisoning last-known-good).")
 
     # Save raw ticker list too (for reference)
     raw_df = pd.DataFrame(combined).sort_values("ticker").reset_index(drop=True)
