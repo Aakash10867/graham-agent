@@ -119,9 +119,25 @@ def fetch_nse_tickers():
         session.get("https://www.nseindia.com", timeout=10)
         time.sleep(1)
 
-        csv_url = "https://archives.nseindia.com/content/equities/EQUITY_L.csv"
-        resp = session.get(csv_url, timeout=15)
-        resp.raise_for_status()
+        # NSE migrated the archive to nsearchives.nseindia.com; the old
+        # archives.nseindia.com host now intermittently 503s (esp. from CI IPs).
+        # Try the current host first, fall back to the legacy one.
+        csv_hosts = [
+            "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv",
+            "https://archives.nseindia.com/content/equities/EQUITY_L.csv",
+        ]
+        resp = None
+        for _u in csv_hosts:
+            try:
+                _r = session.get(_u, timeout=15)
+                _r.raise_for_status()
+                resp = _r
+                print(f"[NSE] archive host OK: {_u.split('/')[2]}")
+                break
+            except Exception as _he:
+                print(f"[NSE] archive host failed ({_u.split('/')[2]}): {_he}")
+        if resp is None:
+            raise RuntimeError("all NSE archive hosts failed")
 
         df = pd.read_csv(io.StringIO(resp.text))
 
