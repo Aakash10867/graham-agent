@@ -49,7 +49,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add universe_scored.csv universe_tickers.csv archive_manifest.json
+          git add universe_scored.csv universe_tickers.csv archive_manifest.json nse_tickers_lastgood.csv
 
           if ! git diff --cached --quiet; then
             git commit -m "Auto-update: universe scored $(date +%Y-%m-%d)"
