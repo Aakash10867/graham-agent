@@ -771,6 +771,13 @@ def process_universe(ticker_list, max_workers=2):
                     _recovered += 1
                 except Exception:
                     FAILURES.append((_t, "retry_scoring_failed"))
+            else:
+                # Still throttled after the retry pass. Re-record it — otherwise
+                # it's erased from FAILURES entirely: universe_failures.csv never
+                # builds, the shrink guard undercounts transient loss, AND
+                # carry-forward (which reads the rate_limited bucket) carries
+                # nothing. This re-append is what arms all three.
+                FAILURES.append((_t, "rate_limited"))
             time.sleep(1.0)
         print(f"[RETRY] Recovered {_recovered}/{len(_throttled)}. "
               f"Still lost: {len(_throttled) - _recovered}")
