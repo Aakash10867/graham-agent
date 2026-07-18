@@ -677,10 +677,23 @@ def fetch_fundamentals(ticker, retries=3):
 
         except Exception as e:
             error_str = str(e)
-            if "429" in error_str or "Too Many Requests" in error_str:
-                # 3. EXPONENTIAL BACKOFF: If blocked, sleep for 5s, 10s, 20s
+            # "object of type 'NoneType' has no len()" is not a real code error on
+            # OUR side — it's yfinance's .info returning a half-built payload under
+            # the SAME load that produces 429s. It fired 66x in one run on real
+            # large-caps (AUBANK, DIXON, HCLTECH-adjacent). Treat it as throttling:
+            # send it through the identical backoff+retry, and only if it survives
+            # ALL attempts does it fall through to the rate_limited bucket at the
+            # bottom (making it carry-forward-eligible, correctly — a name that
+            # 429/blanks under load is present, not delisted). A genuinely broken
+            # ticker 404s or no-prices instead, on a different branch.
+            _is_throttle = ("429" in error_str
+                            or "Too Many Requests" in error_str
+                            or "has no len()" in error_str)
+            if _is_throttle:
+                # EXPONENTIAL BACKOFF: sleep 5s, 10s, 20s
                 sleep_time = (2 ** attempt) * 5
-                print(f"[{ticker}] Rate limited. Sleeping {sleep_time}s...")
+                _label = "Rate limited" if "429" in error_str or "Too Many Requests" in error_str else "Malformed .info (throttle)"
+                print(f"[{ticker}] {_label}. Sleeping {sleep_time}s...")
                 time.sleep(sleep_time)
             else:
                 if "404" in error_str:
@@ -693,11 +706,11 @@ def fetch_fundamentals(ticker, retries=3):
                 FAILURES.append((ticker, _reason))
                 return None, None
 
-    # Exhausted all retries — this only happens under 429 backoff. The old code
-    # returned None here silently, making a throttled ticker indistinguishable
-    # from a delisted one in the `failed` counter.
+    # Exhausted all retries under backoff — either HTTP 429 or the malformed-.info
+    # variant of the same throttling. Both are transient and present (not delisted),
+    # so both land in rate_limited: honest in the guard, and carry-forward-eligible.
     FAILURES.append((ticker, "rate_limited"))
-    print(f"[{ticker}] DROPPED after {retries} retries (rate limited).")
+    print(f"[{ticker}] DROPPED after {retries} retries (throttled).")
     return None, None
 
 
