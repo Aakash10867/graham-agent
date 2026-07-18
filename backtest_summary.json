@@ -1,15 +1,26 @@
 {
   "status": "INSUFFICIENT_DATA",
   "matured_cohorts": 0,
-  "min_required": 6,
+  "snapshots_clean": 6,
+  "min_required": 1,
   "horizon_trading_days": 63,
   "benchmark": "NIFTYBEES.NS",
-  "generated": "2026-07-17T16:26:13",
+  "generated": "2026-07-18T09:39:47",
   "caveats": [
-    "Buy-and-hold by ENTRY score; mid-horizon score changes are ignored.",
+    "Cross-sectional ladder: within a cohort all buckets share the same window, so a good/bad quarter lifts or sinks them together and cancels out of the high-minus-low spread.",
+    "Daily cohorts overlap ~62/63 days \u2014 they sharpen the estimate but are NOT independent. The band uses effective N = calendar span / horizon, not the raw cohort count.",
     "Delisted names with no forward price are dropped and counted in n_missing; this biases surviving-bucket returns UPWARD.",
-    "Point-in-time snapshot => no current-list survivorship bias; the residual is delisting only."
+    "Point-in-time snapshot => no current-list survivorship bias; residual is delisting only."
   ],
-  "buckets": {},
-  "first_signal_projected": "2026-10-18"
+  "ladder": {},
+  "ladder_monotonic": null,
+  "independent_quarters": 0,
+  "spread_high_minus_low": {
+    "definition": "mean(buckets 4,5) - mean(buckets 0,1) forward return",
+    "point": null,
+    "ci95": null,
+    "n_cohorts": 0,
+    "independent_quarters": 0
+  },
+  "first_reading_date": "2026-10-09"
 }
