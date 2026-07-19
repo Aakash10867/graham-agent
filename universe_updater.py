@@ -1200,6 +1200,7 @@ def main():
         # Decimal vector (graded, parallel to the integer spectrum scores above)
         "graham_defensive_graded", "graham_frac",
         "greenblatt_frac",
+        "dorsey_buffett_graded", "dorsey_frac",
         # Quality Gate & Framework Verdicts
         "quality_pass",
         "trajectory_score",
