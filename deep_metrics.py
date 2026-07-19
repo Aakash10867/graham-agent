@@ -981,6 +981,17 @@ def compute_classification(data):
 
 # ─── 10. SPECTRUM SCORES (9 columns) ───
 
+def _ramp(x, lo, hi):
+    """Linear ramp, higher-is-better: 0 at/below lo, 1 at/above hi, clipped to [0,1].
+    None/NaN -> 0.0 (fail-closed, matching Graham's conservative adaptation)."""
+    x = _sf(x)
+    if x is None:
+        return 0.0
+    if hi == lo:
+        return 1.0 if x >= hi else 0.0
+    return max(0.0, min(1.0, (x - lo) / (hi - lo)))
+
+
 def compute_spectrum_scores(data):
     """Compute all spectrum scores from the layer-1 metrics."""
 
@@ -999,6 +1010,24 @@ def compute_spectrum_scores(data):
     price = _sf(data.get("price"))
     if gn and price and price <= gn: graham_d += 1
     data["graham_defensive_score"] = graham_d
+
+    # ── Graham Defensive Score, GRADED (X.xx / 8) ──
+    # Parallel decimal. Integer above is untouched: graham_pass, `score`,
+    # selection and backtest cohorts all keep using the integer spine.
+    # Graded: D2 current ratio, D6 EPS growth, D8 Graham-number margin.
+    # Boolean (unchanged): D1 size, D3 LTD/NCA (ratio not stored), D4 stability,
+    #                      D5 dividend record, D7c PE×PB composite.
+    graham_dg  = 1.0 if data.get("graham_adequate_size") else 0.0                    # D1
+    graham_dg += _ramp(data.get("current_ratio"), 1.5, 2.0)                          # D2  ↑ 1.5→2.0
+    graham_dg += 1.0 if data.get("graham_ltd_vs_nca") else 0.0                       # D3
+    graham_dg += 1.0 if data.get("graham_earnings_stable_4y") else 0.0               # D4
+    graham_dg += 1.0 if (data.get("dividend_consecutive_years") or 0) >= 5 else 0.0  # D5
+    graham_dg += _ramp(eps_growth, 0, 33)                                            # D6  ↑ 0%→33%
+    graham_dg += 1.0 if (pe_pb is not None and 0 < pe_pb <= 22.5) else 0.0           # D7c
+    gn_margin  = ((gn - price) / price * 100) if (gn and price and price > 0) else None
+    graham_dg += _ramp(gn_margin, 0, 30)                                             # D8  ↑ 0%→30%
+    data["graham_defensive_graded"] = round(graham_dg, 4)
+    data["graham_frac"] = round(graham_dg / 8.0, 4)
 
     # ── Graham Enterprising Score (X/6) ──
     graham_e = 0
