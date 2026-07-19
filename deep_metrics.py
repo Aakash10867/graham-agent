@@ -1069,6 +1069,23 @@ def compute_spectrum_scores(data):
     if data.get("buffett_value_creating_growth"): db_score += 1
     data["dorsey_buffett_score"] = db_score
 
+    # ── Dorsey+Buffett Combined Score, GRADED (X.xx / 10) ──
+    # Parallel decimal; integer above untouched. Dorsey is W1's pure-fundamental
+    # framework, so NO percentile grading (would make it relative) — book ramps +
+    # boolean only. Graded: FCF margin, net margin, ROA.
+    db_graded  = _ramp(fcf_m, 0, 5)                                                    # D1  ↑ 0→5%
+    db_graded += _ramp(pm, 0, 0.15)                                                    # D2  ↑ 0→15%
+    db_graded += 1.0 if data.get("dorsey_roe_consistent") else 0.0                     # D3
+    db_graded += _ramp(roa, 6, 7)                                                      # D4  ↑ 6→7%
+    db_graded += 1.0 if (droic is not None and droic > COST_OF_CAPITAL_PROXY) else 0.0 # D5
+    db_graded += 1.0 if data.get("buffett_roe_unleveraged") else 0.0                   # B1
+    db_graded += 1.0 if (odt is not None and odt >= 1.0) else 0.0                      # B2
+    db_graded += 1.0 if data.get("buffett_rational_allocation") else 0.0               # B3
+    db_graded += 1.0 if (data.get("graham_earnings_stable_4y") and data.get("dorsey_consistent_cfo")) else 0.0  # consistent ops
+    db_graded += 1.0 if data.get("buffett_value_creating_growth") else 0.0             # B5
+    data["dorsey_buffett_graded"] = round(db_graded, 4)
+    data["dorsey_frac"] = round(db_graded / 10.0, 4)
+
     # ── Dorsey 10-Minute Score (X/8) ──
     t10 = 0
     if data.get("dorsey_has_operating_profit"): t10 += 1
