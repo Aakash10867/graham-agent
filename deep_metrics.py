@@ -755,19 +755,17 @@ def compute_management(data, info, income_stmt, cashflow, bs, shares, stock):
     else:
         data["buffett_rational_allocation"] = None
 
-    # T8 Dorsey: Share Dilution
+    # T8 Dorsey: Share Dilution — annualized growth in share count (buyback = negative)
     if bs is not None and not bs.empty:
-        bs_cols = sorted(bs.columns)
-        # Try to get shares from balance sheet across years
-        shares_latest = shares
-        shares_oldest = None
-        # Approximate: use equity ratio as proxy if shares not directly available
-        if len(bs_cols) >= 3:
-            # Use yfinance sharesOutstanding as current, try to back-calculate
-            # For now, set to None — complex to compute without historical shares
-            data["dorsey_share_dilution_pct"] = None  # TODO: improve
+        bs_cols = sorted(bs.columns)                      # oldest -> newest
+        share_names = ["Ordinary Shares Number", "Share Issued", "Common Stock"]
+        sh_new = _bs_row(bs, share_names, bs_cols[-1])
+        sh_old = _bs_row(bs, share_names, bs_cols[0])
+        yrs = len(bs_cols) - 1
+        if sh_new and sh_old and sh_new > 0 and sh_old > 0 and yrs >= 1:
+            data["dorsey_share_dilution_pct"] = round(((sh_new / sh_old) ** (1.0 / yrs) - 1.0) * 100, 3)
         else:
-            data["dorsey_share_dilution_pct"] = None
+            data["dorsey_share_dilution_pct"] = None     # no share-count history in bs
     else:
         data["dorsey_share_dilution_pct"] = None
 
