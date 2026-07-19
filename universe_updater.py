@@ -1201,6 +1201,7 @@ def main():
         "graham_defensive_graded", "graham_frac",
         "greenblatt_frac",
         "dorsey_buffett_graded", "dorsey_frac",
+        "lynch_graded", "lynch_frac",
         # Quality Gate & Framework Verdicts
         "quality_pass",
         "trajectory_score",
