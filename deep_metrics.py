@@ -1267,17 +1267,21 @@ def compute_trajectory_score(data):
     de = _sf(data.get("de"))  # percent: 89.0 == D/E 0.89x
 
     t = 0
+    t_graded = 0.0  # parallel decimal; integer t untouched. Price-independent => absolute.
 
-    # 1. Earnings compounding (0-3)
+    # 1. Earnings compounding (0-3): sign threshold at 0 (shrinking vs growing),
+    #    then ramp 2->3 across 0->15% CAGR. Only check with a real gradient.
     if ni_cagr is not None:
         if ni_cagr > 15:
             t += 3
         elif ni_cagr > 0:
             t += 2
+        if ni_cagr > 0:
+            t_graded += 2 + _ramp(ni_cagr, 0, 15)
 
     # 2. Revenue compounding (0-2)
     if rev_cagr is not None and rev_cagr > 0:
-        t += 2
+        t += 2; t_graded += 2
 
     # 3. Margin expansion, y3 -> y0 (0-2). Fall back to y2 if y3 absent.
     m_now = m_then = None
@@ -1291,19 +1295,22 @@ def compute_trajectory_score(data):
             m_then = nb / rb
             break
     if m_now is not None and m_then is not None and m_now > m_then:
-        t += 2
+        t += 2; t_graded += 2
 
     # 4. Growth is not debt-funded (0-2)
     if debt_g is not None and rev_g is not None and debt_g < rev_g:
-        t += 2
+        t += 2; t_graded += 2
     elif debt_g is not None and debt_g < 0:
-        t += 2
+        t += 2; t_graded += 2
 
     # 5. Leverage sane: D/E < 1.0x (0-1)
     if de is not None and de < 100:
-        t += 1
+        t += 1; t_graded += 1
 
     data["trajectory_score"] = max(0, min(10, t))
+    t_graded = max(0.0, min(10.0, t_graded))
+    data["trajectory_graded"] = round(t_graded, 4)
+    data["trajectory_frac"] = round(t_graded / 10.0, 4)
 
 
 def compute_quality_gate(data):
