@@ -1385,6 +1385,12 @@ def compute_framework_verdicts(data):
     data["trajectory_pass"] = trajectory_pass
     data["lynch_pass"] = lynch_pass
     data["score"] = sum([graham_pass, greenblatt_pass, dorsey_buff_pass, trajectory_pass, lynch_pass])
+    # Continuous mirror of the integer score (0-5). None frac -> 0, mirroring the
+    # integer (where an unranked greenblatt fails its pass). Display/W1 only.
+    data["score_continuous"] = round(sum(
+        (_sf(data.get(f)) or 0)
+        for f in ("graham_frac", "greenblatt_frac", "dorsey_frac", "lynch_frac", "trajectory_frac")
+    ), 4)
 
 
 # ═══════════════════════════════════════════
