@@ -1203,6 +1203,7 @@ def main():
         "dorsey_buffett_graded", "dorsey_frac",
         "lynch_graded", "lynch_frac",
         "trajectory_graded", "trajectory_frac",
+        "score_continuous",
         # Quality Gate & Framework Verdicts
         "quality_pass",
         "trajectory_score",
