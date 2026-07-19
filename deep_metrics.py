@@ -1045,6 +1045,7 @@ def compute_spectrum_scores(data):
     # NOTE: This requires universe-level ranking. Set placeholder here.
     # Actual ranking computed in score_all_stocks() after all stocks processed.
     data["greenblatt_score"] = None  # Filled by rank pass
+    data["greenblatt_frac"] = None   # Filled by rank pass (continuous percentile, 0-1)
 
     # ── Dorsey+Buffett Combined Score (X/10) ──
     db_score = 0
@@ -1432,6 +1433,7 @@ def compute_greenblatt_ranks(all_data):
     for i, d in enumerate(rankable):
         percentile = (1 - i / n) * 10
         d["greenblatt_score"] = max(1, min(10, int(round(percentile))))
+        d["greenblatt_frac"] = round(percentile / 10.0, 4)   # continuous, un-bucketed rank position
 
     # Now compute framework verdicts for ALL stocks (including greenblatt)
     for d in all_data:
