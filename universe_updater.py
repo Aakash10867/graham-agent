@@ -1197,6 +1197,8 @@ def main():
         "graham_defensive_score", "graham_enterprising_score", "greenblatt_score",
         "dorsey_buffett_score", "dorsey_10min_score", "lynch_score",
         "schilit_manipulation_score", "mulford_cashflow_quality_score",
+        # Decimal vector (graded, parallel to the integer spectrum scores above)
+        "graham_defensive_graded", "graham_frac",
         # Quality Gate & Framework Verdicts
         "quality_pass",
         "trajectory_score",
