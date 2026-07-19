@@ -31,7 +31,7 @@ import deep_metrics
 # History:
 #   1  2026-07-10  dividend_yield fraction->percent fix; trajectory_pass >= 8
 # ──────────────────────────────────────────────
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2   # v2: graded decimal 5-vector + score_continuous + real share_dilution
 
 import random
 
