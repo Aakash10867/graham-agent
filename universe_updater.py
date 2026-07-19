@@ -1199,6 +1199,7 @@ def main():
         "schilit_manipulation_score", "mulford_cashflow_quality_score",
         # Decimal vector (graded, parallel to the integer spectrum scores above)
         "graham_defensive_graded", "graham_frac",
+        "greenblatt_frac",
         # Quality Gate & Framework Verdicts
         "quality_pass",
         "trajectory_score",
