@@ -992,6 +992,17 @@ def _ramp(x, lo, hi):
     return max(0.0, min(1.0, (x - lo) / (hi - lo)))
 
 
+def _ramp_down(x, ideal, limit):
+    """Linear ramp, lower-is-better: 1 at/below ideal, 0 at/above limit, clipped.
+    None/NaN -> 0.0 (fail-closed)."""
+    x = _sf(x)
+    if x is None:
+        return 0.0
+    if limit == ideal:
+        return 1.0 if x <= ideal else 0.0
+    return max(0.0, min(1.0, (limit - x) / (limit - ideal)))
+
+
 def compute_spectrum_scores(data):
     """Compute all spectrum scores from the layer-1 metrics."""
 
@@ -1108,8 +1119,13 @@ def compute_spectrum_scores(data):
     data["dorsey_10min_score"] = t10
 
     # ── Lynch Score (category-branching) ──
+    # Integer l_score keeps its existing tiers untouched. l_graded is the parallel
+    # decimal: numeric VALUATION checks (PEG, PE, PEG_adj, NCAV, div-yield) become
+    # smooth ramps off Lynch's own boundaries; every categorical / non-monotonic /
+    # boolean check adds to BOTH on the same line so they cannot diverge.
     cat = data.get("lynch_category", "unknown")
     l_score = 0
+    l_graded = 0.0
     peg = _sf(data.get("lynch_peg"))
     peg_adj = _sf(data.get("lynch_peg_adjusted"))
     debt_h = data.get("lynch_debt_healthy")
@@ -1118,67 +1134,74 @@ def compute_spectrum_scores(data):
         if peg is not None and peg < 1: l_score += 3
         elif peg is not None and peg < 1.5: l_score += 2
         elif peg is not None and peg < 2: l_score += 1
+        l_graded += 3 * _ramp_down(peg, 1.0, 2.0)                          # PEG ↓ 1.0→2.0
         growth_f = data.get("lynch_growth_flag")
-        if growth_f == "ideal": l_score += 3
-        elif growth_f == "acceptable": l_score += 2
-        if debt_h == "normal": l_score += 2
-        elif debt_h == "acceptable": l_score += 1
-        if data.get("graham_earnings_stable_4y"): l_score += 2
+        if growth_f == "ideal": l_score += 3; l_graded += 3
+        elif growth_f == "acceptable": l_score += 2; l_graded += 2
+        if debt_h == "normal": l_score += 2; l_graded += 2
+        elif debt_h == "acceptable": l_score += 1; l_graded += 1
+        if data.get("graham_earnings_stable_4y"): l_score += 2; l_graded += 2
         # Max 10
 
     elif cat == "stalwart":
         if pe is not None and 0 < pe <= 15: l_score += 3
         elif pe is not None and 0 < pe <= 20: l_score += 2
+        l_graded += (3 * _ramp_down(pe, 15, 20)) if (pe is not None and pe > 0) else 0.0   # PE ↓ 15→20
         if peg_adj is not None and peg_adj >= 2: l_score += 3
         elif peg_adj is not None and peg_adj >= 1: l_score += 2
-        if debt_h in ("normal", "acceptable"): l_score += 2
-        if data.get("graham_earnings_stable_4y"): l_score += 2
+        l_graded += 3 * _ramp(peg_adj, 1, 2)                               # PEG_adj ↑ 1→2
+        if debt_h in ("normal", "acceptable"): l_score += 2; l_graded += 2
+        if data.get("graham_earnings_stable_4y"): l_score += 2; l_graded += 2
         # Max 10
 
     elif cat == "slow_grower":
         consec = data.get("dividend_consecutive_years", 0) or 0
-        if consec >= 10: l_score += 3
-        elif consec >= 5: l_score += 2
+        if consec >= 10: l_score += 3; l_graded += 3
+        elif consec >= 5: l_score += 2; l_graded += 2
         payout = _sf(data.get("graham_payout_ratio"))
-        if payout and 30 <= payout <= 75: l_score += 3
-        elif payout and payout < 30: l_score += 1
+        if payout and 30 <= payout <= 75: l_score += 3; l_graded += 3
+        elif payout and payout < 30: l_score += 1; l_graded += 1
         dy = _sf(data.get("dividend_yield"))
         if dy and dy > 0.04: l_score += 2
         elif dy and dy > 0.02: l_score += 1
-        if data.get("dorsey_clean_balance_sheet"): l_score += 2
+        l_graded += 2 * _ramp(dy, 0.02, 0.04)                             # div yield ↑ 0.02→0.04
+        if data.get("dorsey_clean_balance_sheet"): l_score += 2; l_graded += 2
         # Max 10
 
     elif cat == "cyclical":
         # For cyclicals: low PE = expensive (peak), high PE = cheap (trough)
-        # So we DON'T reward low PE. Instead reward:
-        if debt_h == "normal": l_score += 3
-        elif debt_h == "acceptable": l_score += 2
+        # So we DON'T reward low PE. All checks here are sign/categorical — nothing ramps.
+        if debt_h == "normal": l_score += 3; l_graded += 3
+        elif debt_h == "acceptable": l_score += 2; l_graded += 2
         accel = _sf(data.get("lynch_growth_acceleration"))
-        if accel is not None and accel > 0: l_score += 3  # Recovering
+        if accel is not None and accel > 0: l_score += 3; l_graded += 3  # Recovering
         inv_flag = data.get("lynch_inventory_flag")
-        if inv_flag is False: l_score += 2  # No inventory buildup
-        if data.get("dorsey_consistent_cfo"): l_score += 2
+        if inv_flag is False: l_score += 2; l_graded += 2  # No inventory buildup
+        if data.get("dorsey_consistent_cfo"): l_score += 2; l_graded += 2
         # Max 10
 
     elif cat == "turnaround":
         net_cash_ps = _sf(data.get("lynch_net_cash_per_share"))
-        if net_cash_ps is not None and net_cash_ps > 0: l_score += 3
-        if debt_h == "normal": l_score += 3
-        elif debt_h == "acceptable": l_score += 2
+        if net_cash_ps is not None and net_cash_ps > 0: l_score += 3; l_graded += 3
+        if debt_h == "normal": l_score += 3; l_graded += 3
+        elif debt_h == "acceptable": l_score += 2; l_graded += 2
         ni_y0 = _sf(data.get("net_income_y0"))
-        if ni_y0 and ni_y0 > 0: l_score += 2  # Now profitable
-        if data.get("dorsey_consistent_cfo"): l_score += 2
+        if ni_y0 and ni_y0 > 0: l_score += 2; l_graded += 2  # Now profitable
+        if data.get("dorsey_consistent_cfo"): l_score += 2; l_graded += 2
         # Max 10
 
     elif cat == "asset_play":
         ncav_r = _sf(data.get("graham_ncav_ratio"))
         if ncav_r is not None and ncav_r <= 0.67: l_score += 4
         elif ncav_r is not None and ncav_r <= 1.0: l_score += 2
-        if debt_h == "normal": l_score += 3
-        if _sf(data.get("graham_net_cash")) and data["graham_net_cash"] > 0: l_score += 3
+        l_graded += (4 * _ramp_down(ncav_r, 0.67, 1.0)) if (ncav_r is not None and ncav_r > 0) else 0.0   # NCAV ↓ 0.67→1.0
+        if debt_h == "normal": l_score += 3; l_graded += 3
+        if _sf(data.get("graham_net_cash")) and data["graham_net_cash"] > 0: l_score += 3; l_graded += 3
         # Max 10
 
     data["lynch_score"] = l_score
+    data["lynch_graded"] = round(l_graded, 4)
+    data["lynch_frac"] = round(l_graded / 10.0, 4)
 
     # ── Schilit Manipulation Score (X/10, INVERTED: higher = worse) ──
     manip = 0
