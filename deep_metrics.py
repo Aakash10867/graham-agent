@@ -63,6 +63,27 @@ def _pct_growth(new, old):
 
 # ─── 1. BALANCE SHEET HEALTH (14 columns) ───
 
+# ── Frozen axis reference (Quality/Growth/Price/Safety), committed to repo ──
+import os as _os, json as _json
+try:
+    from axis_scores import grade_row as _axis_grade
+    with open(_os.path.join(_os.path.dirname(__file__), "axis_reference.json")) as _f:
+        _AXIS_REF = _json.load(_f)
+except Exception:
+    _axis_grade, _AXIS_REF = None, None
+
+
+def compute_axis_scores(data):
+    """Relative axis profile vs the FROZEN Indian reference. Terminal scorer:
+    deterministic from stored metrics + committed axis_reference.json.
+    None-safe if the reference isn't present yet (columns emit None)."""
+    s = _axis_grade(data, _AXIS_REF) if (_axis_grade and _AXIS_REF) else {}
+    data["quality_axis"] = s.get("quality_axis")
+    data["growth_axis"]  = s.get("growth_axis")
+    data["price_axis"]   = s.get("price_axis")
+    data["safety_axis"]  = s.get("safety_axis")
+
+
 def compute_balance_sheet(data, info, bs, shares):
     """Compute balance sheet health metrics."""
     price = _sf(data.get("price"))
@@ -1461,6 +1482,7 @@ def compute_all_deep_metrics(data, stock):
     compute_spectrum_scores(data)
     compute_trajectory_score(data)
     compute_quality_gate(data)
+    compute_axis_scores(data)
 
     return data
 
