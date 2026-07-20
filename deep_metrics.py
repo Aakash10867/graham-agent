@@ -111,6 +111,10 @@ def compute_balance_sheet(data, info, bs, shares):
     # F1: Net Current Assets
     data["graham_net_current_assets"] = round(nca, 2) if nca is not None else None
 
+    # current_ratio fallback (info-first): from the balance sheet when info lacked it
+    if data.get("current_ratio") is None and ca and cl and cl != 0:
+        data["current_ratio"] = round(ca / cl, 2)
+
     # N1: NCAV per share
     total_liab = _bs_row(bs, ["Total Liabilities Net Minority Interest", "Total Liab"], latest)
     if ca is not None and total_liab is not None:
@@ -621,10 +625,26 @@ def compute_moat(data, info, income_stmt, bs, cashflow, shares):
     else:
         data["dorsey_roe_consistent"] = None
 
+    # Statement fallbacks (info-first): fill only when yfinance info lacked the field.
+    # roe_y0 is % -> info roe is a fraction; net_income_y0 / total-assets & revenue for the rest.
+    if data.get("roe") is None:
+        _r0 = _sf(data.get("roe_y0"))
+        if _r0 is not None:
+            data["roe"] = round(_r0 / 100.0, 4)
+    if data.get("profit_margin") is None:
+        _ni, _rev = _sf(data.get("net_income_y0")), _sf(data.get("revenue_y0"))
+        if _ni is not None and _rev and _rev != 0:
+            data["profit_margin"] = round(_ni / _rev, 4)
+
     # D4: ROA
     data["dorsey_roa"] = _sf(info.get("returnOnAssets"))
     if data["dorsey_roa"] is not None:
         data["dorsey_roa"] = round(data["dorsey_roa"] * 100, 2)
+    else:
+        _ni = _sf(data.get("net_income_y0"))
+        _ta = _bs_row(bs, ["Total Assets"], sorted(bs.columns)[-1]) if (bs is not None and not bs.empty) else None
+        if _ni is not None and _ta and _ta != 0:
+            data["dorsey_roa"] = round(_ni / _ta * 100, 2)   # % , matching the info path
 
     # V3: P/B + ROE signal
     pb = _sf(data.get("pb"))
