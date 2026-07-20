@@ -31,7 +31,7 @@ import deep_metrics
 # History:
 #   1  2026-07-10  dividend_yield fraction->percent fix; trajectory_pass >= 8
 # ──────────────────────────────────────────────
-SCHEMA_VERSION = 2   # v2: graded decimal 5-vector + score_continuous + real share_dilution
+SCHEMA_VERSION = 3   # v3: + relative axis scores (quality/growth/price/safety)
 
 import random
 
@@ -1204,6 +1204,8 @@ def main():
         "lynch_graded", "lynch_frac",
         "trajectory_graded", "trajectory_frac",
         "score_continuous",
+        # Relative axis profile (vs frozen Indian reference)
+        "quality_axis", "growth_axis", "price_axis", "safety_axis",
         # Quality Gate & Framework Verdicts
         "quality_pass",
         "trajectory_score",
