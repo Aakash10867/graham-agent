@@ -22,7 +22,7 @@ CSV = sys.argv[1] if len(sys.argv) > 1 else "universe_scored.csv"
 
 TERMINALS = ["compute_classification", "compute_spectrum_scores",
              "compute_trajectory_score", "compute_quality_gate",
-             "compute_framework_verdicts"]
+             "compute_framework_verdicts", "compute_axis_scores"]
 
 def discover_outputs():
     """Every column the terminal scorers ASSIGN — the full set to verify."""
@@ -46,6 +46,7 @@ def rescore_all(datas):
     for d in datas:
         dm.compute_classification(d); dm.compute_spectrum_scores(d)
         dm.compute_trajectory_score(d); dm.compute_quality_gate(d)
+        dm.compute_axis_scores(d)
         dm.compute_framework_verdicts(d)        # provisional
     dm.compute_greenblatt_ranks(datas)          # universe-wide rank pass
     for d in datas:
