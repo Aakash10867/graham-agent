@@ -1509,7 +1509,6 @@ ticker,name,exchange
 536738.BO,STELLAR CAPITAL SERVICES LIMITED,BSE
 536846.BO,Yuranus Infrastructure Ltd,BSE
 536960.BO,Motilal Oswal Mutual Fund,BSE
-536974.BO,CAPTAIN POLYPLAST LIMITED,BSE
 537007.BO,ICICI Prudential Mutual Fund,BSE
 537008.BO,ICICI Prudential Mutual Fund,BSE
 537069.BO,Arnold Holdings Ltd,BSE
@@ -1975,6 +1974,7 @@ ticker,name,exchange
 542666.BO,G. K. P. Printing & Packaging Limited,BSE
 542668.BO,EVANS ELECTRIC LIMITED,BSE
 542669.BO,BMW INDUSTRIES LIMITED,BSE
+542677.BO,Mahesh Developers Limited,BSE
 542678.BO,Cian Healthcare Limited,BSE
 542679.BO,Dhanashree Electronics Limited,BSE
 542682.BO,Harish Textile Engineers Limited,BSE
@@ -2638,6 +2638,8 @@ ticker,name,exchange
 544823.BO,DEVSON CATALYST LIMITED,BSE
 544826.BO,MILLWORKS TECHNOLOGIES LIMITED,BSE
 544827.BO,Bajaj Finserv Mutual Fund,BSE
+544830.BO,Mirae Asset Mutual Fund,BSE
+544831.BO,MEENAKSHI INDIA LIMITED,BSE
 555555.BO,ICICI Prudential Mutual Fund,BSE
 590103.BO,Reliance Mutual Fund-Permitted,BSE
 590104.BO,Reliance Mutual Fund-Permitted,BSE
@@ -3143,6 +3145,7 @@ COSMOFIRST.NS,COSMO FIRST LIMITED,NSE
 COUNCODOS.NS,Country Condo's Limited,NSE
 CPCAP.NS,CP Capital Limited,NSE
 CPEDU.NS,Career Point Edutech Limited,NSE
+CPL.NS,Captain Polyplast Limited,NSE
 CPPLUS.NS,Aditya Infotech Limited,NSE
 CRAFTSMAN.NS,Craftsman Automation Limited,NSE
 CRAMC.NS,Canara Robeco Asset Management Company Limited,NSE
