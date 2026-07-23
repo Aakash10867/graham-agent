@@ -990,6 +990,33 @@ DRIFT_MATERIAL_PCT = 0.10
 # Below this, a score_continuous move is arithmetic, not a story.
 DRIFT_MATERIAL_CONTINUOUS = 0.05
 
+# Worst-case wins. Index 0 is worst. When several frameworks flip at once and
+# disagree about why, a single fundamental break makes the whole drop
+# fundamental: a stock can get expensive AND deteriorate in the same quarter,
+# and the deterioration is the part that costs money.
+DRIFT_PRECEDENCE = (
+    "fundamental",
+    "mixed",
+    "unclear",
+    "unknown_inputs",
+    "valuation",
+    "relative_rank",
+)
+
+# Only the two labels that POSITIVELY establish "the business held" may soften
+# an alert. Both flavours of "we could not tell" keep the existing severity.
+# Absence of evidence must never downgrade — otherwise every holding bought
+# before W1 shipped, which is all of them, gets quietly demoted on a label that
+# means nothing more than "no data".
+DRIFT_SEVERITY = {
+    "fundamental":    "danger",
+    "mixed":          "danger",
+    "unclear":        "danger",
+    "unknown_inputs": "danger",
+    "valuation":      "warning",
+    "relative_rank":  "warning",
+}
+
 
 def _on_conviction(trace: dict) -> bool:
     return bool(trace) and trace.get("slot_type") in _CONVICTION_SLOTS
@@ -1276,6 +1303,91 @@ def compute_thesis_drift(holdings, policy, universe_df, price_history=None):
                                current_by_ticker.get(tkr),
                                still_investable=(tkr in pool))
     return out
+
+
+def classify_score_drop(entry_trace: dict | None, universe_row) -> dict:
+    """Why did this holding's score fall? Deterministic, no selection re-run.
+
+    Everything needed is already in hand at the alert site: the holding's
+    stored entry_trace and today's universe row. Re-running select_portfolio
+    would answer a DIFFERENT question ("would we buy this today") at roughly a
+    thousand times the cost, and needs an IPS policy the alert path does not
+    load.
+
+    Returns {reason, severity, newly_failing, per_framework}.
+
+    The severity is ADVISORY. It never gates firing — a score loss is a score
+    loss regardless of cause, and the alert fires either way. This only decides
+    how loud it is.
+    """
+    row = universe_row if universe_row is not None else {}
+
+    def _get(col):
+        try:
+            v = row.get(col)
+        except AttributeError:
+            return None
+        try:
+            if v is None or pd.isna(v):
+                return None
+        except (TypeError, ValueError):
+            pass
+        return v
+
+    # Today's facts, in the exact shape _classify_flip expects from a _trace,
+    # so entry and current sides go through identical comparison logic.
+    current = {
+        "pe": _num(_get("pe"), 3),
+        "roe_pct": _num(_get("roe_pct"), 3),
+        "score_continuous": _num(_get("score_continuous")),
+        "fracs": {f: _num(_get(col)) for f, col in FRAC_COL.items()},
+    }
+
+    entry = entry_trace or {}
+    entry_passed = entry.get("passed")
+    if not isinstance(entry_passed, (list, tuple)) or not entry_passed:
+        # No recorded entry thesis: manual holding, or bought before the trace
+        # carried these fields. We cannot name a cause, and failing to name one
+        # must not be mistaken for naming a benign one.
+        return {"reason": "unknown_inputs",
+                "severity": DRIFT_SEVERITY["unknown_inputs"],
+                "newly_failing": [], "per_framework": {}}
+
+    applicable = set(_applicable_frameworks(row))
+    current_passed = {f for f in FRAMEWORKS
+                      if f in applicable and bool(_get(PASS_FLAG[f]))}
+    newly_failing = sorted((set(entry_passed) & set(FRAMEWORKS)) - current_passed)
+
+    if not newly_failing:
+        # The integer score says it fell; the framework diff does not
+        # corroborate. score_at_entry and entry_trace['passed'] are stored
+        # separately and can disagree. Say so, rather than invent a cause or
+        # quietly soften an alert we cannot explain.
+        return {"reason": "unclear",
+                "severity": DRIFT_SEVERITY["unclear"],
+                "newly_failing": [], "per_framework": {}}
+
+    per_framework = {}
+    for f in newly_failing:
+        if f not in applicable:
+            # Scoreable at entry, not scoreable now (sector exclusion changed).
+            # Near-impossible, since exclusion is static per sector — but it
+            # must not read as the business breaking.
+            per_framework[f] = "unclear"
+        else:
+            per_framework[f] = _classify_flip(f, entry, current)
+
+    # An unrecognised label sorts as WORST, not mildest. If _classify_flip ever
+    # grows a label nobody mapped here, the failure direction must be a louder
+    # alert, never a quieter one.
+    reason = min(per_framework.values(),
+                 key=lambda r: DRIFT_PRECEDENCE.index(r)
+                 if r in DRIFT_PRECEDENCE else -1)
+
+    return {"reason": reason,
+            "severity": DRIFT_SEVERITY.get(reason, "danger"),
+            "newly_failing": newly_failing,
+            "per_framework": per_framework}
 
 # ══════════════════════════════════════════════════════════════════════════
 # BENCHMARK SELECTION  (Sprint 13 §1)
