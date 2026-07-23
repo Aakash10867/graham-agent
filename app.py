@@ -1664,6 +1664,23 @@ _DRIFT_REASON_TEXT = {
     "unknown_inputs": "too little recorded at entry to say why",
 }
 
+# Why this alert is the colour it is. Shown only where the answer is not
+# obvious from the flip line above it: an amber score-drop needs to say what
+# was established, and a red one that we could NOT establish anything needs to
+# say that too — otherwise "we don't know" and "the business broke" look
+# identical to the reader. fundamental/mixed get nothing; the flip line
+# already says it.
+_DRIFT_ALERT_NOTE = {
+    "valuation": "The business metrics held; the price moved. That is why this "
+                 "is amber rather than red.",
+    "relative_rank": "This stock's own numbers held — other stocks moved past "
+                     "it. That is why this is amber rather than red.",
+    "unclear": "We could not establish a cause from what we track, so this "
+               "stays at full severity.",
+    "unknown_inputs": "Too little was recorded at entry to establish a cause, "
+                      "so this stays at full severity.",
+}
+
 
 def _drift_flip_line(verb, names, reasons):
     """'No longer passes: Graham, Lynch (price moved, the business held).'
@@ -8009,6 +8026,23 @@ elif st.session_state.sb_view_mode == "portfolios":
                             # Replaced expander with a permanently open, bordered container
                             with st.container(border=True):
                                 st.markdown("##### Defend Position")
+
+                                # W1 drift reason. Only score_drop writes these
+                                # keys, so quality_fail and price_crash fall
+                                # through untouched. This is not decoration: the
+                                # label already set the severity above, and an
+                                # amber card with no stated reason is worse than
+                                # the red one it replaced.
+                                _dr = detail.get("drift_reason")
+                                if _dr:
+                                    _nf = detail.get("drift_newly_failing") or []
+                                    _pf = detail.get("drift_per_framework") or {}
+                                    if _nf:
+                                        st.markdown(_drift_flip_line(
+                                            "No longer passes", _nf, _pf))
+                                    _note = _DRIFT_ALERT_NOTE.get(_dr)
+                                    if _note:
+                                        st.caption(_note)
                                 
                                 ticker = alert.get("ticker", "")
                                 # Fetch holding for this portfolio directly from Supabase
