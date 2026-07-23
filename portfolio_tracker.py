@@ -1193,7 +1193,7 @@ def run_daily_tracker():
                  "suggested_shares": suggested_shares,
                  "suggested_amount": suggested_amount,
                  "budget_remaining": round(sip_budget, 2)},
-                "opportunity"
+                "opportunity", severity="info"
             ))
         # ── 3d. Portfolio-level health warnings ──
         if len(port_holdings) >= 3:
@@ -1204,10 +1204,10 @@ def run_daily_tracker():
                 weight = count / total_h
                 if weight > 0.4:
                     all_alerts.append(make_alert(
-                        "danger", "_portfolio",
+                        "sector_concentration", "_portfolio",
                         f"Portfolio {port['name']}: {sector} is {weight*100:.0f}% of holdings (>40%)",
                         {"reason": "sector_concentration", "sector": sector, "weight_pct": round(weight * 100)},
-                        "review_due"
+                        "review_due", severity="danger"
                     ))
 
             # Diversification score (HHI)
@@ -1216,38 +1216,24 @@ def run_daily_tracker():
             div_score = round((1 - hhi) * 100)
             if div_score < 50:
                 all_alerts.append(make_alert(
-                    "danger", "_portfolio",
+                    "low_diversification", "_portfolio",
                     f"Portfolio {port['name']}: diversification score is {div_score}/100 (critical)",
                     {"reason": "low_diversification", "score": div_score},
-                    "review_due"
+                    "review_due", severity="danger"
                 ))
 
-    # ── Sector headwind: top-weighted sector index dropped >10% in 30 days ──
+        # `sector_headwind` removed. It fired on a raw >10% monthly drop in a
+        # sector index — market timing, not an IPS judgment, and nothing the
+        # user could act on within their mandate. It had ALSO been unreachable:
+        # the write loop discarded alert_type 'sector_headwind' before the DB,
+        # so it made a yfinance call and a book-passage search every single day
+        # and threw both results away.
+        #
+        # NOTE: `if held_sectors:` below is now vestigial — it gates only the
+        # goal-drift check, which never reads held_sectors. Left in place
+        # because removing it CHANGES BEHAVIOUR: goal drift would start firing
+        # for portfolios with no sector data. Separate decision, not this one.
         if held_sectors:
-            sector_weights = Counter(held_sectors)
-            top_sector = sector_weights.most_common(1)[0][0]
-            index_ticker = SECTOR_INDEX_MAP.get(top_sector)
-
-            if index_ticker:
-                try:
-                    idx_hist = yf.Ticker(index_ticker).history(period="1mo")
-                    if len(idx_hist) >= 2:
-                        idx_start = float(idx_hist["Close"].iloc[0])
-                        idx_end = float(idx_hist["Close"].iloc[-1])
-                        idx_return = ((idx_end - idx_start) / idx_start) * 100
-                        if idx_return < -10:
-                            alloc_pct = (sector_weights[top_sector] / len(held_sectors)) * 100
-                            all_alerts.append(make_alert(
-                                "sector_headwind", "_portfolio",
-                                f"{top_sector} index down {idx_return:.1f}% this month — {alloc_pct:.0f}% of {port['name']}",
-                                {"reason": "sector_headwind", "sector": top_sector,
-                                 "index_return_pct": round(idx_return, 1),
-                                 "portfolio_weight_pct": round(alloc_pct, 1)},
-                                "sector_headwind"
-                            ))
-                except Exception as e:
-                    print(f"Sector index check failed for {top_sector}: {e}")
-
             # ── Goal drift: trailing CAGR < 80% of needed CAGR ──
             target_amount = port.get("target_amount")
             target_date_str = port.get("target_date")
@@ -1276,16 +1262,20 @@ def run_daily_tracker():
                                 needed_cagr = (float(target_amount) / current_total_value) ** (12 / months_remaining) - 1
     
                                 if needed_cagr > 0 and actual_cagr < (0.8 * needed_cagr):
-                                    severity = "danger" if actual_cagr < (0.5 * needed_cagr) else "goal_drift"
+                                    # Was: `"danger" if ... else "goal_drift"` —
+                                    # a ternary choosing between a severity and
+                                    # a TYPE for one column. Now the type is
+                                    # constant and only the severity varies.
+                                    _sev = "danger" if actual_cagr < (0.5 * needed_cagr) else "warning"
                                     all_alerts.append(make_alert(
-                                        severity, "_portfolio",
+                                        "goal_drift", "_portfolio",
                                         f"{port['name']} trailing behind goal — actual {actual_cagr*100:.1f}% vs needed {needed_cagr*100:.1f}%",
                                         {"reason": "goal_drift",
                                          "actual_cagr_pct": round(actual_cagr * 100, 1),
                                          "needed_cagr_pct": round(needed_cagr * 100, 1),
                                          "target_amount": float(target_amount),
                                          "months_remaining": round(months_remaining)},
-                                        "goal_drift"
+                                        "goal_drift", severity=_sev
                                     ))
                 except (ValueError, TypeError) as e:
                     print(f"Goal drift check failed for {port['name']}: {e}")
