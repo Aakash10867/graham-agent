@@ -1703,6 +1703,13 @@ def _format_thesis_drift(diff):
         return ("weak", "**Outranked.** Still investable, but other names now rank above it — "
                         "not in today's portfolio." + (f" Entered as {er}." if er else ""))
 
+    # Did anything actually deteriorate? Consulted by the still_selected line
+    # below, which otherwise asserts "intact" on top of a list of failures.
+    _lost = any(ch["field"] == "newly_failing" and ch.get("to") for ch in changes)
+    _fell = any(ch["field"] == "continuous_drift"
+                and (ch.get("detail") or {}).get("delta", 0) < 0
+                for ch in changes)
+
     lines = []; cr = _sr(curr)
     if d == "now_merit":
         lines.append("**Thesis strengthened.** Entered on conviction (merit had left it behind); "
@@ -1710,7 +1717,16 @@ def _format_thesis_drift(diff):
     elif d == "now_conviction":
         lines.append("**Thesis weakened.** Entered on merit; today it survives only via the conviction sleeve.")
     else:
-        lines.append("**Thesis intact.** Same basis as at entry.")
+        # "Intact" is a CLAIM, and it is false the moment a framework has
+        # dropped or the continuous score has fallen. `drift` tracks only the
+        # selection SLOT (merit vs conviction), so still_selected means "same
+        # seat", never "nothing changed". Reassuring the user immediately above
+        # the evidence contradicting the reassurance is worse than saying less.
+        if _lost or _fell:
+            lines.append("**Same selection basis**, but the thesis has moved "
+                         "since entry.")
+        else:
+            lines.append("**Thesis intact.** Same basis as at entry.")
     if cr:
         lines.append(f"Now {cr}.")
     for ch in changes:
@@ -1737,7 +1753,7 @@ def _format_thesis_drift(diff):
                      f"({'up' if delta > 0 else 'down'} {abs(delta):.2f}).")
                 lg = det.get("largest_move")
                 if lg and lg in (det.get("by_framework") or {}):
-                    s += (f" Largest single move: "
+                    s += (f" Largest measured move: "
                           f"{_DRIFT_FRAMEWORK_LABEL.get(lg, lg)} "
                           f"({det['by_framework'][lg]:+.2f}).")
                 # The caveat travels WITH the number, never in a footnote. An
