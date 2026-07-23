@@ -13,6 +13,9 @@ from datetime import date, timedelta
 from collections import Counter
 import requests as _requests
 import verdict_engine
+# Pure: no Streamlit, no network, no LLM. That purity is what makes the W1
+# drift classification cheap enough to run inside the daily alert loop.
+import selector
 
 
 # ══════════════════════════════════════════════
@@ -1101,12 +1104,29 @@ def run_daily_tracker():
             # Never fire a sell/defend alert off a carried-forward (stale) row:
             # a throttle-day refill is for continuity, not for triggering trades.
             if entry_score - current_score >= 2 and not _is_stale:
+                # W1: WHY it fell, not just that it fell. A drop we can prove
+                # was price-only is a different event from one we can prove was
+                # the business. The classification is ADVISORY — it never gates
+                # firing, only volume.
+                try:
+                    _drift = selector.classify_score_drop(
+                        holding.get("entry_trace"), row.iloc[0])
+                except Exception as _e:
+                    # Classification must never be able to suppress or soften
+                    # an alert. Any failure falls back to the loudest reading
+                    # and says so in the log.
+                    print(f"  [W1] drift classification failed for {ticker}: {_e}")
+                    _drift = {"reason": "unknown_inputs", "severity": "danger",
+                              "newly_failing": [], "per_framework": {}}
                 _dd_headline = f"{holding.get('name', ticker)} score dropped {entry_score} -> {current_score}"
                 all_alerts.append(make_alert(
                     "score_drop", ticker, _dd_headline,
                     {"name": holding.get("name", ticker), "entry_score": entry_score,
-                     "current_score": current_score, "reason": "score_drop"},
-                    "score_drop", severity="danger"
+                     "current_score": current_score, "reason": "score_drop",
+                     "drift_reason": _drift["reason"],
+                     "drift_newly_failing": _drift["newly_failing"],
+                     "drift_per_framework": _drift["per_framework"]},
+                    "score_drop", severity=_drift["severity"]
                 ))
                 if _tg_token and user_id in _tg_map:
                     send_telegram(_tg_map[user_id], f"⚠️ <b>{_html_esc(_dd_headline)}</b>\n\n<a href='https://kordent.streamlit.app'>Open Kordent</a>", _tg_token)
