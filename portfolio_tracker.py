@@ -1335,7 +1335,11 @@ def run_daily_tracker():
 
                 wl_name = wl.get("name") or wl_ticker
 
-                def wl_alert(alert_type, headline, detail, book_key):
+                def wl_alert(alert_type, headline, detail, book_key, *, severity):
+                    if severity not in _SEVERITIES:
+                        raise ValueError(
+                            f"severity must be one of {_SEVERITIES}, got "
+                            f"{severity!r} (alert_type={alert_type!r})")
                     passages = []
                     if book_chunks and book_key:
                         query = ALERT_BOOK_QUERIES.get(book_key, "")
@@ -1346,6 +1350,7 @@ def run_daily_tracker():
                         "portfolio_id": None,
                         "user_id": wl_user_id,
                         "alert_type": alert_type,
+                        "severity": severity,
                         "ticker": wl_ticker,
                         "headline": headline,
                         "detail": {**detail, "book_passages": passages},
@@ -1364,7 +1369,7 @@ def run_daily_tracker():
                         "watchlist_score_up",
                         f"👁 {wl_name} score improved {_last_notified} → {cur_score}/5",
                         {"prev_score": _last_notified, "current_score": cur_score, "source": "watchlist"},
-                        "watchlist_score_up"
+                        "watchlist_score_up", severity="info"
                     ))
                     wl_alert_count += 1
                     # Remember we told them, stamp the date, reset the reason rotation
@@ -1384,7 +1389,7 @@ def run_daily_tracker():
                         "watchlist_score_down",
                         f"👁 {wl_name} score dropped {prev_score} → {cur_score}/5",
                         {"prev_score": prev_score, "current_score": cur_score, "source": "watchlist"},
-                        "watchlist_score_down"
+                        "watchlist_score_down", severity="warning"
                     ))
                     wl_alert_count += 1
 
@@ -1395,7 +1400,11 @@ def run_daily_tracker():
                         "watchlist_quality_flip",
                         f"👁 {wl_name} quality flipped to {flip_dir}",
                         {"previous": prev_quality, "current": cur_quality, "source": "watchlist"},
-                        "watchlist_quality_flip"
+                        "watchlist_quality_flip",
+                        # Direction matters: a flip TO pass is good news, a flip
+                        # to fail is an accounting red flag. One type, two
+                        # severities — exactly what the split column is for.
+                        severity=("info" if cur_quality else "warning")
                     ))
                     wl_alert_count += 1
 
@@ -1418,7 +1427,7 @@ def run_daily_tracker():
                                 f"👁 {wl_name} within {pct_above_low:.1f}% of 52-week low",
                                 {"current_price": round(cur_price, 2), "week52_low": round(w52_low, 2),
                                  "pct_above_low": round(pct_above_low, 1), "source": "watchlist"},
-                                "watchlist_near_low"
+                                "watchlist_near_low", severity="info"
                             ))
                             wl_alert_count += 1
                 except Exception:
@@ -1496,6 +1505,7 @@ def run_daily_tracker():
                             "portfolio_id": None,
                             "user_id": None,  # broadcast — weekly_mentor sends to all users
                             "alert_type": "new_entry",
+                            "severity": "info",
                             "ticker": nr["ticker"],
                             "headline": f"{nr.get('name', nr['ticker'])} new to radar at score {int(nr['score'])}/5",
                             "detail": {
@@ -1526,12 +1536,6 @@ def run_daily_tracker():
     written = 0
     _failed_alerts = []
     for alert in all_alerts:
-        # overvalued / sector_headwind were IPS-blind heuristic cards (naive
-        # PE/PB and sector-index thresholds) that duplicated the portfolio
-        # review. Removed — the review is the single place a holding gets a
-        # sell/hold verdict.
-        if alert.get("alert_type") in ("overvalued", "sector_headwind"):
-            continue
         try:
             # Opportunity/new_entry collected silently — weekly_mentor activates the best ones Monday
             if alert.get("alert_type") in ("opportunity", "new_entry"):
