@@ -1771,7 +1771,8 @@ def _format_thesis_drift(diff):
                 lines.append(s)
         elif f == "conviction_rank":
             lines.append(f"Conviction rank {ch['from']}→{ch['to']}.")
-    badge = {"now_merit": "strong", "now_conviction": "weak", "still_selected": "intact"}.get(d, "neutral")
+    badge = {"now_merit": "strong", "now_conviction": "weak",
+             "still_selected": "neutral" if (_lost or _fell) else "intact"}.get(d, "neutral")
     return (badge, " ".join(lines))
 
 
