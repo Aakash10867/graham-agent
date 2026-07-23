@@ -1045,7 +1045,7 @@ def run_daily_tracker():
                         "review_due", "_review",
                         f"Portfolio review overdue — was due {review_date}",
                         {"days_overdue": (date.today() - rd).days},
-                        "review_due"
+                        "review_due", severity="info"
                     ))
             except (ValueError, TypeError):
                 pass
@@ -1097,10 +1097,10 @@ def run_daily_tracker():
             if entry_score - current_score >= 2 and not _is_stale:
                 _dd_headline = f"{holding.get('name', ticker)} score dropped {entry_score} -> {current_score}"
                 all_alerts.append(make_alert(
-                    "danger", ticker, _dd_headline,
+                    "score_drop", ticker, _dd_headline,
                     {"name": holding.get("name", ticker), "entry_score": entry_score,
                      "current_score": current_score, "reason": "score_drop"},
-                    "score_drop"
+                    "score_drop", severity="danger"
                 ))
                 if _tg_token and user_id in _tg_map:
                     send_telegram(_tg_map[user_id], f"⚠️ <b>{_html_esc(_dd_headline)}</b>\n\n<a href='https://kordent.streamlit.app'>Open Kordent</a>", _tg_token)
@@ -1108,9 +1108,9 @@ def run_daily_tracker():
             if not quality_pass:
                 _qf_headline = f"{holding.get('name', ticker)} flagged as potential value trap"
                 all_alerts.append(make_alert(
-                    "danger", ticker, _qf_headline,
+                    "quality_fail", ticker, _qf_headline,
                     {"name": holding.get("name", ticker), "reason": "quality_fail"},
-                    "quality_fail"
+                    "quality_fail", severity="danger"
                 ))
                 if _tg_token and user_id in _tg_map:
                     send_telegram(_tg_map[user_id], f"⚠️ <b>{_html_esc(_qf_headline)}</b>\n\n<a href='https://kordent.streamlit.app'>Open Kordent</a>", _tg_token)
@@ -1120,33 +1120,21 @@ def run_daily_tracker():
                 if stock_return < -20:
                     _pc_headline = f"{holding.get('name', ticker)} down {stock_return:.0f}% from entry"
                     all_alerts.append(make_alert(
-                        "danger", ticker, _pc_headline,
+                        "price_crash", ticker, _pc_headline,
                         {"name": holding.get("name", ticker), "reason": "price_crash",
                          "entry_price": entry_price, "current_price": round(live_price, 2),
                          "return_pct": round(stock_return, 1)},
-                        "price_crash"
+                        "price_crash", severity="danger"
                     ))
                     if _tg_token and user_id in _tg_map:
                         send_telegram(_tg_map[user_id], f"⚠️ <b>{_html_esc(_pc_headline)}</b>\n\n<a href='https://kordent.streamlit.app'>Open Kordent</a>", _tg_token)
 
-            # ── Overvalued: Graham margin of safety eroding ──
-            current_pe = float(row["pe"].iloc[0]) if pd.notna(row["pe"].iloc[0]) else None
-            current_pb = float(row["pb"].iloc[0]) if "pb" in row.columns and pd.notna(row["pb"].iloc[0]) else None
-
-            overvalued_reasons = []
-            if current_pe and current_pe > 18:
-                overvalued_reasons.append(f"PE {current_pe:.1f} > 18")
-            if current_pb and current_pb > 1.8:
-                overvalued_reasons.append(f"PB {current_pb:.1f} > 1.8")
-
-            if overvalued_reasons:
-                all_alerts.append(make_alert(
-                    "overvalued", ticker,
-                    f"{holding.get('name', ticker)} may be overvalued — {', '.join(overvalued_reasons)}",
-                    {"name": holding.get("name", ticker), "reason": "overvalued",
-                     "pe": current_pe, "pb": current_pb},
-                    "overvalued"
-                ))
+        # `overvalued` removed. It fired on naked PE>18 / PB>1.8 — IPS-blind
+        # thresholds that ignore sector, growth and the user's own mandate, and
+        # it duplicated the portfolio review, which is the single place a
+        # holding gets a hold/sell verdict. It had ALSO been unreachable: the
+        # write loop discarded alert_type 'overvalued' before the DB, so this
+        # block ran a book-passage search every day and threw the result away.
 
         # ── 3c. Opportunity alerts ──
         investor_type = port.get("investor_type", "balanced")
