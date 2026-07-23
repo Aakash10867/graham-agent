@@ -963,8 +963,37 @@ def run_daily_tracker():
         # 3. ALERT DETECTION (with book passages)
         # ══════════════════════════════════════
 
-        def make_alert(alert_type, ticker, headline, detail, book_query_key=None):
-            """Helper to build alert dict with book passage attached."""
+        _SEVERITIES = ("danger", "warning", "info")
+
+        def make_alert(alert_type, ticker, headline, detail,
+                       book_query_key=None, *, severity):
+            """Build an alert dict with book passage attached.
+
+            alert_type is WHAT HAPPENED (score_drop, quality_fail, goal_drift).
+            severity is HOW BAD (danger/warning/info). These were one column
+            until now, which cost us twice:
+
+              1. The unique key is (portfolio_id, ticker, alert_type,
+                 alert_date) and the write is an UPSERT on it. When score_drop,
+                 quality_fail and price_crash all wrote alert_type='danger', a
+                 ticker triggering two of them on one day had the second
+                 silently overwrite the first — no exception, and the `written`
+                 counter incremented for both. Separating the columns makes the
+                 key meaningful and the collision disappears.
+              2. It forced nonsense like `severity = 'danger' if ... else
+                 'goal_drift'`, a ternary choosing between a severity and a type.
+
+            severity is KEYWORD-ONLY and has NO DEFAULT deliberately. Inserting
+            it positionally would let an un-updated call site pass `ticker` as
+            severity and write a wrong row that still satisfies the CHECK. This
+            way a missed site raises TypeError on the first run instead.
+            """
+            if severity not in _SEVERITIES:
+                # The DB CHECK on severity lands in step 5. Until then this is
+                # the only thing standing between a typo and a bad row.
+                raise ValueError(
+                    f"severity must be one of {_SEVERITIES}, got {severity!r} "
+                    f"(alert_type={alert_type!r}, ticker={ticker!r})")
             passages = []
             if book_chunks and book_query_key:
                 query = ALERT_BOOK_QUERIES.get(book_query_key, "")
@@ -976,6 +1005,7 @@ def run_daily_tracker():
                 "portfolio_id": port_id,
                 "user_id": user_id,
                 "alert_type": alert_type,
+                "severity": severity,
                 "ticker": ticker,
                 "headline": headline,
                 "detail": {**detail, "book_passages": passages},
