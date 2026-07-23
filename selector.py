@@ -111,6 +111,20 @@ TRADEOFF_TILT = {
     "any": (),
 }
 
+# Each framework is a BUNDLE of axes — the composition derived while building the
+# axis table. This is what lets ONE demand tilt (Q4/Q6/Q7/Q9 -> Quality/Growth/
+# Price/Safety) drive framework weights, instead of Q7/Q9 tilting the frameworks
+# AND the axes separately — the same preference counted twice.
+# Weighting a framework up for one axis used to smuggle in its other axes: a user
+# who wants "cheap" got Graham boosted, which also carries Safety and Quality.
+FRAMEWORK_AXIS_COMPOSITION = {
+    "graham":         {"price": 0.5, "safety": 0.3, "quality": 0.2},
+    "greenblatt":     {"price": 0.5, "quality": 0.5},
+    "dorsey_buffett": {"quality": 0.8, "safety": 0.2},
+    "trajectory":     {"growth": 0.8, "quality": 0.2},
+    "lynch":          {"growth": 0.5, "price": 0.5},
+}
+
 # Q7. Continuous tiebreak when two stocks tie on the weighted sub-score rank.
 # (column, higher_is_better)
 PHILOSOPHY_TIEBREAK = {
@@ -323,12 +337,25 @@ def _tier2(df: pd.DataFrame, policy: dict, rejects: dict):
 # TIER 3 — THE RANKING (Q7 x Q9), WITHIN SECTOR
 # ══════════════════════════════════════════════════════════════════════════
 def _resolve_weights(policy: dict) -> dict:
-    """Q7 sets the weights. Q9 tilts them. Neither touches the gate."""
-    w = dict(policy.get("framework_weights") or {})
-    if not w:
-        w = {f: 20 for f in FRAMEWORKS}
-    for f in TRADEOFF_TILT.get(policy.get("acceptable_tradeoff", "any"), ()):
-        w[f] = w.get(f, 0) / 2.0
+    """SINGLE tilt source. Q4/Q6/Q7/Q9 -> demand_tilt (per-axis lean) -> framework
+    weights, via each framework's axis composition. Never touches the gate.
+
+    Ranking still runs on the framework SUB-SCORES (sector-relative, abstention-aware,
+    and carrying every boolean book check that the continuous-only axis scores
+    structurally cannot). Only the WEIGHTS come from the demand tilt.
+
+    Falls back to the legacy per-philosophy weights when a profile predates the tilt.
+    """
+    tilt = policy.get("demand_tilt") or {}
+    if tilt:
+        w = {f: sum(share * float(tilt.get(ax, 1.0))
+                    for ax, share in FRAMEWORK_AXIS_COMPOSITION[f].items())
+             for f in FRAMEWORKS}
+    else:
+        w = dict(policy.get("framework_weights") or {}) or {f: 20 for f in FRAMEWORKS}
+        # legacy path only — Q9's halving now lives inside derive_demand_tilt
+        for f in TRADEOFF_TILT.get(policy.get("acceptable_tradeoff", "any"), ()):
+            w[f] = w.get(f, 0) / 2.0
     total = sum(w.values()) or 1.0
     return {f: 100.0 * w.get(f, 0) / total for f in FRAMEWORKS}
 
@@ -769,6 +796,7 @@ def select_portfolio(universe_df: pd.DataFrame, policy: dict,
             "philosophy": policy.get("philosophy"),
             "min_acceptable_score": policy.get("min_acceptable_score"),
             "acceptable_tradeoff": policy.get("acceptable_tradeoff"),
+            "demand_tilt": policy.get("demand_tilt"),
             "covariance_used": corr is not None,
             "conviction_slots": k_conv,
             "conviction_framework": dom_framework,
