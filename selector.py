@@ -99,6 +99,18 @@ SUBSCORE = {
     "trajectory": "trajectory_score",
     "lynch": "lynch_score",
 }
+# The graded decimals (W0.1). Same checks, but continuous: the fractional part is
+# distance-to-threshold on the book-ramped checks. The integer versions above are
+# step functions — within one sector dozens of stocks share a value and collapse to
+# the SAME percentile, which is dead weight the demand tilt cannot move. Ranking
+# only; the GATE still counts the PASS_FLAG booleans, so `score` is unaffected.
+SUBSCORE_GRADED = {
+    "graham": "graham_defensive_graded",
+    "greenblatt": "greenblatt_frac",
+    "dorsey_buffett": "dorsey_buffett_graded",
+    "trajectory": "trajectory_graded",
+    "lynch": "lynch_graded",
+}
 
 # Q9. The user names what they VALUE, not what they will WAIVE. So it tilts the
 # ranking; it never opens a side door in the gate. A 5/5 stock with the best
@@ -380,7 +392,9 @@ def _tier3(df: pd.DataFrame, policy: dict) -> pd.DataFrame:
     df = _attach_applicable(df.copy())
 
     for f in FRAMEWORKS:
-        col = SUBSCORE[f]
+        col = SUBSCORE_GRADED.get(f)
+        if col not in df.columns:          # pre-W0.1 archive rows
+            col = SUBSCORE[f]
         if col not in df.columns:
             df[f"_pct_{f}"] = 0.0
             continue
