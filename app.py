@@ -2046,6 +2046,62 @@ def validate_portfolio_ips(stocks: list, ips_policy: dict) -> dict:
     }
 
 
+# ── Demand tilt: builder answers -> per-axis lean (Q/G/P/S) ──
+# Per-axis amplitude differs by NEGOTIABILITY. Safety is a floor the user may raise
+# but never lower (the quality gate stays absolute regardless of tilt). Quality is a
+# soft floor — deep-value may de-emphasise it, never zero it. Price and Growth are dials.
+AXIS_TILT_RANGE = {
+    "safety":  (1.0, 1.6),   # up only
+    "quality": (0.5, 1.5),   # soft floor
+    "price":   (0.4, 1.8),   # wide both ways
+    "growth":  (0.0, 1.8),   # free
+}
+
+
+def derive_demand_tilt(profile: dict) -> dict:
+    """Builder answers -> multiplicative per-axis tilt, clamped then normalised to sum 4.0.
+
+    A TILT, not a filter: it re-ranks candidates that ALREADY passed the absolute layer
+    (quality gate + framework scores). It can never admit a stock the gate rejected.
+    """
+    t = {"quality": 1.0, "growth": 1.0, "price": 1.0, "safety": 1.0}
+
+    ph = profile.get("philosophy")                      # Q7 identity -> primary axis
+    if ph == "growth_at_fair_price":  t["growth"] *= 1.6; t["price"] *= 0.8
+    elif ph == "deep_value":          t["price"] *= 1.6;  t["growth"] *= 0.8
+    elif ph == "quality_compounder":  t["quality"] *= 1.4; t["price"] *= 0.8
+
+    risk = profile.get("risk")                          # Q4 behavioural stress test
+    if risk == "moderate":            t["safety"] *= 1.15
+    elif risk == "conservative":      t["safety"] *= 1.4; t["growth"] *= 0.7
+
+    if profile.get("preference") == "income":           # Q6 income need
+        t["growth"] *= 0.6; t["safety"] *= 1.15
+    else:
+        t["growth"] *= 1.2
+
+    tr = profile.get("acceptable_tradeoff")             # Q9 concession (dials only)
+    if tr == "ok_fail_graham":             t["price"] *= 0.7
+    elif tr == "ok_fail_trajectory_lynch": t["growth"] *= 0.7
+    elif tr == "ok_fail_dorsey_buffett":   t["quality"] *= 0.7
+
+    for k, (lo, hi) in AXIS_TILT_RANGE.items():
+        t[k] = max(lo, min(hi, t[k]))
+    s = sum(t.values()) or 1.0
+    return {k: round(v * 4.0 / s, 3) for k, v in t.items()}
+
+
+def detect_demand_contradiction(profile):
+    """Aspirational vs behavioural mismatch. Surface it — never silently average."""
+    ph, risk = profile.get("philosophy"), profile.get("risk")
+    if ph == "growth_at_fair_price" and risk == "conservative":
+        return ("You picked growth-focused, but you'd sell in a 20% drop. We've leaned "
+                "your portfolio toward steadier growers — you can lean further either way.")
+    if ph == "deep_value" and risk == "conservative":
+        return ("Bargain-hunting usually means holding through volatility, but you'd sell "
+                "in a 20% drop. We've kept the safety bar high in your picks.")
+    return None
+
 
 def generate_ips(profile: dict, age: int = 30) -> dict:
     """Derive a formal Investment Policy Statement from builder profile inputs.
@@ -7408,29 +7464,32 @@ elif st.session_state.sb_view_mode == "builder":
 
             st.divider()
 
-            # Q6 — Income vs growth
+            # Q6 — Income need only. The volatility half moved out; Q4 owns that job.
             _b_pref_resp = st.radio(
-                "🎚️ What matters more to you?",
+                "🎚️ Do you need this portfolio to pay you along the way?",
                 options=[
-                    "Steady dividends and low risk",
-                    "Maximum growth, even if it's bumpy",
+                    "Pay me regularly — dividends matter",
+                    "Purely growth — reinvest everything",
                 ],
                 index=1,
+                help="This is about income need, not risk — your comfort with drops is covered above.",
             )
 
             st.divider()
 
-            # Q7 — Investment philosophy (Sprint 6)
+            # Q7 — Investing identity. Each option maps to exactly ONE axis.
+            # Dropped "diamonds in the rough": it asked the user to lower a SAFETY floor
+            # (turnaround risk) while dressed as a style preference. Floors are not concessions.
             _b_philosophy = st.radio(
                 "🧠 Which investing style sounds most like you?",
                 options=[
-                    "I hunt for bargains — solid businesses at rock-bottom prices",
-                    "I want great businesses that are still growing fast",
-                    "I want companies with unbeatable advantages, even if not cheap",
-                    "I like finding diamonds in the rough — beaten-down, recovering companies",
+                    "Businesses growing fast — I'll pay a fair price for that",
+                    "Bargains — sound businesses trading below what they're worth",
+                    "The most durable businesses — I'll accept a full price and slower growth",
+                    "Balanced — no strong preference",
                 ],
-                index=1,
-                help="This helps us find the 3/5 and 2/5 stocks that are right for YOUR style.",
+                index=3,
+                help="This sets which quality we lean toward when two stocks are otherwise close.",
             )
 
             st.divider()
@@ -7481,8 +7540,8 @@ elif st.session_state.sb_view_mode == "builder":
                 "Sell some to sleep better": "conservative",
             }
             _pref_map = {
-                "Steady dividends and low risk": "income",
-                "Maximum growth, even if it's bumpy": "growth",
+                "Pay me regularly — dividends matter": "income",
+                "Purely growth — reinvest everything": "growth",
             }
             _b_risk = _risk_map.get(_b_risk_resp, "moderate")
             _b_pref = _pref_map.get(_b_pref_resp, "growth")
@@ -7511,10 +7570,10 @@ elif st.session_state.sb_view_mode == "builder":
 
             # Sprint 6: Map philosophy, selectivity, trade-off
             _philosophy_map = {
-                "I hunt for bargains — solid businesses at rock-bottom prices": "deep_value",
-                "I want great businesses that are still growing fast": "growth_at_fair_price",
-                "I want companies with unbeatable advantages, even if not cheap": "quality_compounder",
-                "I like finding diamonds in the rough — beaten-down, recovering companies": "contrarian",
+                "Businesses growing fast — I'll pay a fair price for that": "growth_at_fair_price",
+                "Bargains — sound businesses trading below what they're worth": "deep_value",
+                "The most durable businesses — I'll accept a full price and slower growth": "quality_compounder",
+                "Balanced — no strong preference": "balanced",
             }
             _selectivity_map = {
                 "Only the best — 4+ frameworks must agree": 4,
@@ -7528,7 +7587,7 @@ elif st.session_state.sb_view_mode == "builder":
                 "No preference — I trust the system to decide": "any",
             }
 
-            _b_philosophy_val = _philosophy_map.get(_b_philosophy, "growth_at_fair_price")
+            _b_philosophy_val = _philosophy_map.get(_b_philosophy, "balanced")
             _b_min_score = _selectivity_map.get(_b_selectivity, 3)
             _b_tradeoff_val = _tradeoff_map.get(_b_tradeoff, "any")
 
@@ -7538,6 +7597,7 @@ elif st.session_state.sb_view_mode == "builder":
                 "growth_at_fair_price": {"graham": 10, "greenblatt": 15, "dorsey_buffett": 20, "trajectory": 25, "lynch": 30},
                 "quality_compounder":   {"graham": 15, "greenblatt": 15, "dorsey_buffett": 35, "trajectory": 15, "lynch": 20},
                 "contrarian":           {"graham": 25, "greenblatt": 30, "dorsey_buffett": 10, "trajectory": 20, "lynch": 15},
+                "balanced":             {"graham": 20, "greenblatt": 20, "dorsey_buffett": 20, "trajectory": 20, "lynch": 20},
             }
 
             _b_profile = {
@@ -7559,6 +7619,13 @@ elif st.session_state.sb_view_mode == "builder":
                 "acceptable_tradeoff": _b_tradeoff_val,
                 "framework_weights": _framework_weights.get(_b_philosophy_val, {}),
             }
+            # Demand tilt from Q4/Q6/Q7/Q9. Stored now, consumed by selection later
+            # (see Consumption Map) — a lean on the relative layer only.
+            _b_profile["demand_tilt"] = derive_demand_tilt(_b_profile)
+            _b_demand_warn = detect_demand_contradiction(_b_profile)
+            if _b_demand_warn:
+                _b_profile["demand_contradiction"] = _b_demand_warn
+                st.info(_b_demand_warn)
             # Sprint 11: Generate IPS from profile (book is the standard)
             _b_ips = generate_ips(_b_profile, age=_calc_age)
             _b_profile["ips_policy"] = _b_ips
