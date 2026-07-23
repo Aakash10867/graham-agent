@@ -192,6 +192,14 @@ ALERT_BOOK_QUERIES = {
     "watchlist_near_low": "buying near 52-week low discount margin of safety patience value opportunity",
 }
 
+# Alert severity vocabulary. MODULE level, deliberately: make_alert lives inside
+# `for port in portfolios:` while wl_alert lives after that loop ends. Both are
+# locals of run_daily_tracker, so a constant defined in the loop body is visible
+# afterwards ONLY IF the loop ran at least once. A user with no portfolios but a
+# non-empty watchlist would hit NameError on the first watchlist alert. A
+# constant has no business being a loop-body local.
+_SEVERITIES = ("danger", "warning", "info")
+
 # Sector → Nifty sectoral index (yfinance tickers)
 SECTOR_INDEX_MAP = {
     "Technology": "^CNXIT",
@@ -962,8 +970,6 @@ def run_daily_tracker():
         # ══════════════════════════════════════
         # 3. ALERT DETECTION (with book passages)
         # ══════════════════════════════════════
-
-        _SEVERITIES = ("danger", "warning", "info")
 
         def make_alert(alert_type, ticker, headline, detail,
                        book_query_key=None, *, severity):
