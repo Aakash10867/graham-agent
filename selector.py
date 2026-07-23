@@ -949,6 +949,47 @@ def improving_businesses(universe_df: pd.DataFrame, limit: int = 25) -> pd.DataF
 # cap_quota_mid, breadth, free) all earned a seat without the sleeve.
 _CONVICTION_SLOTS = {"conviction"}
 
+# W1. How each framework is ALLOWED to be read when it flips. Set a priori from
+# what the framework's own arithmetic contains, never from observed data.
+#   fundamental — no meaningful price input; a flip is the business moving.
+#   mixed       — contains BOTH price and fundamentals; must be disambiguated
+#                 from pe/roe before any reason is named.
+# dorsey_buffett is 'fundamental' with one honest caveat: nine of its ten checks
+# are pure fundamentals, and the tenth (buffett_one_dollar_test) is a 4-YEAR
+# trailing market-cap delta. It is a price term. It is slow and boolean, so it
+# rarely drives a flip, but the label is a dominant reading, not a purity claim.
+# greenblatt is 'mixed', NOT 'relative-rank': greenblatt_frac is the percentile
+# of (roic_rank + ey_rank) and ey = EBIT/EV, so it moves on this stock's price,
+# this stock's EBIT/ROIC, or other stocks. Calling it relative-rank up front
+# would tell a user "nothing about your stock changed" while the price halved.
+FRAMEWORK_DRIFT_KIND = {
+    "graham":         "mixed",
+    "greenblatt":     "mixed",
+    "dorsey_buffett": "fundamental",
+    "trajectory":     "fundamental",
+    "lynch":          "mixed",
+}
+
+# Where a 'mixed' framework flips but NEITHER pe nor roe moved. For greenblatt
+# that is the informative case — its own inputs held, so the universe moved
+# around it. For graham/lynch it means something we do not capture moved, and
+# the only honest label is that we cannot tell.
+DRIFT_NULL_MOVE_LABEL = {
+    "graham":     "unclear",
+    "greenblatt": "relative_rank",
+    "lynch":      "unclear",
+}
+
+# The noise floor for "this input MOVED". NOT a causal test — proving pe caused
+# a flip needs metric-level archive rows (Tier 2, gated to ~2027). This only
+# separates a move worth naming from rounding and refresh jitter.
+# JUDGMENT, not a fitted parameter: 10% sits below a typical quarterly earnings
+# revision and above CSV rounding. Change it by argument. Never fit it.
+DRIFT_MATERIAL_PCT = 0.10
+
+# Below this, a score_continuous move is arithmetic, not a story.
+DRIFT_MATERIAL_CONTINUOUS = 0.05
+
 
 def _on_conviction(trace: dict) -> bool:
     return bool(trace) and trace.get("slot_type") in _CONVICTION_SLOTS
@@ -972,6 +1013,117 @@ def _trace_facts(trace: dict) -> dict:
         "effective_gate": trace.get("effective_gate"),
         "passed": list(trace.get("passed", [])),
         "failed": list(trace.get("failed", [])),
+        # W1 decomposition inputs. Absent on any trace written before edit 1 —
+        # .get() -> None, which every consumer below treats as "unmeasured",
+        # never as "held". No backfill; this self-heals as holdings turn over.
+        "pe": trace.get("pe"),
+        "roe_pct": trace.get("roe_pct"),
+        "score_continuous": trace.get("score_continuous"),
+        "fracs": dict(trace.get("fracs") or {}),
+    }
+
+
+def _moved(a, b, floor: float = DRIFT_MATERIAL_PCT):
+    """Did a tracked input move beyond the noise floor?
+
+    True / False / None, and the None matters: a missing side means we do not
+    know, which is emphatically not the same as "it held". Collapsing the two
+    is how a data gap gets reported to a user as a stable business."""
+    if a is None or b is None:
+        return None
+    try:
+        a, b = float(a), float(b)
+    except (TypeError, ValueError):
+        return None
+    if a == 0:
+        return b != 0
+    return abs(b - a) / abs(a) >= floor
+
+
+def _classify_flip(framework: str, e: dict, c: dict) -> str:
+    """Why did this framework flip? Deterministic label, never prose.
+
+    Classifies by WHICH input moved, not by whether it moved favourably —
+    direction is already carried by newly_passing vs newly_failing, and
+    duplicating it here would let the two disagree.
+
+    Vocabulary (closed set):
+      fundamental    the business moved
+      valuation      price moved, the business held
+      relative_rank  this stock's inputs held; the universe moved around it
+      mixed          both price and fundamentals moved
+      unclear        inputs held yet it flipped — something uncaptured moved
+      unknown_inputs pe or roe missing on one side; we cannot split it
+    """
+    kind = FRAMEWORK_DRIFT_KIND.get(framework)
+    if kind == "fundamental":
+        return "fundamental"
+    if kind != "mixed":
+        return "unclear"
+
+    pe_moved = _moved(e.get("pe"), c.get("pe"))
+    roe_moved = _moved(e.get("roe_pct"), c.get("roe_pct"))
+    if pe_moved is None or roe_moved is None:
+        return "unknown_inputs"
+    if pe_moved and roe_moved:
+        return "mixed"
+    if pe_moved:
+        return "valuation"
+    if roe_moved:
+        return "fundamental"
+    return DRIFT_NULL_MOVE_LABEL.get(framework, "unclear")
+
+
+def _continuous_drift(e: dict, c: dict) -> dict | None:
+    """Decompose delta(score_continuous) into per-framework contributions.
+
+    score_continuous is the SUM of the five fracs, so the split is exact —
+    when every frac is measured on both sides. When one is not, that framework
+    is excluded rather than guessed, and the shortfall is reported as
+    `unattributed` instead of being silently absorbed into the others.
+
+    This gap is real and must stay visible. deep_metrics coerces a None frac to
+    0 inside score_continuous, so a stock that merely BECOMES rankable (a filing
+    lands, a throttled fetch succeeds) shows a ~1-point jump with nothing about
+    the business having changed — and the reverse reads as a collapse. Naming it
+    `unattributed` is what stops that arithmetic becoming a thesis signal."""
+    ef, cf = (e.get("fracs") or {}), (c.get("fracs") or {})
+    e_sc, c_sc = e.get("score_continuous"), c.get("score_continuous")
+    if e_sc is None or c_sc is None:
+        return None
+    try:
+        e_sc, c_sc = float(e_sc), float(c_sc)
+    except (TypeError, ValueError):
+        return None
+    total = round(c_sc - e_sc, 4)
+
+    by_framework, unmeasured = {}, []
+    for f in FRAMEWORKS:
+        a, b = ef.get(f), cf.get(f)
+        if a is None or b is None:
+            unmeasured.append(f)
+            continue
+        try:
+            by_framework[f] = round(float(b) - float(a), 4)
+        except (TypeError, ValueError):
+            unmeasured.append(f)
+
+    attributed = round(sum(by_framework.values()), 4)
+    largest = (max(by_framework, key=lambda k: abs(by_framework[k]))
+               if by_framework else None)
+    # A "largest move" smaller than the noise floor is not a mover. Report none
+    # rather than crown the biggest rounding error in the set.
+    if largest is not None and abs(by_framework[largest]) < DRIFT_MATERIAL_CONTINUOUS:
+        largest = None
+
+    return {
+        "from": round(e_sc, 4),
+        "to": round(c_sc, 4),
+        "delta": total,
+        "by_framework": by_framework,
+        "largest_move": largest,
+        "unmeasured": unmeasured,
+        "unattributed": round(total - attributed, 4),
     }
 
 
@@ -994,14 +1146,18 @@ def _thesis_changes(entry: dict, current: dict) -> list:
                         "from": e.get("score_applicable"),
                         "to": c.get("score_applicable")})
 
-    # Which specific frameworks flipped, in each direction.
+    # Which specific frameworks flipped, in each direction. `to` stays a plain
+    # list of names — existing renderers join it directly. The reason labels ride
+    # alongside in a NEW key, so nothing that reads the old shape breaks.
     e_pass, c_pass = set(e.get("passed", [])), set(c.get("passed", []))
-    if sorted(c_pass - e_pass):
-        changes.append({"field": "newly_passing", "from": None,
-                        "to": sorted(c_pass - e_pass)})
-    if sorted(e_pass - c_pass):
-        changes.append({"field": "newly_failing", "from": None,
-                        "to": sorted(e_pass - c_pass)})
+    _gained = sorted(c_pass - e_pass)
+    if _gained:
+        changes.append({"field": "newly_passing", "from": None, "to": _gained,
+                        "reasons": {f: _classify_flip(f, e, c) for f in _gained}})
+    _lost = sorted(e_pass - c_pass)
+    if _lost:
+        changes.append({"field": "newly_failing", "from": None, "to": _lost,
+                        "reasons": {f: _classify_flip(f, e, c) for f in _lost}})
 
     # Conviction rank drift, when both entry and today were conviction picks.
     if e.get("conviction_rank") is not None and c.get("conviction_rank") is not None \
@@ -1014,6 +1170,14 @@ def _thesis_changes(entry: dict, current: dict) -> list:
     if e.get("slot_type") != c.get("slot_type"):
         changes.append({"field": "slot_type",
                         "from": e.get("slot_type"), "to": c.get("slot_type")})
+
+    # Magnitude, not just direction. Emitted only above the noise floor, so a
+    # 0.01 refresh wobble never renders as news. Returns None on pre-edit-1
+    # traces, which is the correct silence.
+    cd = _continuous_drift(e, c)
+    if cd and abs(cd["delta"]) >= DRIFT_MATERIAL_CONTINUOUS:
+        changes.append({"field": "continuous_drift",
+                        "from": cd["from"], "to": cd["to"], "detail": cd})
 
     return changes
 
