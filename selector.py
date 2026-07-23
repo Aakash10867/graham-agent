@@ -112,6 +112,21 @@ SUBSCORE_GRADED = {
     "lynch": "lynch_graded",
 }
 
+# W1. The NORMALISED (0-1) graded decimals. Distinct from SUBSCORE_GRADED above,
+# which holds the RAW graded values on their native scales (Graham /8, the other
+# four /10). Selection ranks on PERCENTILES of the raw values, so scale never
+# matters there. Drift decomposition compares magnitudes ACROSS frameworks
+# ("which one moved most"), where mixing a /8 with a /10 would silently favour
+# the /10s. score_continuous is the sum of exactly these five, so
+# delta(score_continuous) decomposes into delta(fracs) with no residual.
+FRAC_COL = {
+    "graham": "graham_frac",
+    "greenblatt": "greenblatt_frac",
+    "dorsey_buffett": "dorsey_frac",
+    "trajectory": "trajectory_frac",
+    "lynch": "lynch_frac",
+}
+
 # Q9. The user names what they VALUE, not what they will WAIVE. So it tilts the
 # ranking; it never opens a side door in the gate. A 5/5 stock with the best
 # trajectory in its sector must win through the front door, not be displaced by
@@ -638,6 +653,22 @@ def _fill(pool: pd.DataFrame, q: dict, corr, k_conviction: int = 0) -> tuple[lis
     return chosen, slot_type
 
 
+def _num(v, nd: int = 4):
+    """Trace numbers must be JSON-safe and COMPARABLE. NaN/None/inf -> None;
+    anything else -> a rounded float.
+
+    A NaN written into entry_trace is poison: NaN != NaN, so every later diff
+    reports a change that never happened. None vs None compares equal, which is
+    the honest answer for a metric we never had."""
+    try:
+        if v is None or pd.isna(v):
+            return None
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return round(f, nd) if math.isfinite(f) else None
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # ENTRY POINT
 # ══════════════════════════════════════════════════════════════════════════
@@ -780,6 +811,18 @@ def select_portfolio(universe_df: pd.DataFrame, policy: dict,
                 "tiebreak_metric": r["_tiebreak_metric"],
                 "tiebreak_value": (None if pd.isna(r["_tiebreak_value"])
                                    else round(float(r["_tiebreak_value"]), 3)),
+                # ── W1 drift-decomposition inputs ──────────────────────────
+                # Captured HERE because _trace is the only thing app.py
+                # persists as entry_trace; the top-level pe/roe_pct on this
+                # holding dict are dropped at insert, and holdings.pe_at_entry /
+                # roe_at_entry are re-derived later from different columns
+                # (roe_y0, a re-fetched row) so they are NOT a comparable
+                # entry side. Recorded at SELECTION time means entry and
+                # current are produced by the same code path.
+                "pe": _num(r.get("pe"), 3),
+                "roe_pct": _num(r.get("roe_pct"), 3),
+                "score_continuous": _num(r.get("score_continuous")),
+                "fracs": {f: _num(r.get(col)) for f, col in FRAC_COL.items()},
             },
         })
 
