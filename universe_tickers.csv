@@ -2640,6 +2640,7 @@ ticker,name,exchange
 544827.BO,Bajaj Finserv Mutual Fund,BSE
 544830.BO,Mirae Asset Mutual Fund,BSE
 544831.BO,MEENAKSHI INDIA LIMITED,BSE
+544832.BO,Sotefin Bharat Limited,BSE
 555555.BO,ICICI Prudential Mutual Fund,BSE
 590103.BO,Reliance Mutual Fund-Permitted,BSE
 590104.BO,Reliance Mutual Fund-Permitted,BSE
@@ -2668,7 +2669,6 @@ ticker,name,exchange
 590160.BO,Tata Mutual Fund - Permitted,BSE
 5PAISA.NS,5Paisa Capital Limited,NSE
 63MOONS.NS,63 moons technologies limited,NSE
-751124.BO,MARG TECHNO PROJECTS LIMITED,BSE
 751126.BO,Consecutive Commodities Limited,BSE
 780014.BO,Has Lifestyle Limited,BSE
 780016.BO,Web Element Solutions Limited,BSE
@@ -4118,7 +4118,6 @@ NESCO.NS,Nesco Limited,NSE
 NESTLEIND.NS,Nestle India Limited,NSE
 NETWEB.NS,Netweb Technologies India Limited,NSE
 NETWORK18.NS,Network18 Media & Investments Limited,NSE
-NEUEON.NS,Neueon Corporation Limited,NSE
 NEULANDLAB.NS,Neuland Laboratories Limited,NSE
 NEWGEN.NS,Newgen Software Technologies Limited,NSE
 NEXTMEDIA.NS,Next Mediaworks Limited,NSE
