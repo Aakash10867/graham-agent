@@ -8059,7 +8059,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                         sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
                                         st.rerun()
 
-                        elif a_type == "opportunity":
+                        elif a_type == "goal_drift":
                             st.success(f"⚡ **{alert['headline']}**")
 
                             with st.container(border=True):
@@ -8149,17 +8149,47 @@ elif st.session_state.sb_view_mode == "portfolios":
                                     sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
                                     st.rerun()
 
-                        elif a_type == "new_entry":
-                            st.info(f"🆕 **{alert['headline']}**")
+                        elif a_type in ("sector_concentration", "low_diversification"):
+                            # Portfolio-level: ticker is '_portfolio', so there is
+                            # no holding to defend. Before the type/severity split
+                            # these fell into the holding card above, looked up a
+                            # holding named '_portfolio', found none, and rendered
+                            # "Holding not found — may have been sold already."
+                            _say(f"📊 **{alert['headline']}**")
                             with st.container(border=True):
-                                ne_name = detail.get("name", alert.get("ticker", ""))
-                                ne_score = detail.get("score", 0)
-                                ne_sector = detail.get("sector", "N/A")
-                                ne_pe = detail.get("pe")
-                                pe_str = f" · PE {ne_pe:.1f}" if ne_pe else ""
-                                st.markdown(f"**{ne_name}** just appeared on our radar with a score of {ne_score}/5. Sector: {ne_sector}{pe_str}. Worth a closer look if it fits your portfolio.")
-                                if st.button("✗ Dismiss", key=f"newentry_dismiss_{a_id}", use_container_width=True):
-                                    sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
+                                if a_type == "sector_concentration":
+                                    st.markdown(
+                                        f"{detail.get('sector', 'One sector')} is "
+                                        f"{detail.get('weight_pct', 0)}% of your holdings. "
+                                        "Concentration raises the cost of being wrong about "
+                                        "a single industry.")
+                                else:
+                                    st.markdown(
+                                        f"Diversification score {detail.get('score', 0)}/100. "
+                                        "A low score means your holdings tend to move together, "
+                                        "so they cushion each other less than the count suggests.")
+                                if st.button("✗ Dismiss", key=f"portrisk_dismiss_{a_id}",
+                                             use_container_width=True):
+                                    sb.table("portfolio_alerts").update(
+                                        {"is_read": True}).eq("id", a_id).execute()
+                                    st.rerun()
+
+                        elif a_type == "review_due":
+                            # Written every run and, until now, matched by no
+                            # branch here — visible only in the PDF export. It is
+                            # the one alert whose entire purpose is to be seen.
+                            _say(f"⏰ **{alert['headline']}**")
+                            with st.container(border=True):
+                                _od = detail.get("days_overdue", 0)
+                                st.markdown(
+                                    f"Your scheduled review is {_od} day"
+                                    f"{'s' if _od != 1 else ''} overdue. Reviewing is how "
+                                    "drift gets caught early — it does not commit you to "
+                                    "trading anything.")
+                                if st.button("✗ Dismiss", key=f"reviewdue_dismiss_{a_id}",
+                                             use_container_width=True):
+                                    sb.table("portfolio_alerts").update(
+                                        {"is_read": True}).eq("id", a_id).execute()
                                     st.rerun()
 
                 
