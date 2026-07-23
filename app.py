@@ -7008,24 +7008,16 @@ elif st.session_state.sb_view_mode == "watchlist":
                         # Daily alerts (auto-expire after 24h)
                         _card_alerts = _wl_alerts_by_ticker.get(_w_ticker, [])
                         for _ca in _card_alerts:
-                            _ca_type = _ca["alert_type"]
+                            # Severity now carries the good/bad reading this block
+                            # used to re-derive. quality_flip parsed its own detail
+                            # JSON to work out direction — duplicating a judgment
+                            # portfolio_tracker had already made when it wrote the
+                            # row. One source, read here.
                             _ca_headline = _ca.get("headline", "")
-                            if _ca_type in ("watchlist_score_up", "watchlist_near_low"):
-                                st.success(f"{_ca_headline}")
-                            elif _ca_type == "watchlist_score_down":
-                                st.warning(f"{_ca_headline}")
-                            elif _ca_type == "watchlist_quality_flip":
-                                _ca_detail = _ca.get("detail") or {}
-                                if isinstance(_ca_detail, str):
-                                    import json as _json
-                                    try:
-                                        _ca_detail = _json.loads(_ca_detail)
-                                    except Exception:
-                                        _ca_detail = {}
-                                if _ca_detail.get("current"):
-                                    st.success(f"{_ca_headline}")
-                                else:
-                                    st.warning(f"{_ca_headline}")
+                            _ca_sev = _ca.get("severity") or "info"
+                            _say_wl = {"danger": st.error,
+                                       "warning": st.warning}.get(_ca_sev, st.success)
+                            _say_wl(f"{_ca_headline}")
     
                         
                         # Editable note
