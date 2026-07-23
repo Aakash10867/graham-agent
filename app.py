@@ -1636,9 +1636,53 @@ def get_nifty_return(days):
     except Exception:
         return None
 
+_DRIFT_FRAMEWORK_LABEL = {
+    "graham": "Graham",
+    "greenblatt": "Greenblatt",
+    "dorsey_buffett": "Dorsey/Buffett",
+    "trajectory": "Trajectory",
+    "lynch": "Lynch",
+}
+
+# Display strings for selector's closed label vocabulary. DESCRIPTIVE ONLY:
+# they say what moved, never what to do about it. Any key selector emits that
+# is missing here renders as a bare framework name rather than crashing or
+# inventing a story — a new label must be added deliberately, not guessed.
+_DRIFT_REASON_TEXT = {
+    "valuation":      "price moved, the business held",
+    "fundamental":    "the business moved",
+    "relative_rank":  "its own numbers held — other stocks moved past it",
+    "mixed":          "price and business both moved",
+    "unclear":        "cause not identifiable from what we track",
+    "unknown_inputs": "too little recorded at entry to say why",
+}
+
+
+def _drift_flip_line(verb, names, reasons):
+    """'No longer passes: Graham, Lynch (price moved, the business held).'
+
+    Groups by reason so a shared cause is stated once instead of repeated per
+    framework. Insertion order is deterministic because `names` arrives sorted."""
+    reasons = reasons or {}
+    by_reason = {}
+    for n in names:
+        by_reason.setdefault(reasons.get(n), []).append(
+            _DRIFT_FRAMEWORK_LABEL.get(n, n))
+    parts = []
+    for reason, fws in by_reason.items():
+        txt = _DRIFT_REASON_TEXT.get(reason)
+        parts.append(", ".join(fws) + (f" ({txt})" if txt else ""))
+    return f"{verb}: {'; '.join(parts)}."
+
+
 def _format_thesis_drift(diff):
     """Render a diff_thesis result as a deterministic drift line — the diff,
-    NOT a fresh explanation. Returns (badge, markdown) or None to skip."""
+    NOT a fresh explanation. Returns (badge, markdown) or None to skip.
+
+    DISPLAY ONLY. The badge deliberately ignores the W1 reason labels: a
+    fundamental break is graver than a valuation one, but escalating severity
+    is a DECISION, and decisions belong to portfolio_tracker/watchlist_reasons.
+    Two places judging severity would eventually judge differently."""
     if not diff:
         return None
     d = diff.get("drift"); entry = diff.get("entry") or {}; curr = diff.get("current") or {}
@@ -1678,9 +1722,37 @@ def _format_thesis_drift(diff):
         elif f == "score_applicable":
             lines.append(f"Passes {ch['from']}→{ch['to']} of its applicable frameworks.")
         elif f == "newly_passing" and ch["to"]:
-            lines.append(f"Now also passes: {', '.join(ch['to'])}.")
+            lines.append(_drift_flip_line("Now also passes", ch["to"],
+                                          ch.get("reasons")))
         elif f == "newly_failing" and ch["to"]:
-            lines.append(f"No longer passes: {', '.join(ch['to'])}.")
+            lines.append(_drift_flip_line("No longer passes", ch["to"],
+                                          ch.get("reasons")))
+        elif f == "continuous_drift":
+            det = ch.get("detail") or {}
+            delta = det.get("delta")
+            if delta is not None:
+                _frm = det.get("from", ch.get("from"))
+                _to = det.get("to", ch.get("to"))
+                s = (f"Continuous score {_frm}→{_to} "
+                     f"({'up' if delta > 0 else 'down'} {abs(delta):.2f}).")
+                lg = det.get("largest_move")
+                if lg and lg in (det.get("by_framework") or {}):
+                    s += (f" Largest single move: "
+                          f"{_DRIFT_FRAMEWORK_LABEL.get(lg, lg)} "
+                          f"({det['by_framework'][lg]:+.2f}).")
+                # The caveat travels WITH the number, never in a footnote. An
+                # unattributed chunk means a framework became scoreable or
+                # stopped being scoreable — arithmetic, not the business. Left
+                # unsaid, that reads as a thesis crack that never happened.
+                unatt = det.get("unattributed") or 0.0
+                if abs(unatt) >= 0.05:
+                    _who = ", ".join(_DRIFT_FRAMEWORK_LABEL.get(u, u)
+                                     for u in (det.get("unmeasured") or []))
+                    s += (f" {unatt:+.2f} of that is **not** attributable to any "
+                          f"measured framework — {_who or 'a framework'} could not "
+                          f"be scored on one side, so that portion is arithmetic, "
+                          f"not a change in the business.")
+                lines.append(s)
         elif f == "conviction_rank":
             lines.append(f"Conviction rank {ch['from']}→{ch['to']}.")
     badge = {"now_merit": "strong", "now_conviction": "weak", "still_selected": "intact"}.get(d, "neutral")
