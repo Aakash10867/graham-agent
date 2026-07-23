@@ -985,8 +985,15 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
     if alerts:
         alert_section = [Paragraph("Active Alerts", s_heading)]
         for a in alerts:
-            icon = {"danger": "⚠", "opportunity": "★",
-                    "review_due": "⏰"}.get(a.get("alert_type", ""), "•")
+            # Type picks a distinctive glyph where one exists; severity is the
+            # fallback. This map used to key on alert_type when alert_type held
+            # SEVERITY words — so the moment types became real, every score_drop,
+            # quality_fail and price_crash would have silently fallen through to
+            # the bullet.
+            icon = ({"review_due": "⏰", "goal_drift": "🎯", "new_entry": "🆕"}
+                    .get(a.get("alert_type", ""))
+                    or {"danger": "⚠", "warning": "!", "info": "★"}
+                    .get(a.get("severity") or "", "•"))
             safe_hl = str(a.get("headline", "")).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             alert_section.append(Paragraph(f"{icon}  {safe_hl}", s_body))
         alert_section.append(Spacer(1, 4*mm))
@@ -7990,8 +7997,22 @@ elif st.session_state.sb_view_mode == "portfolios":
                             except Exception:
                                 detail = {}
 
-                        if a_type == "danger":
-                            st.error(f"🛡️ **{alert['headline']}**")
+                        # Type picks WHICH card, severity picks HOW LOUD. These
+                        # were one value until now, which is why a portfolio-level
+                        # warning (ticker '_portfolio') fell into the holding card
+                        # below, looked up a holding named '_portfolio', found
+                        # none, and told the user it had already been sold.
+                        #
+                        # `or "danger"` covers rows written before the severity
+                        # column existed. Those age out within 7 days via the
+                        # cleanup in portfolio_tracker, so this fallback is
+                        # temporary — but it must not be a crash in the meantime.
+                        _sev = alert.get("severity") or "danger"
+                        _say = {"danger": st.error, "warning": st.warning,
+                                "info": st.info}.get(_sev, st.error)
+
+                        if a_type in ("score_drop", "quality_fail", "price_crash"):
+                            _say(f"🛡️ **{alert['headline']}**")
                             
                             # Replaced expander with a permanently open, bordered container
                             with st.container(border=True):
@@ -8113,7 +8134,12 @@ elif st.session_state.sb_view_mode == "portfolios":
 
                         
                         elif a_type == "goal_drift":
-                            st.error(f"🎯 **{alert['headline']}**")
+                            # Severity now varies: danger below half the needed
+                            # CAGR, warning above it. Previously the severe case
+                            # was routed to a different BRANCH entirely by writing
+                            # alert_type='danger', so this block only ever ran for
+                            # the mild case.
+                            _say(f"🎯 **{alert['headline']}**")
                             with st.container(border=True):
                                 actual = detail.get("actual_cagr_pct", 0)
                                 needed = detail.get("needed_cagr_pct", 0)
