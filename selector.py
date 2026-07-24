@@ -1420,84 +1420,23 @@ def classify_score_change(entry_trace: dict | None, universe_row) -> dict:
 
 
 def classify_score_drop(entry_trace: dict | None, universe_row) -> dict:
-    """Why did this holding's score fall? Deterministic, no selection re-run.
+    """The DOWN half, for a caller that has already observed a real drop.
 
-    Everything needed is already in hand at the alert site: the holding's
-    stored entry_trace and today's universe row. Re-running select_portfolio
-    would answer a DIFFERENT question ("would we buy this today") at roughly a
-    thousand times the cost, and needs an IPS policy the alert path does not
-    load.
+    A thin wrapper over classify_score_change. It had its own inline copy of
+    the down-side logic until now — two implementations of the same rules,
+    which is how a fix lands in one and not the other three months later.
 
-    Returns {reason, severity, newly_failing, per_framework}.
-
-    The severity is ADVISORY. It never gates firing — a score loss is a score
-    loss regardless of cause, and the alert fires either way. This only decides
-    how loud it is.
+    Contract unchanged: {reason, severity, newly_failing, per_framework}, with
+    reason never None and severity never absent.
     """
-    row = universe_row if universe_row is not None else {}
-
-    def _get(col):
-        try:
-            v = row.get(col)
-        except AttributeError:
-            return None
-        try:
-            if v is None or pd.isna(v):
-                return None
-        except (TypeError, ValueError):
-            pass
-        return v
-
-    # Today's facts, in the exact shape _classify_flip expects from a _trace,
-    # so entry and current sides go through identical comparison logic.
-    current = {
-        "pe": _num(_get("pe"), 3),
-        "roe_pct": _num(_get("roe_pct"), 3),
-        "score_continuous": _num(_get("score_continuous")),
-        "fracs": {f: _num(_get(col)) for f, col in FRAC_COL.items()},
-    }
-
-    entry = entry_trace or {}
-    entry_passed = entry.get("passed")
-    if not isinstance(entry_passed, (list, tuple)) or not entry_passed:
-        # No recorded entry thesis: manual holding, or bought before the trace
-        # carried these fields. We cannot name a cause, and failing to name one
-        # must not be mistaken for naming a benign one.
-        return {"reason": "unknown_inputs",
-                "severity": DRIFT_SEVERITY["unknown_inputs"],
-                "newly_failing": [], "per_framework": {}}
-
-    applicable = set(_applicable_frameworks(row))
-    current_passed = {f for f in FRAMEWORKS
-                      if f in applicable and bool(_get(PASS_FLAG[f]))}
-    newly_failing = sorted((set(entry_passed) & set(FRAMEWORKS)) - current_passed)
-
-    if not newly_failing:
-        # The integer score says it fell; the framework diff does not
+    d = classify_score_change(entry_trace, universe_row)["down"]
+    reason = d["reason"]
+    if reason is None:
+        # The caller saw the integer score fall; the framework diff does not
         # corroborate. score_at_entry and entry_trace['passed'] are stored
-        # separately and can disagree. Say so, rather than invent a cause or
-        # quietly soften an alert we cannot explain.
-        return {"reason": "unclear",
-                "severity": DRIFT_SEVERITY["unclear"],
-                "newly_failing": [], "per_framework": {}}
-
-    per_framework = {}
-    for f in newly_failing:
-        if f not in applicable:
-            # Scoreable at entry, not scoreable now (sector exclusion changed).
-            # Near-impossible, since exclusion is static per sector — but it
-            # must not read as the business breaking.
-            per_framework[f] = "unclear"
-        else:
-            per_framework[f] = _classify_flip(f, entry, current)
-
-    # An unrecognised label sorts as WORST, not mildest. If _classify_flip ever
-    # grows a label nobody mapped here, the failure direction must be a louder
-    # alert, never a quieter one.
-    reason = min(per_framework.values(),
-                 key=lambda r: DRIFT_PRECEDENCE.index(r)
-                 if r in DRIFT_PRECEDENCE else -1)
-
+        # separately and can disagree. Say we cannot tell, rather than invent a
+        # cause or quietly soften an alert we cannot explain.
+        reason = "unclear"
     return {"reason": reason,
             "severity": DRIFT_SEVERITY.get(reason, "danger"),
             "newly_failing": d["frameworks"],
