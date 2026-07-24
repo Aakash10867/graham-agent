@@ -1386,8 +1386,30 @@ def classify_score_drop(entry_trace: dict | None, universe_row) -> dict:
 
     return {"reason": reason,
             "severity": DRIFT_SEVERITY.get(reason, "danger"),
-            "newly_failing": newly_failing,
-            "per_framework": per_framework}
+            "newly_failing": d["frameworks"],
+            "per_framework": d["per_framework"]}
+
+
+def build_watch_trace(universe_row) -> dict:
+    """Entry-side facts for a WATCHED stock, shaped like a holding's entry_trace.
+
+    No slot_type and no sector rank: the stock was never selected, so the fields
+    describing a selection seat do not apply. What it does carry is exactly what
+    classify_score_change compares — the framework pass-set plus pe/roe/fracs/
+    score_continuous.
+
+    Lives here rather than in app.py because it encodes which COLUMN backs which
+    framework (PASS_FLAG, FRAC_COL). app.py has two watchlist insert sites; each
+    would otherwise carry its own copy of that mapping and they would drift.
+
+    All values pass through _num, so the result is JSON-safe by construction —
+    no NaN can reach the jsonb column, where it would compare unequal to itself
+    and report a change that never happened.
+    """
+    current, applicable, passing = _current_facts(universe_row)
+    return {"passed": sorted(passing),
+            "failed": sorted(applicable - passing),
+            **current}
 
 # ══════════════════════════════════════════════════════════════════════════
 # BENCHMARK SELECTION  (Sprint 13 §1)
