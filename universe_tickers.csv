@@ -49,7 +49,6 @@ ticker,name,exchange
 501111.BO,Gold Rock Investments Ltd.,BSE
 501148.BO,Dalal Street Investments Ltd.,BSE
 501151.BO,Kartik Investments Trust Ltd.,BSE
-501261.BO,Lords Mark Industries Limited,BSE
 501270.BO,ANTARIKSH INDUSTRIES LIMITED,BSE
 501311.BO,Jayabharat Credit Ltd.,BSE
 501314.BO,PRISMX GLOBAL VENTURES LIMITED,BSE
@@ -937,7 +936,6 @@ ticker,name,exchange
 526871.BO,Intec Capital Limited,BSE
 526873.BO,RAJASTHAN SECURITIES LIMITED,BSE
 526877.BO,Siddheswari Garments Ltd.,BSE
-526883.BO,Shikhar Consultants Ltd.,BSE
 526887.BO,Indo Credit Capital Ltd.,BSE
 526891.BO,Market Creators Ltd.,BSE
 526899.BO,HIMALAYA FOOD INTERNATIONAL LIMITED,BSE
@@ -947,7 +945,6 @@ ticker,name,exchange
 526935.BO,Kalind Limited,BSE
 526941.BO,Vaishno Cement Co. Ltd.,BSE
 526945.BO,Tyroon Tea Co. Ltd.,BSE
-526959.BO,Woodsvilla Limited,BSE
 526961.BO,LAST MILE ENTERPRISES LIMITED,BSE
 526965.BO,Gujarat Craft Industries Ltd.,BSE
 526967.BO,Heera Ispat Ltd.,BSE
@@ -1438,7 +1435,6 @@ ticker,name,exchange
 532975.BO,TELOGICA LIMITED,BSE
 532985.BO,Kotak Mahindra Mutual Fund,BSE
 532992.BO,CHL Limited,BSE
-533006.BO,Birla Cotsyn (India) Limited,BSE
 533007.BO,LGB Forge Limited,BSE
 533018.BO,SIMPLEX MILLS COMPANY LIMITED,BSE
 533019.BO,SIMPLEX PAPERS LTD.,BSE
@@ -1819,7 +1815,6 @@ ticker,name,exchange
 540174.BO,SOUTHERN INFOCONSULTANTS LIMITED,BSE
 540175.BO,REGENCY FINCORP LIMITED,BSE
 540181.BO,Salem Erode Investments Ltd.,BSE
-540189.BO,Unipro Technologies Limited,BSE
 540190.BO,Franklin Industries Limited,BSE
 540192.BO,LKP Securities Limited,BSE
 540198.BO,OSIAJEE TEXFAB LIMITED,BSE
@@ -3115,6 +3110,7 @@ CLEAN.NS,Clean Science and Technology Limited,NSE
 CLEANMAX.NS,Clean Max Enviro Energy Solutions Limited,NSE
 CLEDUCATE.NS,CL Educate Limited,NSE
 CLSEL.NS,Chaman Lal Setia Exports Limited,NSE
+CMLL.NS,Caliber Mining and Logistics Limited,NSE
 CMPDI.NS,Central Mine Planning & Design Institute Limited,NSE
 CMRGREEN.NS,CMR Green Technologies Limited,NSE
 CMSINFO.NS,CMS Info Systems Limited,NSE
