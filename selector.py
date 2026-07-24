@@ -1017,6 +1017,20 @@ DRIFT_SEVERITY = {
     "relative_rank":  "warning",
 }
 
+# Watchlist ceiling is WARNING. Severity measures capital at risk, and a watched
+# stock is not owned — nothing is at stake but an intention. Same shape as
+# DRIFT_SEVERITY otherwise: only the two labels that positively establish "the
+# business held" soften anything, and both "we could not tell" labels keep the
+# existing level.
+WATCHLIST_DRIFT_SEVERITY = {
+    "fundamental":    "warning",
+    "mixed":          "warning",
+    "unclear":        "warning",
+    "unknown_inputs": "warning",
+    "valuation":      "info",
+    "relative_rank":  "info",
+}
+
 
 def _on_conviction(trace: dict) -> bool:
     return bool(trace) and trace.get("slot_type") in _CONVICTION_SLOTS
