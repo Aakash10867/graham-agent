@@ -2984,6 +2984,11 @@ def _add_to_watchlist(rows) -> int:
         # the moment it was added. The CARD shows "3 of 4"; the DATABASE stores 3.
         "score_when_added": int(r["score"]) if pd.notna(r["score"]) else None,
         "quality_when_added": bool(r["quality_pass"]) if pd.notna(r["quality_pass"]) else None,
+        # The entry thesis. Without it a watchlist alert can only say the score
+        # moved, never why — classify_score_change would return unknown_inputs
+        # forever. Captured at add time because add-time facts cannot be
+        # reconstructed once the universe is rescored.
+        "entry_trace": selector.build_watch_trace(r),
     } for _, r in rows.iterrows() if r["ticker"] not in _have]
 
     if not _new:
@@ -6844,6 +6849,12 @@ if st.session_state.sb_view_mode == "chat":
                             "name": str(_wl_row["name"].iloc[0]) if not _wl_row.empty else _bare,
                             "score_when_added": int(_wl_row["score"].iloc[0]) if not _wl_row.empty and pd.notna(_wl_row["score"].iloc[0]) else None,
                             "quality_when_added": bool(_wl_row["quality_pass"].iloc[0]) if not _wl_row.empty and "quality_pass" in _wl_row.columns and pd.notna(_wl_row["quality_pass"].iloc[0]) else None,
+                            # See the bulk-add site: entry thesis, captured now
+                            # because it is unreconstructable later. None when
+                            # the ticker is not in today's universe — that is an
+                            # honest absence, and it labels as unknown_inputs.
+                            "entry_trace": (selector.build_watch_trace(_wl_row.iloc[0])
+                                            if not _wl_row.empty else None),
                         }
                         try:
                             _pw_sb.table("watchlist").insert(_wl_data).execute()
