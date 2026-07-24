@@ -9343,9 +9343,25 @@ elif st.session_state.sb_view_mode == "portfolios":
                                     st.session_state[f"_macro_diff_{port['id']}"] = {}
 
                                 enriched = build_review_context(holdings, port)
+                                # demand_tilt lives on the PROFILE, not inside
+                                # ips_policy, so the policy handed to the drift
+                                # re-selection lacked it — review re-ranked every
+                                # holding under different weights than the build
+                                # used. That manufactures drift: a stock flagged
+                                # "outranked" because the QUESTION changed, not
+                                # the company. Build and review must score by the
+                                # same rule or the diff is meaningless.
+                                # Falsy ips_policy stays falsy: compute_thesis_drift
+                                # treats that as "drift undefined", and a tilt
+                                # alone is not a mandate.
+                                _pp = port.get("portfolio_profile") or {}
+                                _ips_pol = _pp.get("ips_policy")
+                                if _ips_pol and _pp.get("demand_tilt"):
+                                    _ips_pol = {**_ips_pol,
+                                                "demand_tilt": _pp["demand_tilt"]}
                                 _drift = selector.compute_thesis_drift(
                                     holdings,
-                                    (port.get("portfolio_profile") or {}).get("ips_policy"),
+                                    _ips_pol,
                                     universe_df,
                                 )
                                 llm_recs = generate_review_recommendations(
