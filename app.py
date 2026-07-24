@@ -8170,7 +8170,22 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 actual = detail.get("actual_cagr_pct", 0)
                                 needed = detail.get("needed_cagr_pct", 0)
                                 months = detail.get("months_remaining", 0)
-                                st.markdown(f"Your portfolio is growing at {actual:.1f}% but needs {needed:.1f}% to hit your goal in {months} months. Consider increasing your SIP or reviewing your picks — but don't chase risk.")
+                                # Was: "Consider increasing your SIP or reviewing
+                                # your picks — but don't chase risk." That is a
+                                # recommendation about the user's money, which
+                                # this system does not make. What replaces it is
+                                # arithmetic, not counsel: a shortfall has
+                                # exactly three variables, and naming them is
+                                # strictly more useful than nominating one.
+                                st.markdown(
+                                    f"Your portfolio is growing at **{actual:.1f}%** "
+                                    f"against the **{needed:.1f}%** needed to reach "
+                                    f"your goal in {months} months.")
+                                st.caption(
+                                    "A gap like this closes in one of three ways: "
+                                    "contributing more, allowing more time, or earning "
+                                    "a higher return. The first two are yours to set. "
+                                    "The third is not.")
                                 if st.button("✗ Dismiss", key=f"goaldrift_dismiss_{a_id}", use_container_width=True):
                                     sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
                                     st.rerun()
