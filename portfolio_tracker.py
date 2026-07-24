@@ -1494,6 +1494,15 @@ def run_daily_tracker():
                 "greenblatt_pass": bool(row["greenblatt_pass"]) if pd.notna(row.get("greenblatt_pass")) else None,
                 "dorsey_pass": bool(row["dorsey_pass"]) if pd.notna(row.get("dorsey_pass")) else None,
                 "trajectory_pass": bool(row["trajectory_pass"]) if pd.notna(row.get("trajectory_pass")) else None,
+                # Recorded, not derived. It WAS recoverable as score minus the
+                # other four (deep_metrics.py:1426 defines score as the sum of
+                # exactly these five), and rows up to 2026-07-24 were backfilled
+                # that way. But that identity is an undocumented invariant: if
+                # score is ever redefined — to count only APPLICABLE frameworks,
+                # say, which selector already models — new rows would follow one
+                # rule and old rows another, with nothing recording which. An
+                # append-only audit trail should store what it observed.
+                "lynch_pass": bool(row["lynch_pass"]) if pd.notna(row.get("lynch_pass")) else None,
                 "pe": round(float(row["pe"]), 2) if pd.notna(row.get("pe")) else None,
                 "roe_pct": round(float(row["roe_pct"]), 2) if pd.notna(row.get("roe_pct")) else None,
                 "quality_pass": bool(row["quality_pass"]) if pd.notna(row.get("quality_pass")) else None,
