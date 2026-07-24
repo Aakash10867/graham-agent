@@ -1318,6 +1318,106 @@ def compute_thesis_drift(holdings, policy, universe_df, price_history=None):
                                still_investable=(tkr in pool))
     return out
 
+def _current_facts(universe_row):
+    """Today's comparison facts, plus which frameworks pass, from a universe row.
+
+    Shaped exactly like a _trace so entry and current sides go through identical
+    comparison logic in _classify_flip.
+    """
+    row = universe_row if universe_row is not None else {}
+
+    def _get(col):
+        try:
+            v = row.get(col)
+        except AttributeError:
+            return None
+        try:
+            if v is None or pd.isna(v):
+                return None
+        except (TypeError, ValueError):
+            pass
+        return v
+
+    current = {
+        "pe": _num(_get("pe"), 3),
+        "roe_pct": _num(_get("roe_pct"), 3),
+        "score_continuous": _num(_get("score_continuous")),
+        "fracs": {f: _num(_get(col)) for f, col in FRAC_COL.items()},
+    }
+    applicable = set(_applicable_frameworks(row))
+    passing = {f for f in FRAMEWORKS
+               if f in applicable and bool(_get(PASS_FLAG[f]))}
+    return current, applicable, passing
+
+
+def _label_flips(frameworks, entry, current, applicable):
+    """Per-framework labels for one direction, collapsed worst-case-wins."""
+    per = {}
+    for f in sorted(frameworks):
+        if f not in applicable:
+            # Scoreable at entry, not scoreable now (sector exclusion changed).
+            # Near-impossible, but it must not read as the business breaking.
+            per[f] = "unclear"
+        else:
+            per[f] = _classify_flip(f, entry, current)
+    if not per:
+        return {}, None
+    # Unrecognised labels sort as WORST, never mildest: if _classify_flip grows
+    # a label nobody mapped, the failure direction must be louder, not quieter.
+    reason = min(per.values(),
+                 key=lambda r: DRIFT_PRECEDENCE.index(r)
+                 if r in DRIFT_PRECEDENCE else -1)
+    return per, reason
+
+
+def classify_score_change(entry_trace: dict | None, universe_row) -> dict:
+    """Which frameworks flipped since entry, in BOTH directions, and why.
+
+    Shared by holdings (score_drop) and watchlist entries (score_up/down).
+    Path B: no selection re-run — entry_trace plus today's universe row is
+    everything needed.
+
+    Returns {"traceable": bool, "down": {...}, "up": {...}} where each
+    direction carries {frameworks, per_framework, reason}; "down" also carries
+    "severity".
+
+    reason is None when a direction has no flips. That is NOT "we could not
+    tell" — it is "nothing happened here". Only a caller that KNOWS a change
+    occurred can translate None into 'unclear', so that translation lives in
+    the caller, not here.
+
+    Severity is down-side only. There is no severity above 'info' for good
+    news, so on the up side the label shapes the MESSAGE and decides nothing.
+    """
+    current, applicable, passing = _current_facts(universe_row)
+    entry = entry_trace or {}
+    entry_passed = entry.get("passed")
+
+    if not isinstance(entry_passed, (list, tuple)) or not entry_passed:
+        # No recorded entry thesis. We cannot name a cause, and failing to name
+        # one must not be mistaken for naming a benign one.
+        blank = {"frameworks": [], "per_framework": {},
+                 "reason": "unknown_inputs"}
+        return {"traceable": False,
+                "down": {**blank, "severity": DRIFT_SEVERITY["unknown_inputs"]},
+                "up": dict(blank)}
+
+    ep = set(entry_passed) & set(FRAMEWORKS)
+    newly_failing = ep - passing
+    newly_passing = passing - ep
+
+    down_pf, down_reason = _label_flips(newly_failing, entry, current, applicable)
+    up_pf, up_reason = _label_flips(newly_passing, entry, current, applicable)
+
+    return {
+        "traceable": True,
+        "down": {"frameworks": sorted(newly_failing), "per_framework": down_pf,
+                 "reason": down_reason,
+                 "severity": DRIFT_SEVERITY.get(down_reason) if down_reason else None},
+        "up": {"frameworks": sorted(newly_passing), "per_framework": up_pf,
+               "reason": up_reason},
+    }
+
 
 def classify_score_drop(entry_trace: dict | None, universe_row) -> dict:
     """Why did this holding's score fall? Deterministic, no selection re-run.
