@@ -4696,6 +4696,14 @@ def get_sip_candidates(sip_amount: int, time_horizon: str, investor_type: str,
         "philosophy": philosophy,
         "acceptable_tradeoff": acceptable_tradeoff,
         "framework_weights": _fw or _ips.get("framework_weights") or {},
+        # THE tilt source. Without this key _resolve_weights falls silently to
+        # the legacy per-philosophy weights, and FRAMEWORK_AXIS_COMPOSITION —
+        # the whole W0 relative layer's route into selection — never runs.
+        # derive_demand_tilt() writes it onto the profile at build time and it
+        # is persisted to Supabase; it just never got copied into the policy.
+        # Same failure as the Q7/Q8/Q9 one documented below: computed, stored,
+        # never handed over.
+        "demand_tilt": _profile.get("demand_tilt") or {},
         "allocation_policy": _ips.get("allocation_policy", {}),
         "portfolio_sizing": _ips.get("portfolio_sizing", {}),
     }
