@@ -1361,6 +1361,28 @@ def run_daily_tracker():
 
                 wl_name = wl.get("name") or wl_ticker
 
+                # W1: why the score moved, BOTH directions, computed once — the
+                # up and down blocks below both read it.
+                #
+                # BASELINE IS ADD TIME. entry_trace is what we recorded when the
+                # stock was watched, so the label answers "is this better than
+                # when I flagged it" — the question a watchlist actually serves.
+                # The alert TRIGGERS are narrower (vs last-notified for up, vs
+                # yesterday for down), so headline and label can measure
+                # different spans. detail carries drift_baseline='added' so
+                # nothing downstream has to infer which.
+                try:
+                    _wl_drift = selector.classify_score_change(
+                        wl.get("entry_trace"), row.iloc[0])
+                except Exception as _e:
+                    # Never let classification suppress or soften an alert.
+                    print(f"  [W1] watchlist drift failed for {wl_ticker}: {_e}")
+                    _wl_blank = {"reason": "unknown_inputs", "frameworks": [],
+                                 "per_framework": {}}
+                    _wl_drift = {"traceable": False,
+                                 "down": {**_wl_blank, "severity": "warning"},
+                                 "up": dict(_wl_blank)}
+
                 def wl_alert(alert_type, headline, detail, book_key, *, severity):
                     if severity not in _SEVERITIES:
                         raise ValueError(
@@ -1394,7 +1416,19 @@ def run_daily_tracker():
                     all_alerts.append(wl_alert(
                         "watchlist_score_up",
                         f"👁 {wl_name} score improved {_last_notified} → {cur_score}/5",
-                        {"prev_score": _last_notified, "current_score": cur_score, "source": "watchlist"},
+                        {"prev_score": _last_notified, "current_score": cur_score, "source": "watchlist",
+                         # reason may be None: the score rose against
+                         # last-notified while the pass-set is unchanged since
+                         # ADD time. That is "nothing changed versus when you
+                         # flagged it", which is a real answer — not the same as
+                         # "we could not tell", so it is not coerced to unclear.
+                         "drift_reason": _wl_drift["up"]["reason"],
+                         "drift_frameworks": _wl_drift["up"]["frameworks"],
+                         "drift_per_framework": _wl_drift["up"]["per_framework"],
+                         "drift_baseline": "added"},
+                        # Severity stays info. There is no level above info for
+                        # good news, so here the label shapes the MESSAGE and
+                        # decides nothing.
                         "watchlist_score_up", severity="info"
                     ))
                     wl_alert_count += 1
@@ -1414,8 +1448,18 @@ def run_daily_tracker():
                     all_alerts.append(wl_alert(
                         "watchlist_score_down",
                         f"👁 {wl_name} score dropped {prev_score} → {cur_score}/5",
-                        {"prev_score": prev_score, "current_score": cur_score, "source": "watchlist"},
-                        "watchlist_score_down", severity="warning"
+                        {"prev_score": prev_score, "current_score": cur_score, "source": "watchlist",
+                         # None here means the add-time comparison shows no net
+                         # framework loss even though the score fell against
+                         # yesterday. We cannot explain that from what we track,
+                         # so it is genuinely unclear — which keeps warning.
+                         "drift_reason": _wl_drift["down"]["reason"] or "unclear",
+                         "drift_frameworks": _wl_drift["down"]["frameworks"],
+                         "drift_per_framework": _wl_drift["down"]["per_framework"],
+                         "drift_baseline": "added"},
+                        "watchlist_score_down",
+                        severity=selector.WATCHLIST_DRIFT_SEVERITY.get(
+                            _wl_drift["down"]["reason"] or "unclear", "warning")
                     ))
                     wl_alert_count += 1
 
