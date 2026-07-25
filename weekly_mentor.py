@@ -528,8 +528,19 @@ def build_plain_fallback(name, summaries, alerts, recommendations=None):
 
         lines.append("")
 
-    dangers = [a for a in alerts if a.get("alert_type") in ("danger", "overvalued", "goal_drift")]
-    others = [a for a in alerts if a.get("alert_type") not in ("danger", "overvalued", "goal_drift", "opportunity", "new_entry")]
+    # Severity-first. Before the alert_type/severity split, "danger" WAS an
+    # alert_type; now it is a value in the severity column and alert_type holds
+    # the real kind (score_drop, quality_fail, ...). 'overvalued' was deleted
+    # entirely. Grouping on the old strings silently classified ZERO alerts as
+    # serious and dropped every real danger into "also noting". goal_drift now
+    # varies danger/warning, so it lands here only when ITS severity is danger.
+    _EXCLUDED = ("opportunity", "new_entry")
+    dangers = [a for a in alerts
+               if a.get("severity") == "danger"
+               and a.get("alert_type") not in _EXCLUDED]
+    others = [a for a in alerts
+              if a.get("severity") != "danger"
+              and a.get("alert_type") not in _EXCLUDED]
 
     if dangers:
         lines.append("⚠️ Needs your attention:")
@@ -585,7 +596,9 @@ def build_subject(name, summaries, alerts):
             else:
                 return f"🔴 {name}, tough week {pct} — here's the bigger picture"
 
-    danger_count = sum(1 for a in alerts if a.get("alert_type") in ("danger", "overvalued", "goal_drift"))
+    danger_count = sum(1 for a in alerts
+                       if a.get("severity") == "danger"
+                       and a.get("alert_type") not in ("opportunity", "new_entry"))
     opp_count = 0  # Opportunities now handled by weekly recommendations
 
     if danger_count and opp_count:
