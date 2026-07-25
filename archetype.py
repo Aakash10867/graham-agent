@@ -211,11 +211,18 @@ CYCLICAL_INDUSTRIES = frozenset({
 # Conglomerates, Infrastructure Operations, Specialty Chemicals.
 
 
-# ─── Confidence gates (SPECIFICATIONS, not fitted parameters) ───
-# The two knobs most likely to need revisiting. Deliberately NOT tuned against
-# outcomes — that would be the falsification-vs-tuning line the project holds.
+# ─── Confidence gate (SPECIFICATION, not a fitted parameter) ───
+# Deliberately NOT tuned against outcomes — that is the falsification-vs-tuning
+# line the project holds.
+#
+# ONE gate, not two. An earlier design also rejected rows whose top two scores
+# were within a margin. That was wrong: weak evidence and a close call are
+# DIFFERENT situations. "No archetype fits" -> abstain. "Two archetypes fit
+# equally well" -> that is not ignorance, it is a DUAL LABEL, which is precisely
+# what the multi-archetype path exists for. Collapsing both into unclassified
+# put a ~2-point band of the growth measure (g ~ 13.5-15.5, where the
+# fast_grower and stalwart curves cross) into permanent abstention for no reason.
 MIN_EVIDENCE = 0.50   # the winner must have real evidence, not merely be least-weak
-MIN_MARGIN   = 0.15   # it must actually be winning, not tied within data noise
 SECONDARY_AT = 0.70   # runner-up is emitted as a dual label at >= this x top
 
 ARCHETYPES = ("cyclical", "fast_grower", "stalwart",
@@ -277,13 +284,25 @@ def _ev_fast_grower(data):
 def _ev_stalwart(data):
     """Lynch: large, established, ~10-12% growth, rides out recessions.
     BAND, not a ramp — a 19% grower is not more stalwart than a 12% grower;
-    above ~20% it is a fast grower and the evidence should decay to zero."""
+    above ~20% it is a fast grower and the evidence should decay to zero.
+
+    GROWTH MEASURE is min(rev_cagr, ni_cagr), not ni_cagr alone. NI growth above
+    revenue growth is margin expansion — finite, cannot compound indefinitely —
+    so the slower of the two is what the BUSINESS is doing. Gating on ni alone
+    put mature compounders in a dead zone (ABBOTINDIA: ni 17.8 / rev 9.0 scored
+    0.275 and fell to unclassified) — too fast for the stalwart band, not
+    qualifying as fast_grower because revenue lags. Same measure fast_grower
+    already ramps on."""
+    rev = _sf(data.get("revenue_cagr_3y"))
     ni = _sf(data.get("ni_cagr_3y"))
-    if ni is None or ni < 5 or ni >= 20:
+    if rev is None or ni is None:
         return 0.0
-    base = 0.5 + 0.5 * _ramp(ni, 5, 10)               # rises into Lynch's band
-    if ni > 12:
-        base *= _ramp_down(ni, 12, 20)                # decays out the top
+    g = min(rev, ni)
+    if g < 5 or g >= 20:
+        return 0.0
+    base = 0.5 + 0.5 * _ramp(g, 5, 10)                # rises into Lynch's band
+    if g > 12:
+        base *= _ramp_down(g, 12, 20)                 # decays out the top
     if not data.get("graham_adequate_size"):
         base *= 0.6                                   # Lynch's stalwarts are large
     if not data.get("graham_earnings_stable_4y"):
@@ -295,12 +314,18 @@ def _ev_slow_grower(data):
     """Lynch: large, old, sluggish, generous dividend. The DIVIDEND is the
     thesis — a no-dividend sluggish company is not a slow grower in Lynch's
     sense, it is something he would not own. Halving without it is deliberate:
-    such a stock should fall to unclassified and let Lynch abstain."""
+    such a stock should fall to unclassified and let Lynch abstain.
+
+    Growth measure is min(rev_cagr, ni_cagr) — see _ev_stalwart."""
+    rev = _sf(data.get("revenue_cagr_3y"))
     ni = _sf(data.get("ni_cagr_3y"))
-    if ni is None or ni >= 5:
+    if rev is None or ni is None:
+        return 0.0
+    g = min(rev, ni)
+    if g >= 5:
         return 0.0
     # Declining is not slow-growing: decays to 0 at -5% CAGR.
-    base = _ramp(ni, -5, 5)
+    base = _ramp(g, -5, 5)
     consec = _sf(data.get("dividend_consecutive_years"), 0) or 0
     if consec < 5:
         base *= 0.5
@@ -374,10 +399,13 @@ def assign_archetype(data):
         archetype_basis      : deterministic human-readable trace
 
     NOTE ON THE GATE: archetype_confidence is a summary number for display and
-    for the LLM to phrase. It is NOT the gate. The gate is the two explicit
-    conditions below (MIN_EVIDENCE on the top score AND MIN_MARGIN on the gap).
-    Do not later refactor this into a single threshold on confidence — they are
-    not equivalent.
+    for the LLM to phrase. It is NOT the gate. The gate is the single explicit
+    condition below (MIN_EVIDENCE on the top score). Confidence is
+    min(top_ev, margin), so a DUAL-LABELLED row reports LOW confidence even
+    though its evidence is strong. That is correct and deliberate: it reports
+    confidence in the PRIMARY label specifically, not in the classification as a
+    whole. Do NOT refactor this into a threshold on confidence — a near-tie
+    would then be rejected again, which is the bug this design removed.
     """
     # ── Cyclical is TERMINAL ──
     # The cyclical label exists specifically to fire WHEN THE FIRM LOOKS LIKE A
@@ -413,15 +441,6 @@ def assign_archetype(data):
             "archetype_confidence": round(top_ev, 4),
             "archetype_basis": (f"unclassified: best={top_name} ev={top_ev:.2f} "
                                 f"< MIN_EVIDENCE {MIN_EVIDENCE}"),
-        }
-    if margin < MIN_MARGIN:
-        return {
-            "archetype_primary": "unclassified",
-            "archetype_secondary": None,
-            "archetype_confidence": round(margin, 4),
-            "archetype_basis": (f"unclassified: {top_name} ev={top_ev:.2f} vs "
-                                f"{second_name} ev={second_ev:.2f}, margin "
-                                f"{margin:.2f} < MIN_MARGIN {MIN_MARGIN}"),
         }
 
     # Dual label. Used ONLY to SUPPRESS sign flips where primary and secondary
