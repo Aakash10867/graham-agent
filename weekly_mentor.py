@@ -424,11 +424,16 @@ Portfolio: {s['name']}{_paper_tag}
 
         line = f"- {a['headline']}{appeared}{passage_text}\n"
 
+        # Severity-first, same as build_plain_fallback. alert_type no longer
+        # carries "danger"/"overvalued" — severity does, and this block sorts
+        # what the CIO email leads with. On the OLD strings every score_drop and
+        # quality_fail fell into ALSO NOTING and the LLM was told to treat a real
+        # break as routine — on every weekly email, not just the fallback.
         a_type = a.get("alert_type", "")
-        if a_type in ("danger", "overvalued", "goal_drift"):
-            danger_block += line
-        elif a_type in ("opportunity", "new_entry"):
+        if a_type in ("opportunity", "new_entry"):
             opp_block += line
+        elif a.get("severity") == "danger":
+            danger_block += line
         else:
             info_block += line
 
