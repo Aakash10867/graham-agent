@@ -13,6 +13,11 @@ import math
 import pandas as pd
 from datetime import datetime, timezone
 
+# W2 archetype engine. HARD dependency, unlike the SOFT axis_scores import
+# further down: if this is missing, lynch_category cannot be derived and every
+# Lynch score downstream is silently wrong. Fail at import, not at row 3,000.
+from archetype import assign_archetype, lynch_category_from
+
 # ─── Constants ───
 INDIA_10Y_BOND_RATE = 7.0        # Hardcoded, stable
 ADEQUATE_SIZE_INR = 2_000_000_000  # ₹200Cr (PPP-adjusted from Graham's $100M)
@@ -958,34 +963,31 @@ def compute_manipulation_flags(data, income_stmt, bs, cashflow):
 # ─── 9. STOCK CLASSIFICATION (4 columns) ───
 
 def compute_classification(data):
-    """Compute Lynch category, debt health, lifecycle, and enterprising financial pass."""
+    """Lynch category (via the W2 archetype engine), debt health, lifecycle,
+    and enterprising financial pass."""
     ni_cagr = _sf(data.get("ni_cagr_3y"))
-    eps_cv = _sf(data.get("graham_eps_cv"))
-    ni = [_sf(data.get(f"net_income_y{i}")) for i in range(4)]
-    pb = _sf(data.get("pb"))
     de = _sf(data.get("de"))
-    market_cap = _sf(data.get("market_cap"))
-    net_cash = _sf(data.get("graham_net_cash"))
 
-    # Lynch Category
-    has_recent_loss = any(v is not None and v < 0 for v in ni[:2])
-    has_older_loss = any(v is not None and v < 0 for v in ni[2:])
-    recovering = has_older_loss and ni[0] is not None and ni[0] > 0
-
-    if recovering:
-        data["lynch_category"] = "turnaround"
-    elif eps_cv is not None and eps_cv > 0.5:
-        data["lynch_category"] = "cyclical"
-    elif pb and pb <= 0.67 and net_cash and net_cash > 0:
-        data["lynch_category"] = "asset_play"
-    elif ni_cagr is not None and ni_cagr > 15:
-        data["lynch_category"] = "fast_grower"
-    elif ni_cagr is not None and ni_cagr >= 5:
-        data["lynch_category"] = "stalwart"
-    elif ni_cagr is not None:
-        data["lynch_category"] = "slow_grower"
-    else:
-        data["lynch_category"] = "unknown"
+    # ── Lynch Category — W2: derived from the archetype engine ──
+    # The old priority-ordered ladder keyed `cyclical` off graham_eps_cv > 0.5,
+    # which split at the MEDIAN of the distribution it was splitting:
+    # pct(eps_cv > 0.5) ran 0.321-0.558 in EVERY sector, and the ordering was
+    # INVERTED (Technology 0.481 > Basic Materials 0.369). Cyclical share by
+    # sector spanned only 24.1%-34.9% across the whole economy. It was a coin
+    # flip, and it was load-bearing on lynch_score -> lynch_frac -> score.
+    # Turnaround held top precedence and fired on any rounding-error loss, so it
+    # also stole 660 rows from every other bucket. See archetype.py for the full
+    # diagnostic record and the estimability principle behind the replacement.
+    #
+    # ONE classifier, TWO consumers: lynch_score branches on lynch_category
+    # exactly as before — it simply stops receiving noise. Building a second
+    # classifier alongside the broken one would have let the two drift.
+    _arch = assign_archetype(data)
+    data["archetype_primary"] = _arch["archetype_primary"]
+    data["archetype_secondary"] = _arch["archetype_secondary"]
+    data["archetype_confidence"] = _arch["archetype_confidence"]
+    data["archetype_basis"] = _arch["archetype_basis"]
+    data["lynch_category"] = lynch_category_from(_arch["archetype_primary"])
 
     # Lynch Debt Health
     if de is None:
