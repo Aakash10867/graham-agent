@@ -383,7 +383,8 @@ VERDICT_EMOJI = {
 }
 
 
-def get_verdict_tier(score, quality_pass, pass_dict, manipulation_score=0):
+def get_verdict_tier(score, quality_pass, pass_dict, manipulation_score=0,
+                     n_applicable=5):
     """
     Deterministic verdict assignment. The LLM never overrides this.
 
@@ -393,6 +394,11 @@ def get_verdict_tier(score, quality_pass, pass_dict, manipulation_score=0):
         pass_dict: dict with graham_pass, greenblatt_pass, dorsey_pass,
                    trajectory_pass, lynch_pass (all bool)
         manipulation_score: int 0-10 (Schilit manipulation, higher = worse)
+        n_applicable: how many frameworks APPLY to this business (default 5).
+                      Greenblatt abstains on financials/utilities; Lynch
+                      abstains when the archetype engine cannot classify the
+                      business. Judging a stock against tests that were never
+                      applied to it is the error this parameter removes.
 
     Returns:
         str: one of STRONG BUY, BUY, CONDITIONAL BUY, WATCH, AVOID, SELL
@@ -401,8 +407,35 @@ def get_verdict_tier(score, quality_pass, pass_dict, manipulation_score=0):
     if not quality_pass:
         return "SELL"
 
+    # ── Normalise to a 5-framework equivalent ────────────────────────────
+    # Same FRACTION of applicable tests, matching selector._effective_gate,
+    # which scales the gate DOWN by exactly this ratio. 3 of 4 -> 4-equivalent,
+    # and _effective_gate(4, 4) == 3, so the two agree: 3 of 4 clears a 4+ gate
+    # and reads BUY. int(x + 0.5) rather than round() for the same reason given
+    # there — round() is banker's rounding and round(2.5) == 2.
+    #
+    # CEILING, deliberately asymmetric: a stock with fewer than 5 applicable
+    # frameworks CANNOT reach STRONG BUY. Proportional scaling may lift a
+    # verdict as far as BUY, but the top tier is a claim about unanimous
+    # agreement across the full evidence set, and 3 of 3 is not that — fewer
+    # tests is less evidence even at the same fraction. Same argument the
+    # correlation-cluster note makes: a 3/5 among correlated frameworks is a
+    # weaker signal than a 3/5 spread across independent ones.
+    _capped = False
+    try:
+        n_applicable = int(n_applicable)
+    except (TypeError, ValueError):
+        n_applicable = 5
+    if n_applicable < 1:
+        n_applicable = 5
+    if n_applicable < 5:
+        score = min(5, int(score * 5 / n_applicable + 0.5))
+        _capped = True
+
     # ── Score 5: STRONG BUY (or downgrade to BUY if manipulation borderline) ──
     if score == 5:
+        if _capped:
+            return "BUY"
         if manipulation_score is not None and manipulation_score > 3:
             return "BUY"  # Above clean threshold but below quality gate fail
         return "STRONG BUY"
