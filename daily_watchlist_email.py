@@ -29,6 +29,14 @@ from google import genai
 from supabase import create_client, Client
 import watchlist_reasons  # weekly rotating "reasons to buy" engine
 
+# score_label — the true denominator, from the one place that knows it.
+# selector imports only math/numpy/pandas (no Streamlit), so it is safe in a
+# headless Actions job. Degrades to a bare number rather than failing the send.
+try:
+    import selector
+except Exception:
+    selector = None
+
 
 APP_URL = "https://kordent.streamlit.app"
 GEMINI_MODELS = [
@@ -73,6 +81,7 @@ def enrich_watchlist(watchlist_items, universe_df, price_cache):
             "added_score": added_score,
             "added_quality": added_quality,
             "current_score": None,
+            "score_label": "?",
             "current_quality": None,
             "sector": "Unknown",
             "pe": None,
@@ -90,6 +99,16 @@ def enrich_watchlist(watchlist_items, universe_df, price_cache):
             if not row.empty:
                 r = row.iloc[0]
                 item["current_score"] = int(r["score"]) if pd.notna(r.get("score")) else None
+                # "3 of 4", not "3/5". Computed HERE because this is the only
+                # place the universe row is in scope; the three render sites
+                # below just read it. A framework that abstains was never
+                # applied, so counting it in the denominator states the stock
+                # failed a test it never took.
+                item["score_label"] = (
+                    selector.score_label(r, item["current_score"])
+                    if selector and item["current_score"] is not None
+                    else (str(item["current_score"])
+                          if item["current_score"] is not None else "?"))
                 item["current_quality"] = bool(r["quality_pass"]) if pd.notna(r.get("quality_pass")) else None
                 item["sector"] = str(r["sector"]) if pd.notna(r.get("sector")) else "Unknown"
                 item["pe"] = round(float(r["pe"]), 1) if pd.notna(r.get("pe")) else None
@@ -154,7 +173,7 @@ def build_mentor_prompt(name, stocks, alerts_for_user):
     # Stock summary block
     stock_block = ""
     for s in stocks:
-        score_line = f"{s['current_score']}/5" if s['current_score'] is not None else "?"
+        score_line = s.get("score_label") or "?"
         score_delta = ""
         if s['added_score'] is not None and s['current_score'] is not None:
             diff = s['current_score'] - s['added_score']
@@ -183,7 +202,7 @@ def build_mentor_prompt(name, stocks, alerts_for_user):
         if s.get("_show_improvement") and s.get("current_score") is not None:
             _dd = s.get("_improved_days")
             _when = "today" if _dd == 0 else (f"{_dd} days ago" if _dd else "recently")
-            reasons_line = f"THIS WEEK'S ANGLE — score improved to {s['current_score']}/5 {_when}."
+            reasons_line = f"THIS WEEK'S ANGLE — score improved to {s.get('score_label') or s['current_score']} {_when}."
         if s.get("_reasons"):
             _facts = "; ".join(s["_reasons"])
             reasons_line += (f" Also notable: {_facts}." if reasons_line
@@ -273,7 +292,7 @@ def build_plain_fallback(name, stocks, alerts):
     lines = [f"{name}, here's your daily watchlist update.\n"]
 
     for s in stocks:
-        score_str = f"{s['current_score']}/5" if s['current_score'] is not None else "?"
+        score_str = s.get("score_label") or "?"
         price_str = f"₹{s['current_price']:,.2f}" if s['current_price'] else "price unavailable"
 
         delta = ""
