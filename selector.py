@@ -342,10 +342,29 @@ def _applicable_frameworks(row) -> tuple:
 
     Result today: exactly ONE stock in Financial Services reaches 4/5, out of a
     universe where financials are a third of the index. Not a market fact — an
-    arithmetic ceiling of 4/5, judged against a 4+ gate."""
+    arithmetic ceiling of 4/5, judged against a 4+ gate.
+
+    W2 — the SAME principle now applies to LYNCH. His method is
+    categorise-then-evaluate: fast grower, stalwart, slow grower, cyclical,
+    turnaround, asset play. When the archetype engine cannot place a business in
+    any of them, the method does not run — there is no branch to score it on.
+    lynch_score has no else-branch, so an unclassified row silently took
+    lynch_frac = 0.0 and lynch_pass = False, which records "FAILED Lynch". It has
+    not failed Lynch; Lynch cannot evaluate it. Two different claims.
+
+    This is genuine INAPPLICABILITY, not missing data. Missing data already has
+    an honest path — it lowers the sub-score, which fails the boolean. An
+    unclassifiable business is a different thing: the framework takes no position
+    on it at all. Both exclusions can fire together, leaving 3 applicable;
+    _effective_gate holds it to the same FRACTION, so a 4+ gate becomes 2 of 3."""
+    excluded = set()
     if bool(row.get("greenblatt_sector_excluded", False)):
-        return tuple(f for f in FRAMEWORKS if f != "greenblatt")
-    return FRAMEWORKS
+        excluded.add("greenblatt")
+    if str(row.get("lynch_category") or "").strip() == "unknown":
+        excluded.add("lynch")
+    if not excluded:
+        return FRAMEWORKS
+    return tuple(f for f in FRAMEWORKS if f not in excluded)
 
 
 def _effective_gate(min_score: int, n_applicable: int) -> int:
