@@ -502,7 +502,11 @@ def render_score_history_chart(sb, ticker, stock_name=None, chart_key=None):
         line=dict(color="#1D4ED8", width=2),
         fill="tozeroy", fillcolor="rgba(29, 78, 216, 0.06)",
         name="Score",
-        hovertemplate="%{y}/5<extra>Score</extra>",
+        # No denominator: score_history rows carry the raw integer and no
+        # applicability columns, so the denominator for a PAST date is not
+        # reconstructable. Historical points also span the v3->v4 schema break.
+        # An unlabelled number is honest; a fabricated "/5" is not.
+        hovertemplate="Score %{y}<extra></extra>",
     ))
 
     # Quality-fail markers
@@ -1228,7 +1232,7 @@ def generate_portfolio_narrative(portfolio, holdings, collection, score_data=Non
  
         stocks_block += f"""
 --- {name} ({ticker}) ---
-Sector: {sector} | Allocation: {alloc}% | Score: {score}/5 | P&L: {pnl_pct:+.1f}%
+Sector: {sector} | Allocation: {alloc}% | Score: {score} | P&L: {pnl_pct:+.1f}%
 Frameworks: Graham={graham}, Greenblatt={greenblatt}, Dorsey={dorsey}, Trajectory={trajectory}, Quality={quality}
 Book context (use sparingly, in your own words): {book_text[:500]}
 """
@@ -1253,7 +1257,7 @@ PORTFOLIO THESIS
  
 Then for EACH stock, write a header line and ONE paragraph (4-6 sentences):
  
-Header format: Company Name (Sector · Score X/5 · XX% allocation)
+Header format: Company Name (Sector · Score N of M · XX% allocation)
  
 The paragraph must cover:
 1. WHY we hold this — connect to the specific frameworks that PASS (e.g. "Greenblatt and Trajectory pass, meaning the company is capital-efficient and on an upward trend")
@@ -1373,6 +1377,7 @@ def generate_health_check(portfolio, holdings, universe_df, collection):
             "name": h.get("name", ticker), "ticker": ticker, "sector": sector,
             "alloc": alloc, "beta": beta, "pe_vs_avg": pe_vs_avg,
             "pct_from_high": pct_from_high, "score": score,
+            "score_label": _score_label(ticker, score),
         })
 
     # ── Sector concentration (HHI) ──
@@ -1437,7 +1442,7 @@ def generate_health_check(portfolio, holdings, universe_df, collection):
     holdings_summary = "\n".join(
         f"  {e['name']} ({e['ticker']}) — Sector: {e['sector']}, Alloc: {e['alloc']}%, "
         f"Beta: {e['beta'] or 'N/A'}, PE vs Avg: {e['pe_vs_avg'] or 'N/A'}%, "
-        f"From 52w High: {e['pct_from_high'] or 'N/A'}%, Score: {e['score']}/5"
+        f"From 52w High: {e['pct_from_high'] or 'N/A'}%, Score: {e.get('score_label') or e['score']}"
         for e in enriched
     )
     # ── Find complementary stocks from universe ──
@@ -1467,6 +1472,7 @@ def generate_health_check(portfolio, holdings, universe_df, collection):
                 "name": str(r.get("name", r["ticker"])),
                 "sector": str(r.get("sector", "N/A")),
                 "score": int(r["score"]),
+                "score_label": selector.score_label(r),
                 "pe": round(float(r["pe"]), 2) if pd.notna(r.get("pe")) else None,
                 "roe_pct": round(float(r["roe_pct"]), 2) if pd.notna(r.get("roe_pct")) else None,
                 "pct_from_high": round(float(r["pct_from_high"]), 2) if pd.notna(r.get("pct_from_high")) else None,
@@ -1513,7 +1519,7 @@ Write a diagnostic with these sections:
 Be direct and specific. Reference actual holdings by name. Under 300 words total.
 
 COMPLEMENTARY CANDIDATES (stocks not in portfolio that could improve diversification):
-{chr(10).join(f"  {c['ticker']} — {c['name']} | Sector: {c['sector']} | Score: {c['score']}/5 | PE: {c['pe']} | ROE: {c['roe_pct']}%" for c in complement_candidates) if complement_candidates else "None available"}
+{chr(10).join(f"  {c['ticker']} — {c['name']} | Sector: {c['sector']} | Score: {c.get('score_label') or c['score']} | PE: {c['pe']} | ROE: {c['roe_pct']}%" for c in complement_candidates) if complement_candidates else "None available"}
 If the portfolio needs more holdings or sector diversity, recommend specific stocks from the candidates above in your ACTION ITEMS.
 
 After the narrative, on a new line, output a JSON block starting with ACTIONS_JSON: followed by a JSON array.
@@ -9541,7 +9547,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                         action = f"🔴 SELL ALL ({h['shares']})"
                                         sell_qty = h["shares"]
                                         reasoning = (
-                                            f"Score is 0/5 — all frameworks fail. "
+                                            f"Score is {_score_label(_sell_ticker, 0)} — every applicable framework fails. "
                                             f"No investment thesis exists. Redeploy capital."
                                         )
                                         confidence = "high"
@@ -9557,7 +9563,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                             action = f"🔴 SELL ALL ({h['shares']})"
                                             sell_qty = h["shares"]
                                             reasoning = (
-                                                f"Score dropped to 1/5 without Graham pass — "
+                                                f"Score dropped to {_score_label(_sell_ticker, 1)} without Graham pass — "
                                                 f"below the 2/4 buy threshold and no deep value "
                                                 f"exception applies. Thesis has eroded."
                                             )
