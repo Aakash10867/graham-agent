@@ -384,6 +384,44 @@ def _effective_gate(min_score: int, n_applicable: int) -> int:
     return max(1, int(min_score * n_applicable / len(FRAMEWORKS) + 0.5))
 
 
+def score_label(row, score=None) -> str:
+    """Render a composite score with its TRUE denominator: "3 of 4", not "3/5".
+
+    Every display surface must use this. Hardcoding "/5" states that a stock
+    failed a test that was never applied to it — the same error _effective_gate
+    and _applicable_frameworks exist to prevent, leaking back in at the last
+    inch. A financial does not fail Greenblatt; an unclassifiable business does
+    not fail Lynch.
+
+    ONLY THE DENOMINATOR MOVES. The raw integer `score` is the sum of five
+    *_pass booleans, and an abstaining framework's flag is already False, so it
+    contributes 0 to the numerator either way. That is why this is a pure
+    display fix and why nothing that WRITES a score has to change: the stored
+    value stays the raw 5-denominator integer that portfolio_tracker compares
+    against, exactly as documented at the watchlist insert site.
+
+    row   : a universe row (dict or Series) carrying greenblatt_sector_excluded
+            and lynch_category. A row missing them yields the full 5 — correct
+            for pre-v4 archive rows, which were scored under v3 semantics and
+            must not be retroactively reinterpreted.
+    score : numerator override, for callers holding a stored score whose row is
+            looked up separately. Defaults to row["score"].
+    """
+    if score is None:
+        try:
+            score = row.get("score")
+        except AttributeError:
+            score = None
+    try:
+        if score is None or pd.isna(score):
+            return "—"
+        score = int(score)
+    except (TypeError, ValueError):
+        return "—"
+    n = len(_applicable_frameworks(row if row is not None else {}))
+    return f"{score} of {n}"
+
+
 def _tier2(df: pd.DataFrame, policy: dict, rejects: dict):
     """Annotate EVERY investable stock with its gate arithmetic, then return
     (gated_pool, annotated_frame). The conviction sleeve needs the arithmetic
