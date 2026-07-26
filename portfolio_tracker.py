@@ -1202,12 +1202,21 @@ def run_daily_tracker():
                 "trajectory_pass": bool(opp_row.get("trajectory_pass")) if pd.notna(opp_row.get("trajectory_pass")) else False,
                 "lynch_pass": bool(opp_row.get("lynch_pass")) if pd.notna(opp_row.get("lynch_pass")) else False,
             }
-            opp_verdict = verdict_engine.get_verdict_tier(opp_score, True, opp_pass_dict)
+            # n_applicable, not the default 5: Greenblatt abstains on
+            # financials/utilities and Lynch on an unclassifiable business, so
+            # judging this row against five tests it never took would understate
+            # the verdict — and this one goes out by email, unreviewed.
+            _opp_n = len(selector._applicable_frameworks(opp_row))
+            opp_verdict = verdict_engine.get_verdict_tier(
+                opp_score, True, opp_pass_dict, n_applicable=_opp_n)
             opp_emoji = verdict_engine.VERDICT_EMOJI.get(opp_verdict, "")
 
             all_alerts.append(make_alert(
                 "opportunity", opp_row["ticker"],
-                f"{opp_emoji} {opp_row.get('name', opp_row['ticker'])} — {opp_verdict} ({opp_score}/5) — fits your {investor_type} profile",
+                # Headlines are STORED and rendered verbatim downstream, so a
+                # hardcoded /5 here outlives every render-side fix.
+                f"{opp_emoji} {opp_row.get('name', opp_row['ticker'])} — {opp_verdict} "
+                f"({selector.score_label(opp_row, opp_score)}) — fits your {investor_type} profile",
                 {"name": str(opp_row.get("name", opp_row["ticker"])),
                  "sector": str(opp_row.get("sector", "N/A")),
                  "price": stock_price,
