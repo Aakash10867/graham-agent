@@ -823,10 +823,25 @@ PASS_PATTERN_MEANINGS = {
 }
 
 
-def get_pattern_key(pass_dict):
+def get_pattern_key(pass_dict, abstained=()):
     """
-    Compute the pattern key for CONDITIONAL BUY (3/5) stocks.
+    Compute the pattern key for CONDITIONAL BUY (3-of-5-equivalent) stocks.
     Returns a key into PASS_PATTERN_MEANINGS or None.
+
+    abstained: framework names that do not APPLY to this business (Greenblatt on
+    financials/utilities; Lynch on an unclassifiable business model). Their
+    *_pass flags are False, so counting them as failures would both inflate the
+    failure count past 2 and describe a test that never ran as one the business
+    flunked.
+
+    NOTE — a deliberate gap, not an oversight. Excluding abstentions restores
+    the count, but PASS_PATTERN_MEANINGS is written over a FIVE-framework
+    vocabulary: "fails_graham_lynch" means Lynch evaluated the business and
+    rejected it. For an abstaining stock the honest key would be
+    "fails_graham + abstains_lynch", which is a DIFFERENT claim needing
+    different, book-sourced prose. Until that prose exists, such a stock gets
+    no pattern meaning at all. Returning None is true; returning a
+    five-framework meaning for a four-framework business is not.
     """
     frameworks = [
         ("graham", pass_dict.get("graham_pass", False)),
@@ -835,11 +850,20 @@ def get_pattern_key(pass_dict):
         ("trajectory", pass_dict.get("trajectory_pass", False)),
         ("lynch", pass_dict.get("lynch_pass", False)),
     ]
-    failing = [name for name, passed in frameworks if not passed]
-    if len(failing) == 2:
+    _abs = set(abstained or ())
+    failing = [name for name, passed in frameworks
+               if not passed and name not in _abs]
+    if len(failing) == 2 and not _abs:
         key = f"fails_{'_'.join(sorted(failing))}"
         return key if key in PASS_PATTERN_MEANINGS else None
     return None
+
+
+def get_pattern_meaning_for(pass_dict, abstained=()):
+    """Abstention-aware get_pattern_meaning. The original two-arg-less form is
+    kept below for callers that have no applicability information."""
+    key = get_pattern_key(pass_dict, abstained)
+    return PASS_PATTERN_MEANINGS[key] if key else None
 
 
 def get_pattern_meaning(pass_dict):
