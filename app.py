@@ -3842,6 +3842,30 @@ def load_universe(file_path: str):
 universe_df = load_universe(CSV_PATH)
 
 
+def _score_label(ticker, score=None) -> str:
+    """selector.score_label for a surface that holds a TICKER and a stored
+    score but not the universe row — the rebalance table and the action-item
+    card, both rendering from persisted JSON.
+
+    Applicability is resolved against TODAY's universe row, not the row as it
+    stood when the JSON was written. A user reading the card today should see
+    today's denominator; the stored numerator is untouched.
+
+    Falls back to the bare number, never to a fabricated "/5": if the ticker has
+    left the universe we do not know what applies to it, and inventing a
+    denominator is the exact error this function exists to remove.
+    """
+    if score is None:
+        return "—"
+    try:
+        _r = universe_df[universe_df["ticker"] == ticker]
+        if not _r.empty:
+            return selector.score_label(_r.iloc[0], score=score)
+    except Exception:
+        pass
+    return str(score)
+
+
 # ──────────────────────────────────────────────
 # TOOL FUNCTIONS
 # ──────────────────────────────────────────────
@@ -4608,11 +4632,19 @@ def find_investments(market: str) -> dict:
                 "rev_growth_pct": round(row["rev_growth"], 2) if pd.notna(row.get("rev_growth")) else "N/A",
                 "ni_growth_pct": round(row["ni_growth"], 2) if pd.notna(row.get("ni_growth")) else "N/A",
                 "debt_growth_pct": round(row["debt_growth"], 2) if pd.notna(row.get("debt_growth")) else "N/A",
-                "score": f"{int(row['score'])}/5",
-                "passed": [f for f in ["Graham", "Greenblatt", "Dorsey", "Trajectory"]
-                           if pd.notna(row.get(f"{f.lower()}_pass")) and row.get(f"{f.lower()}_pass")],
-                "failed": [f for f in ["Graham", "Greenblatt", "Dorsey", "Trajectory"]
-                           if pd.notna(row.get(f"{f.lower()}_pass")) and not row.get(f"{f.lower()}_pass")],
+                "score": selector.score_label(row),
+                # LYNCH WAS MISSING from both lists — a pre-existing bug, not a
+                # W2 one, but it meant the model never saw the fifth framework.
+                # Abstained frameworks appear in neither list: not passed, and
+                # emphatically not failed.
+                "passed": [f for f, c in _FW_COLS
+                           if c in selector._applicable_frameworks(row)
+                           and pd.notna(row.get(f"{c}_pass")) and row.get(f"{c}_pass")],
+                "failed": [f for f, c in _FW_COLS
+                           if c in selector._applicable_frameworks(row)
+                           and pd.notna(row.get(f"{c}_pass")) and not row.get(f"{c}_pass")],
+                "abstained": [f for f, c in _FW_COLS
+                              if c not in selector._applicable_frameworks(row)],
                 "years_of_data": int(row["years_of_data"]) if pd.notna(row.get("years_of_data")) else 0,
                 "pct_from_52w_high": round(row["pct_from_high"], 1) if pd.notna(row.get("pct_from_high")) else "N/A",
                 "pct_from_52w_low": round(row["pct_from_low"], 1) if pd.notna(row.get("pct_from_low")) else "N/A",
@@ -6922,7 +6954,7 @@ elif st.session_state.sb_view_mode == "watchlist":
                             _rec_rows.append({
                                 "Stock": _rs["name"],
                                 "Ticker": _rs["ticker"],
-                                "Score": f"{_rs['score']}/5",
+                                "Score": _score_label(_rs["ticker"], _rs.get("score")),
                                 "Verdict": _rs["verdict"],
                                 "Price": f"{fmt_inr(_rs['price'])}",
                                 "Shares": _rs["shares"],
@@ -7023,7 +7055,12 @@ elif st.session_state.sb_view_mode == "watchlist":
                                 elif _w_diff < 0:
                                     _w_delta_str = f"  ↓{abs(_w_diff)} since added"
                             st.markdown(f"**{_w_name}** ({_w_bare})")
-                            st.caption(f"Score: {_w_cur_score}/5{_w_delta_str} · {_w_sector} · PE {_w_pe} · PB {_w_pb} · Watching {_w_days}d")
+                            # Denominator from the live row. The DELTA stays a
+                            # raw-integer difference: score_when_added is stored
+                            # raw by design, so both sides share a scale.
+                            _w_lbl = (selector.score_label(_w_row.iloc[0], score=_w_cur_score)
+                                      if not _w_row.empty and _w_cur_score != "?" else f"{_w_cur_score}")
+                            st.caption(f"Score: {_w_lbl}{_w_delta_str} · {_w_sector} · PE {_w_pe} · PB {_w_pb} · Watching {_w_days}d")
     
                             # Quality flip warning
                             if _w_added_quality is not None and _w_cur_quality is not None and _w_added_quality != _w_cur_quality:
@@ -9046,7 +9083,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                             _suggested_qty = max(1, int(_budget / _live_price)) if _live_price > 0 else 1
 
                                             st.caption(
-                                                f"Sector: {act_sector} · Score: {act_score}/5 · "
+                                                f"Sector: {act_sector} · Score: {_score_label(act_ticker, act_score)} · "
                                                 f"PE: {act.get('pe', 'N/A')} · Price: {fmt_inr(_live_price, 2)} · "
                                                 f"Budget ({suggested_pct}% of {fmt_inr(_sip)}): {fmt_inr(_budget)}"
                                             )
