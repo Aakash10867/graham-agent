@@ -195,6 +195,21 @@ RANK_BAND = 0.05  # percentile points within which covariance may reorder
 CONVICTION_SLOTS = {4: 0, 3: 1, 2: 2}
 CONVICTION_MIN_PCT = 0.90
 
+# W2 sector-shrinkage strength: pct = w*pct_sector + (1-w)*pct_pool, w = n/(n+K).
+# SPECIFICATION, not fitted. A percentile's resolution is ~1/n, so below roughly
+# 20 observations a within-group percentile carries less information than the
+# parent distribution. K = 20 puts the crossover there.
+#
+# Interaction with CONVICTION_MIN_PCT, stated because it is NOT obvious: that
+# threshold is on the percentile VALUE, and shrinkage compresses small-sector
+# percentiles. Top-of-sector alone clears 0.90 only once n >= ~180. Below that,
+# a conviction pick must ALSO stand up pool-wide:
+#     n=9  -> needs pool pct >= 0.855      n=59  -> needs >= 0.605
+#     n=27 -> needs pool pct >= 0.765      n=100 -> needs >= 0.400
+# Intended. "Best of 9" is thinner evidence than "best of 400", and a
+# concentrated conviction bet is precisely where that distinction should bite.
+SECTOR_SHRINK_K = 20
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # TIER 1 — INVESTABILITY FLOOR
@@ -225,6 +240,22 @@ def _tier1(df: pd.DataFrame, sip_amount: float, rejects: dict) -> pd.DataFrame:
     # Structural: no sector => cannot be checked against max_same_sector or
     # min_sectors. Do not let these become an "Unknown" sector that spuriously
     # satisfies the breadth requirement.
+    # W2 — DECLARED, not incidental. This is not a rare edge case: 2,177 of
+    # 4,477 fresh rows (48.6%) have no sector, and the boundary is an EXCHANGE
+    # boundary, not a coverage gradient — yfinance classifies 2,300 of 2,387 NSE
+    # tickers and ZERO BSE-only listings (0 classified / 2,090 blank).
+    #
+    # Recovering it was considered and REJECTED. BSE's own INDUSTRY field is
+    # already parsed in universe_updater's listing fetch and dropped at the
+    # combine step, so the data is reachable — it is just not worth reaching
+    # for. Of those 2,177 rows, exactly NINE score >= 4 and ZERO score 5; 72.5%
+    # score 0 against 35.7% for classified rows; median market cap is ₹44 Cr
+    # with p75 at ₹130 Cr, i.e. three-quarters sit below the ₹200 Cr
+    # adequate-size floor. They score 0 because their cashflow statements are
+    # thin and _ramp fails closed on None — recovering the LABEL does not
+    # recover the FUNDAMENTALS. Worse, adding ~2,000 data-poor names to sector
+    # denominators would inflate every classified stock's percentile without
+    # adding information. Revisit only if BSE fundamental coverage improves.
     cut(df["sector"].notna(), "no_sector")
 
     # A row whose `name` is blank or a comma-mangled fragment is a corrupt CSV
@@ -402,9 +433,25 @@ def _tier3(df: pd.DataFrame, policy: dict) -> pd.DataFrame:
 
     Percentile rather than z-score: bounded, NaN-safe, and immune to the fat
     tails that riddle Indian small-cap fundamentals.
+
+    W2 — SHRUNK toward the pool. A raw within-sector percentile scores "best of
+    9" and "best of 400" identically at 1.00. In the post-tier1 pool the
+    smallest sector runs to 9 members and the median to 59, so this is not
+    hypothetical. Each sector percentile is blended with the pool-wide one:
+
+        pct = w * pct_sector + (1 - w) * pct_pool,   w = n / (n + K)
+
+    Order WITHIN a sector is unchanged: w is constant inside a sector and both
+    percentiles are monotone in the metric, so the blend is too. What changes is
+    the LEVEL — thin-sector stocks are pulled toward their pool standing, which
+    is the entire point. Sector breadth is protected by min_sectors /
+    max_same_sector in _tier2, not by inflated small-sector percentiles.
     """
     w = _resolve_weights(policy)
     df = _attach_applicable(df.copy())
+
+    _n_sector = df.groupby("sector")["ticker"].transform("size")
+    _w_sector = (_n_sector / (_n_sector + SECTOR_SHRINK_K)).fillna(0.0)
 
     for f in FRAMEWORKS:
         col = SUBSCORE_GRADED.get(f)
@@ -413,9 +460,13 @@ def _tier3(df: pd.DataFrame, policy: dict) -> pd.DataFrame:
         if col not in df.columns:
             df[f"_pct_{f}"] = 0.0
             continue
-        df[f"_pct_{f}"] = (df.groupby("sector")[col]
-                             .rank(pct=True, method="average", na_option="bottom")
-                             .fillna(0.0))
+        _p_sector = (df.groupby("sector")[col]
+                       .rank(pct=True, method="average", na_option="bottom")
+                       .fillna(0.0))
+        _p_pool = (df[col]
+                     .rank(pct=True, method="average", na_option="bottom")
+                     .fillna(0.0))
+        df[f"_pct_{f}"] = _w_sector * _p_sector + (1.0 - _w_sector) * _p_pool
 
     # Weight only over frameworks that APPLY to each stock, renormalized.
     # A financial ranked on 4 frameworks must not be penalised for the absent
