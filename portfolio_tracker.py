@@ -1374,7 +1374,6 @@ def run_daily_tracker():
                 try:
                     _wl_drift = selector.classify_score_change(
                         wl.get("entry_trace"), row.iloc[0])
-                _wl_archetype = str(row.iloc[0].get("lynch_category") or "")
                 except Exception as _e:
                     # Never let classification suppress or soften an alert.
                     print(f"  [W1] watchlist drift failed for {wl_ticker}: {_e}")
