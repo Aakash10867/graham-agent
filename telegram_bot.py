@@ -17,6 +17,15 @@ import requests
 import pandas as pd
 from supabase import create_client
 
+# score_label + PASS_FLAG: the denominator and the framework->column mapping live
+# in ONE place. selector imports only math/numpy/pandas — no Streamlit — so it is
+# safe in a headless Actions job. Degrades to a bare number if unavailable rather
+# than taking the bot down.
+try:
+    import selector
+except Exception:
+    selector = None
+
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 APP_URL = "https://kordent.streamlit.app"
@@ -193,10 +202,21 @@ def handle_score(supabase, chat_id, text, universe_df):
     sector = r.get("sector", "—")
     pe = f"{r['pe']:.1f}" if pd.notna(r.get("pe")) else "—"
 
+    # LYNCH WAS MISSING from this list entirely — the bot has never shown the
+    # fifth framework. An ABSTAINING framework renders as "—", not ❌: Greenblatt
+    # does not apply to financials/utilities and Lynch does not apply to a
+    # business his six categories cannot place. A ❌ says the stock was tested
+    # and failed, which for those rows is false.
+    _app = set(selector._applicable_frameworks(r)) if selector else None
     fw_lines = []
-    for label, key in [("Graham", "graham_pass"), ("Greenblatt", "greenblatt_pass"),
-                        ("Dorsey", "dorsey_pass"), ("Trajectory", "trajectory_pass")]:
-        if key in r and pd.notna(r[key]):
+    for label, fw, key in [("Graham", "graham", "graham_pass"),
+                           ("Greenblatt", "greenblatt", "greenblatt_pass"),
+                           ("Dorsey", "dorsey_buffett", "dorsey_pass"),
+                           ("Trajectory", "trajectory", "trajectory_pass"),
+                           ("Lynch", "lynch", "lynch_pass")]:
+        if _app is not None and fw not in _app:
+            fw_lines.append(f"  {label}: — (does not apply)")
+        elif key in r and pd.notna(r[key]):
             fw_lines.append(f"  {label}: {'✅' if r[key] else '❌'}")
 
     quality = ""
@@ -205,7 +225,7 @@ def handle_score(supabase, chat_id, text, universe_df):
 
     msg = (
         f"<b>{_html_esc(name)}</b> ({_html_esc(ticker)})\n\n"
-        f"Score: <b>{score}/5</b>\n"
+        f"Score: <b>{selector.score_label(r, score) if selector else score}</b>\n"
         f"Sector: {_html_esc(sector)}\n"
         f"PE: {_html_esc(pe)}\n\n"
         f"<b>Frameworks:</b>\n" + "\n".join(fw_lines)
@@ -245,9 +265,12 @@ def handle_watchlist(supabase, chat_id, universe_df):
         if universe_df is not None and not universe_df.empty:
             row = universe_df[universe_df["ticker"] == ticker]
             if not row.empty:
-                score = int(row["score"].iloc[0]) if pd.notna(row["score"].iloc[0]) else "?"
+                _sc = row["score"].iloc[0]
+                if pd.notna(_sc):
+                    score = (selector.score_label(row.iloc[0], int(_sc))
+                             if selector else f"{int(_sc)}")
         note_text = f" — {_html_esc(w['note'][:40])}" if w.get("note") else ""
-        lines.append(f"<b>{_html_esc(bare)}</b>  {score}/5{note_text}")
+        lines.append(f"<b>{_html_esc(bare)}</b>  {score}{note_text}")
 
     lines.append(f"\n<a href='{APP_URL}'>Open Kordent</a>")
     send_message(chat_id, "\n".join(lines))
