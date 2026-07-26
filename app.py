@@ -9543,11 +9543,20 @@ elif st.session_state.sb_view_mode == "portfolios":
                                     # ── DETERMINISTIC BELOW-THRESHOLD OVERRIDE ──
                                     # Score 0 = no thesis. Score 1 without Graham = below buy threshold.
                                     # Both warrant exit. Score 1 WITH Graham = deep value exception, hold.
+                                    #
+                                    # KNOWN GAP, deliberately not fixed here: these branches compare the
+                                    # RAW integer, so 1-of-3 and 1-of-5 both force a sell even though the
+                                    # former is a 2-of-5 equivalent. Same normalisation the verdict ladder
+                                    # now applies. Changing a SELL TRIGGER is a decision, not a display
+                                    # fix, so it is carved out rather than slipped in here. The reasoning
+                                    # text below is corrected either way — a user reading "0 of 3" is
+                                    # being told the truth about what was tested.
                                     if h["now_score"] == 0 and "SELL" not in action:
                                         action = f"🔴 SELL ALL ({h['shares']})"
                                         sell_qty = h["shares"]
                                         reasoning = (
-                                            f"Score is {_score_label(_sell_ticker, 0)} — every applicable framework fails. "
+                                            f"Score is {_score_label(h['ticker'], 0)} — every applicable "
+                                            f"framework fails. "
                                             f"No investment thesis exists. Redeploy capital."
                                         )
                                         confidence = "high"
@@ -9563,8 +9572,8 @@ elif st.session_state.sb_view_mode == "portfolios":
                                             action = f"🔴 SELL ALL ({h['shares']})"
                                             sell_qty = h["shares"]
                                             reasoning = (
-                                                f"Score dropped to {_score_label(_sell_ticker, 1)} without Graham pass — "
-                                                f"below the 2/4 buy threshold and no deep value "
+                                                f"Score dropped to {_score_label(h['ticker'], 1)} without "
+                                                f"Graham pass — below the buy threshold and no deep value "
                                                 f"exception applies. Thesis has eroded."
                                             )
                                             confidence = "high"
