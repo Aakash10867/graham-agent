@@ -3842,6 +3842,16 @@ def load_universe(file_path: str):
 universe_df = load_universe(CSV_PATH)
 
 
+# Display name -> FRAMEWORKS key. The COLUMN comes from selector.PASS_FLAG, not
+# from the key: "dorsey_buffett" maps to column "dorsey_pass", so building the
+# name by concatenation is wrong. The old list here was four hardcoded labels
+# lower()'d into column names — which silently dropped Lynch (no entry at all)
+# and would have dropped Dorsey the moment anyone used the real key.
+_FW_COLS = (("Graham", "graham"), ("Greenblatt", "greenblatt"),
+            ("Dorsey", "dorsey_buffett"), ("Trajectory", "trajectory"),
+            ("Lynch", "lynch"))
+
+
 def _score_label(ticker, score=None) -> str:
     """selector.score_label for a surface that holds a TICKER and a stored
     score but not the universe row — the rebalance table and the action-item
@@ -4618,6 +4628,7 @@ def find_investments(market: str) -> dict:
     def to_list(tier_df, max_n=10):
         entries = []
         for _, row in tier_df.head(max_n).iterrows():
+            _app = set(selector._applicable_frameworks(row))
             entries.append({
                 "ticker": row["ticker"],
                 "name": row.get("name", row["ticker"]) if pd.notna(row.get("name")) else row["ticker"],
@@ -4633,18 +4644,17 @@ def find_investments(market: str) -> dict:
                 "ni_growth_pct": round(row["ni_growth"], 2) if pd.notna(row.get("ni_growth")) else "N/A",
                 "debt_growth_pct": round(row["debt_growth"], 2) if pd.notna(row.get("debt_growth")) else "N/A",
                 "score": selector.score_label(row),
-                # LYNCH WAS MISSING from both lists — a pre-existing bug, not a
-                # W2 one, but it meant the model never saw the fifth framework.
-                # Abstained frameworks appear in neither list: not passed, and
+                # LYNCH WAS MISSING from both lists — pre-existing, not a W2
+                # bug, but it meant the model never saw the fifth framework.
+                # Abstained frameworks appear in NEITHER list: not passed, and
                 # emphatically not failed.
-                "passed": [f for f, c in _FW_COLS
-                           if c in selector._applicable_frameworks(row)
-                           and pd.notna(row.get(f"{c}_pass")) and row.get(f"{c}_pass")],
-                "failed": [f for f, c in _FW_COLS
-                           if c in selector._applicable_frameworks(row)
-                           and pd.notna(row.get(f"{c}_pass")) and not row.get(f"{c}_pass")],
-                "abstained": [f for f, c in _FW_COLS
-                              if c not in selector._applicable_frameworks(row)],
+                "passed": [f for f, k in _FW_COLS if k in _app
+                           and pd.notna(row.get(selector.PASS_FLAG[k]))
+                           and row.get(selector.PASS_FLAG[k])],
+                "failed": [f for f, k in _FW_COLS if k in _app
+                           and pd.notna(row.get(selector.PASS_FLAG[k]))
+                           and not row.get(selector.PASS_FLAG[k])],
+                "abstained": [f for f, k in _FW_COLS if k not in _app],
                 "years_of_data": int(row["years_of_data"]) if pd.notna(row.get("years_of_data")) else 0,
                 "pct_from_52w_high": round(row["pct_from_high"], 1) if pd.notna(row.get("pct_from_high")) else "N/A",
                 "pct_from_52w_low": round(row["pct_from_low"], 1) if pd.notna(row.get("pct_from_low")) else "N/A",
