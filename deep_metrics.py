@@ -356,21 +356,56 @@ def compute_valuation(data, info, income_stmt, cashflow, bs, shares):
     total_debt = _sf(info.get("totalDebt"))
     total_cash = _sf(info.get("totalCash"))
 
-    # D7a: PE on 3Y average EPS
+    # D7a: PE on average EPS. NB the column is named graham_pe_3y_avg but the
+    # input is graham_avg_eps_4y — a FOUR-year average. The name is legacy and
+    # kept for archive compatibility; the value has always been 4y.
     if price and avg_eps and avg_eps > 0:
         data["graham_pe_3y_avg"] = round(price / avg_eps, 2)
     else:
         data["graham_pe_3y_avg"] = None
+    # Local alias so D7c below reads on the averaged basis, not trailing `pe`.
+    pe_avg_eps = _sf(data.get("graham_pe_3y_avg"))
 
-    # D7c: PE × PB composite
-    if pe and pe > 0 and pb and pb > 0:
-        data["graham_pe_pb_composite"] = round(pe * pb, 2)
+    # ── D7c / D8 on AVERAGED earnings (W2 step 7) ────────────────────────
+    # Graham's D7 is stated on AVERAGE earnings, and the averaging is not a
+    # detail — it IS his anti-cyclical-value-trap device. Trailing PE at the top
+    # of a cycle reads cheap precisely when earnings are about to fall. Both
+    # tests previously used trailing eps/pe; both now use graham_avg_eps_4y via
+    # graham_pe_3y_avg, computed just above.
+    #
+    # NO FALLBACK to trailing when the average is missing. Substituting the
+    # unaveraged number would reintroduce the exact error the change removes,
+    # and it is not needed: coverage IMPROVES on net (see below).
+    #
+    # ── MEASURED EFFECT, 4,477 fresh rows, pre-change snapshot ───────────
+    # D8 PASSES its falsification test: pass->fail rate 4.8% on declared
+    # cyclicals vs 2.1% elsewhere — 2.3x, i.e. it strips more false cheapness
+    # from cyclicals, which is what the peak-earnings argument predicts.
+    #
+    # D7c DOES NOT: 4.8% cyclical vs 5.9% non-cyclical — it bites slightly LESS
+    # on cyclicals. Shipped on BOOK FIDELITY ALONE, not on demonstrated efficacy.
+    # Two readings we cannot separate: (a) this snapshot contains no cyclical
+    # peak (Indian steel revenue was ~flat 2022-26), so a cross-sectional test
+    # is underpowered for a peak-detector; (b) D7c is a PRODUCT with P/B, so
+    # fixing one factor dilutes the signal. Recorded rather than glossed.
+    #
+    # The larger win is D8 COVERAGE, and it is a fail-closed bug, not a
+    # refinement: trailing eps>0 held for 44.0% of rows, averaged eps>0 for
+    # 74.4%. A firm with one loss year had no trailing EPS, so graham_number was
+    # None and D8 scored 0 — reading as "fails Graham's price test" when it
+    # meant "not computable". 1,368 rows GAIN the test; 98 lose it.
+    # Net repricing: 694 rows (15.5%) move on graham_defensive_score, of which
+    # only 23 currently score >= 4.
+    if pe_avg_eps and pe_avg_eps > 0 and pb and pb > 0:
+        data["graham_pe_pb_composite"] = round(pe_avg_eps * pb, 2)
     else:
         data["graham_pe_pb_composite"] = None
 
-    # D8: Graham Number
-    if eps and eps > 0 and bvps and bvps > 0:
-        data["graham_number"] = round((22.5 * eps * bvps) ** 0.5, 2)
+    # D8: Graham Number on average EPS. Conventionally quoted with trailing EPS,
+    # but the 22.5 constant is 15 P/E x 1.5 P/B and inherits D7's averaged-
+    # earnings basis, so trailing was the inconsistency.
+    if avg_eps and avg_eps > 0 and bvps and bvps > 0:
+        data["graham_number"] = round((22.5 * avg_eps * bvps) ** 0.5, 2)
     else:
         data["graham_number"] = None
 
