@@ -1374,9 +1374,11 @@ def run_daily_tracker():
                 try:
                     _wl_drift = selector.classify_score_change(
                         wl.get("entry_trace"), row.iloc[0])
+                _wl_archetype = str(row.iloc[0].get("lynch_category") or "")
                 except Exception as _e:
                     # Never let classification suppress or soften an alert.
                     print(f"  [W1] watchlist drift failed for {wl_ticker}: {_e}")
+                    _wl_archetype = ""
                     _wl_blank = {"reason": "unknown_inputs", "frameworks": [],
                                  "per_framework": {}}
                     _wl_drift = {"traceable": False,
@@ -1415,7 +1417,11 @@ def run_daily_tracker():
                 if cur_score is not None and _last_notified is not None and cur_score > _last_notified:
                     all_alerts.append(wl_alert(
                         "watchlist_score_up",
-                        f"👁 {wl_name} score improved {_last_notified} → {cur_score}/5",
+                        # Denominator from the live row — headlines are STORED and
+                        # rendered verbatim downstream, so a hardcoded /5 here
+                        # outlives every render-side fix.
+                        f"👁 {wl_name} score improved {_last_notified} → "
+                        f"{selector.score_label(row.iloc[0], cur_score)}",
                         {"prev_score": _last_notified, "current_score": cur_score, "source": "watchlist",
                          # reason may be None: the score rose against
                          # last-notified while the pass-set is unchanged since
@@ -1447,7 +1453,8 @@ def run_daily_tracker():
                 if cur_score is not None and prev_score is not None and cur_score < prev_score:
                     all_alerts.append(wl_alert(
                         "watchlist_score_down",
-                        f"👁 {wl_name} score dropped {prev_score} → {cur_score}/5",
+                        f"👁 {wl_name} score dropped {prev_score} → "
+                        f"{selector.score_label(row.iloc[0], cur_score)}",
                         {"prev_score": prev_score, "current_score": cur_score, "source": "watchlist",
                          # None here means the add-time comparison shows no net
                          # framework loss even though the score fell against
@@ -1458,8 +1465,17 @@ def run_daily_tracker():
                          "drift_per_framework": _wl_drift["down"]["per_framework"],
                          "drift_baseline": "added"},
                         "watchlist_score_down",
-                        severity=selector.WATCHLIST_DRIFT_SEVERITY.get(
-                            _wl_drift["down"]["reason"] or "unclear", "warning")
+                        # W2: archetype conditions SEVERITY, never the label.
+                        # For a cyclical, "valuation" inverts — a falling PE with
+                        # fundamentals intact is the peak-earnings signature, not
+                        # a discount. HARDEN-ONLY, and the watchlist ceiling
+                        # still caps it at warning (a watched stock is not owned).
+                        severity=selector.apply_archetype_severity(
+                            selector.WATCHLIST_DRIFT_SEVERITY.get(
+                                _wl_drift["down"]["reason"] or "unclear", "warning"),
+                            _wl_archetype,
+                            _wl_drift["down"]["reason"] or "unclear",
+                            ceiling="warning")
                     ))
                     wl_alert_count += 1
 
@@ -1586,7 +1602,8 @@ def run_daily_tracker():
                             "alert_type": "new_entry",
                             "severity": "info",
                             "ticker": nr["ticker"],
-                            "headline": f"{nr.get('name', nr['ticker'])} new to radar at score {int(nr['score'])}/5",
+                            "headline": (f"{nr.get('name', nr['ticker'])} new to radar at "
+                                         f"score {selector.score_label(nr, int(nr['score']))}"),
                             "detail": {
                                 "name": str(nr.get("name", nr["ticker"])),
                                 "score": int(nr["score"]),
