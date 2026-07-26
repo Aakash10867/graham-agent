@@ -1371,13 +1371,18 @@ def run_daily_tracker():
                 # yesterday for down), so headline and label can measure
                 # different spans. detail carries drift_baseline='added' so
                 # nothing downstream has to infer which.
+                # W2: archetype for the severity floor below. Own try/except —
+                # a missing column must never suppress the drift call that follows.
+                try:
+                    _wl_archetype = str(row.iloc[0].get("lynch_category") or "")
+                except Exception:
+                    _wl_archetype = ""
                 try:
                     _wl_drift = selector.classify_score_change(
                         wl.get("entry_trace"), row.iloc[0])
                 except Exception as _e:
                     # Never let classification suppress or soften an alert.
                     print(f"  [W1] watchlist drift failed for {wl_ticker}: {_e}")
-                    _wl_archetype = ""
                     _wl_blank = {"reason": "unknown_inputs", "frameworks": [],
                                  "per_framework": {}}
                     _wl_drift = {"traceable": False,
