@@ -5008,6 +5008,11 @@ def get_csv_financial_data(ticker: str) -> dict:
 
         _app_set = set(selector._applicable_frameworks(row))
         _n_app = len(_app_set)
+        # Short names: get_pattern_key and _get_failure_principles use "dorsey",
+        # FRAMEWORKS uses "dorsey_buffett". Bound HERE because both
+        # get_pass_pattern_reasoning and get_pattern_meaning_for consume it below.
+        _abstained = tuple("dorsey" if f == "dorsey_buffett" else f
+                           for f in selector.FRAMEWORKS if f not in _app_set)
         verdict = verdict_engine.get_verdict_tier(score, quality_pass, pass_dict,
                                                   manip, n_applicable=_n_app)
         verdict_reason = verdict_engine.get_verdict_reason(verdict, score, pass_dict, manip)
@@ -5028,8 +5033,6 @@ def get_csv_financial_data(ticker: str) -> dict:
         # Gate on the NORMALISED verdict, not the raw integer: a 2-of-4 stock is
         # a CONDITIONAL BUY and should be explained like one. get_pattern_meaning_for
         # returns None when any framework abstained — see its docstring.
-        _abstained = tuple("dorsey" if f == "dorsey_buffett" else f
-                           for f in selector.FRAMEWORKS if f not in _app_set)
         pattern_meaning = (verdict_engine.get_pattern_meaning_for(pass_dict, _abstained)
                            if verdict == "CONDITIONAL BUY" else None)
 
