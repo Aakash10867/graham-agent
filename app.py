@@ -5022,7 +5022,8 @@ def get_csv_financial_data(ticker: str) -> dict:
         except Exception:
             pass
 
-        book_reasoning = verdict_engine.get_pass_pattern_reasoning(score, pass_dict, verdict, philosophy)
+        book_reasoning = verdict_engine.get_pass_pattern_reasoning(
+            score, pass_dict, verdict, philosophy, abstained=_abstained)
         deep_formatted = verdict_engine.format_deep_metrics_for_llm(row)
         # Gate on the NORMALISED verdict, not the raw integer: a 2-of-4 stock is
         # a CONDITIONAL BUY and should be explained like one. get_pattern_meaning_for
