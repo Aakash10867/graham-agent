@@ -31,7 +31,20 @@ import deep_metrics
 # History:
 #   1  2026-07-10  dividend_yield fraction->percent fix; trajectory_pass >= 8
 # ──────────────────────────────────────────────
-SCHEMA_VERSION = 3   # v3: + relative axis scores (quality/growth/price/safety)
+SCHEMA_VERSION = 4   # v4: W2 archetype engine — lynch_category REDEFINED
+# ── v3 -> v4 IS A DECLARED BREAK, NOT AN ADDITION ──────────────────────
+# lynch_category is no longer computed by the old priority ladder, whose
+# cyclical branch keyed off graham_eps_cv > 0.5 — empirically a coin flip
+# (pct > 0.5 ran 0.321-0.558 in EVERY sector; ordering INVERTED, Technology
+# 0.481 > Basic Materials 0.369). It feeds lynch_score -> lynch_frac -> score.
+# Measured on the pre-break CSV (4,477 fresh rows):
+#     cyclical    1,648 -> 888     turnaround   660 -> 221
+#     slow_grower   653 ->  50     unknown      360 -> 2,327
+#     rows changing lynch_category: 3,128 (69.9%)
+# Cohorts archived under schema_version <= 3 are NOT comparable to v4 on
+# lynch_category, lynch_frac, lynch_pass, score, or score_continuous. A backtest
+# spanning the boundary must exclude v3 rows or treat the two sides as separate
+# experiments. Cross-sectional comparisons WITHIN one schema_version stay valid.
 
 import random
 
@@ -1193,6 +1206,9 @@ def main():
         # Classification
         "lynch_category", "lynch_debt_healthy", "mulford_lifecycle_stage",
         "graham_ent_financial_pass",
+        # W2 archetype — lynch_category above is DERIVED from archetype_primary
+        "archetype_primary", "archetype_secondary", "archetype_confidence",
+        "archetype_basis",
         # Spectrum Scores
         "graham_defensive_score", "graham_enterprising_score", "greenblatt_score",
         "dorsey_buffett_score", "dorsey_10min_score", "lynch_score",
@@ -1216,7 +1232,17 @@ def main():
 
     df = pd.DataFrame(scored_results)
 
-    # Only keep columns that exist
+    # Only keep columns that exist. This silently DROPS anything absent, which
+    # is fine for optional columns but would hide a broken archetype engine —
+    # the CSV would simply lack the column and nothing would complain. The whole
+    # point of the v4 break is that these reach the archive, so check loudly.
+    _missing_arch = [c for c in ("archetype_primary", "lynch_category")
+                     if c not in df.columns]
+    if _missing_arch:
+        raise RuntimeError(
+            f"[GUARD] FATAL: archetype columns absent from scored results: "
+            f"{_missing_arch}. compute_classification did not run or "
+            f"archetype.py failed. Refusing to write a v4 CSV without them.")
     columns = [c for c in columns if c in df.columns]
     df = df[columns].sort_values("ticker").reset_index(drop=True)
 
