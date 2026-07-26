@@ -291,14 +291,22 @@ BOOK_PRINCIPLES = {
 #
 # These are layered: failure-specific + pass-specific + score-specific + verdict-specific.
 
-def _get_failure_principles(pass_dict):
-    """Return principles triggered by specific framework FAILURES."""
+def _get_failure_principles(pass_dict, abstained=()):
+    """Return principles triggered by specific framework FAILURES.
+
+    An ABSTAINING framework triggers nothing. Its *_pass flag is False, so
+    `if not l` would otherwise inject a principle about a judgement that was
+    never made — a wrong reason attached to a right verdict, occupying one of
+    only six principle slots. This has misfired on Greenblatt for every
+    financial since well before the archetype work; the Lynch case is new.
+    """
     principles = []
-    g = pass_dict.get("graham_pass", False)
-    gb = pass_dict.get("greenblatt_pass", False)
-    d = pass_dict.get("dorsey_pass", False)
-    t = pass_dict.get("trajectory_pass", False)
-    l = pass_dict.get("lynch_pass", False)
+    _abs = set(abstained or ())
+    g = pass_dict.get("graham_pass", False) or "graham" in _abs
+    gb = pass_dict.get("greenblatt_pass", False) or "greenblatt" in _abs
+    d = pass_dict.get("dorsey_pass", False) or "dorsey" in _abs
+    t = pass_dict.get("trajectory_pass", False) or "trajectory" in _abs
+    l = pass_dict.get("lynch_pass", False) or "lynch" in _abs
 
     if not g:
         principles.extend(["marks_p2_price_value", "fisher_p6_high_pe_not_overpriced"])
@@ -531,10 +539,18 @@ def get_verdict_reason(verdict, score, pass_dict, manipulation_score=0):
 # 4. PASS-PATTERN REASONING RETRIEVAL
 # ═══════════════════════════════════════════
 
-def get_pass_pattern_reasoning(score, pass_dict, verdict, philosophy=None):
+def get_pass_pattern_reasoning(score, pass_dict, verdict, philosophy=None,
+                               abstained=()):
     """
     Returns a formatted string of relevant book principles for the LLM,
     selected by the specific pass/fail pattern and verdict tier.
+
+    NOTE: `score` is accepted for signature compatibility and is NOT read —
+    every layer below keys off pass_dict, verdict, and philosophy. Left in
+    place rather than removed so existing positional callers keep working.
+
+    abstained: framework short names that do not apply (see
+    _get_failure_principles). Empty tuple reproduces the previous behaviour.
 
     The LLM receives this as [BOOK_REASONING] in the system prompt and uses
     it to explain WHY the verdict makes sense (or what conditions would change it).
@@ -551,8 +567,8 @@ def get_pass_pattern_reasoning(score, pass_dict, verdict, philosophy=None):
     # Collect all triggered principle keys (with deduplication)
     triggered = []
 
-    # Layer 1: failure-specific
-    triggered.extend(_get_failure_principles(pass_dict))
+    # Layer 1: failure-specific. Abstentions are not failures.
+    triggered.extend(_get_failure_principles(pass_dict, abstained))
 
     # Layer 2: pass-specific
     triggered.extend(_get_pass_principles(pass_dict))
