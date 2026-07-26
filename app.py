@@ -5006,7 +5006,9 @@ def get_csv_financial_data(ticker: str) -> dict:
         quality_pass = bool(row.get("quality_pass")) if row.get("quality_pass") != "N/A" else False
         manip = int(row.get("schilit_manipulation_score", 0)) if row.get("schilit_manipulation_score") != "N/A" else 0
 
-        verdict = verdict_engine.get_verdict_tier(score, quality_pass, pass_dict, manip)
+        _n_app = len(selector._applicable_frameworks(row))
+        verdict = verdict_engine.get_verdict_tier(score, quality_pass, pass_dict,
+                                                  manip, n_applicable=_n_app)
         verdict_reason = verdict_engine.get_verdict_reason(verdict, score, pass_dict, manip)
 
         # Get user's investment philosophy if available (from active portfolio profile)
@@ -6056,12 +6058,18 @@ When you call get_csv_financial_data, the response includes:
 VERDICT PROTOCOL — MANDATORY:
 The verdict tier in _verdict_tier is DETERMINISTIC. You MUST use it. NEVER override it.
 Your job is to EXPLAIN the verdict, not decide it. The rules are:
-- STRONG BUY (5/5 + clean): All frameworks agree, quality gate passes, no red flags.
-- BUY (4/5 or 5/5 with borderline manipulation): Strong consensus with one minor gap.
-- CONDITIONAL BUY (3/5 + quality pass): Frameworks disagree. YOU must explain the thesis AND the invalidation conditions. Read _pass_pattern_meaning and _book_reasoning for guidance.
-- WATCH (2/5 with Graham or Dorsey anchor): Interesting but insufficient evidence. State what would need to change for an upgrade.
-- AVOID (2/5 without Graham or Dorsey): No price floor, no quality anchor. The pass pattern is fragile.
-- SELL (0-1/5 without Graham, OR quality gate failed): No investment thesis, or accounting red flags.
+Scores are "N of M", where M is how many frameworks APPLY to that business, not always 5.
+Greenblatt abstains on financials and utilities (his own instruction); Lynch abstains when
+the business fits none of his six categories. An abstaining framework is NOT a failure —
+never describe it as one, and never say a stock "failed" a test that was not applied. The
+tiers below are stated in 5-framework equivalents; the engine has already normalised for M.
+- STRONG BUY (all 5 of 5 + clean): Every framework agrees, quality gate passes, no red flags.
+  Requires all five to apply — a stock where any framework abstains tops out at BUY.
+- BUY (4-of-5 equivalent, or 5/5 with borderline manipulation): Strong consensus with one minor gap.
+- CONDITIONAL BUY (3-of-5 equivalent + quality pass): Frameworks disagree. YOU must explain the thesis AND the invalidation conditions. Read _pass_pattern_meaning and _book_reasoning for guidance.
+- WATCH (2-of-5 equivalent with Graham or Dorsey anchor): Interesting but insufficient evidence. State what would need to change for an upgrade.
+- AVOID (2-of-5 equivalent without Graham or Dorsey): No price floor, no quality anchor. The pass pattern is fragile.
+- SELL (0-1 of 5 equivalent without Graham, OR quality gate failed): No investment thesis, or accounting red flags.
 
 HOW TO EXPLAIN EACH TIER:
 For STRONG BUY and BUY:
