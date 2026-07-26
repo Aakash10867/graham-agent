@@ -1177,6 +1177,63 @@ WATCHLIST_DRIFT_SEVERITY = {
     "relative_rank":  "info",
 }
 
+# ── W2: archetype conditions SEVERITY, never the label ────────────────────
+# _classify_flip answers WHICH INPUT MOVED and must keep answering only that —
+# its docstring is explicit that favourability lives in newly_passing vs
+# newly_failing, and duplicating it there would let the two disagree. So the
+# archetype enters one step later, at "how alarmed should you be".
+#
+# ONE CELL, and it is Lynch's own inversion. "valuation" normally means price
+# moved and the business held, hence only a warning. For a CYCLICAL that reading
+# flips: a falling PE with fundamentals apparently intact is the peak-earnings
+# signature — earnings follow the price down, and the low PE is the trap, not
+# the discount. lynch_score's cyclical branch already encodes the same claim.
+#
+# HARDEN-ONLY, and this is what keeps the table from growing into 6x6 = 36
+# cells of pairwise overfit. An archetype is CONTEXT, not evidence that a
+# business held, so it may raise an alarm and must never quiet one. Same
+# principle as the note above DRIFT_SEVERITY: absence of evidence never
+# downgrades.
+#
+# The other rows of the sourced sign-flip table (rising leverage on a cyclical,
+# margin compression on a fast grower, inventory build, dividend cut on a
+# stalwart) are NOT here because entry_trace carries only pe, roe_pct,
+# score_continuous and the five fracs. There is no leverage, margin, inventory
+# or dividend on either side of the comparison, so those rules cannot fire.
+# Extending entry_trace is a jsonb schema change plus a backfill — deliberately
+# out of W2 scope, recorded so the omission is not mistaken for an oversight.
+_SEVERITY_ORDER = ("info", "warning", "danger")
+
+ARCHETYPE_SEVERITY_FLOOR = {
+    ("cyclical", "valuation"): "danger",
+}
+
+
+def apply_archetype_severity(severity, archetype, reason, ceiling=None):
+    """Raise `severity` to the archetype floor for this reason, never lower it.
+
+    ceiling: optional cap ("warning" on watchlist surfaces, where severity
+    measures capital at risk and a watched stock is not owned). Applied AFTER
+    the floor, so the watchlist ceiling still wins — a floor of danger on an
+    unowned stock lands at warning, matching WATCHLIST_DRIFT_SEVERITY's own note.
+    """
+    if not severity or not archetype or not reason:
+        return severity
+    floor = ARCHETYPE_SEVERITY_FLOOR.get((archetype, reason))
+    if floor is None:
+        return severity
+    try:
+        out = max(severity, floor, key=_SEVERITY_ORDER.index)
+    except ValueError:
+        return severity            # unknown label: leave it alone, never soften
+    if ceiling:
+        try:
+            if _SEVERITY_ORDER.index(out) > _SEVERITY_ORDER.index(ceiling):
+                out = ceiling
+        except ValueError:
+            pass
+    return out
+
 
 def _on_conviction(trace: dict) -> bool:
     return bool(trace) and trace.get("slot_type") in _CONVICTION_SLOTS
