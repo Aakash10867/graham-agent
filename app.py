@@ -5006,7 +5006,8 @@ def get_csv_financial_data(ticker: str) -> dict:
         quality_pass = bool(row.get("quality_pass")) if row.get("quality_pass") != "N/A" else False
         manip = int(row.get("schilit_manipulation_score", 0)) if row.get("schilit_manipulation_score") != "N/A" else 0
 
-        _n_app = len(selector._applicable_frameworks(row))
+        _app_set = set(selector._applicable_frameworks(row))
+        _n_app = len(_app_set)
         verdict = verdict_engine.get_verdict_tier(score, quality_pass, pass_dict,
                                                   manip, n_applicable=_n_app)
         verdict_reason = verdict_engine.get_verdict_reason(verdict, score, pass_dict, manip)
@@ -5023,7 +5024,13 @@ def get_csv_financial_data(ticker: str) -> dict:
 
         book_reasoning = verdict_engine.get_pass_pattern_reasoning(score, pass_dict, verdict, philosophy)
         deep_formatted = verdict_engine.format_deep_metrics_for_llm(row)
-        pattern_meaning = verdict_engine.get_pattern_meaning(pass_dict) if score == 3 else None
+        # Gate on the NORMALISED verdict, not the raw integer: a 2-of-4 stock is
+        # a CONDITIONAL BUY and should be explained like one. get_pattern_meaning_for
+        # returns None when any framework abstained — see its docstring.
+        _abstained = tuple("dorsey" if f == "dorsey_buffett" else f
+                           for f in selector.FRAMEWORKS if f not in _app_set)
+        pattern_meaning = (verdict_engine.get_pattern_meaning_for(pass_dict, _abstained)
+                           if verdict == "CONDITIONAL BUY" else None)
 
         st.session_state._last_verdict_tier = verdict
         row["_verdict_tier"] = verdict
