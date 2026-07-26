@@ -45,6 +45,15 @@ SCHEMA_VERSION = 4   # v4: W2 archetype engine — lynch_category REDEFINED
 # lynch_category, lynch_frac, lynch_pass, score, or score_continuous. A backtest
 # spanning the boundary must exclude v3 rows or treat the two sides as separate
 # experiments. Cross-sectional comparisons WITHIN one schema_version stay valid.
+#
+# v4 CARRIES A SECOND, INDEPENDENT REPRICING. Graham D7c and D8 moved from
+# trailing to AVERAGED earnings (Graham's own basis; the averaging is his
+# anti-cyclical-value-trap device). 694 rows (15.5%) move on
+# graham_defensive_score -> graham_frac -> score, of which 23 currently reach 4+.
+# Most of the movement is COVERAGE, not re-rating: trailing eps>0 held for 44.0%
+# of rows against 74.4% for the 4-year average, so D8 had been failing closed on
+# more than half the universe. Do NOT attribute a Graham score shift across this
+# boundary to the archetype change — they are separate causes in one version.
 
 import random
 
