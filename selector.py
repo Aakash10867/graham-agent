@@ -384,6 +384,63 @@ def _effective_gate(min_score: int, n_applicable: int) -> int:
     return max(1, int(min_score * n_applicable / len(FRAMEWORKS) + 0.5))
 
 
+# ── The FORCED-EXIT ceiling ────────────────────────────────────────────────
+# _effective_gate is a FLOOR (admit at >= k). This is a CEILING (force an exit
+# at <= t). They are not the same operation and must not share a formula.
+#
+# The raw rule was `now_score == 1`, an integer on an implied 5-denominator:
+# sell when at most one fifth of the frameworks pass. Written as a fraction that
+# survives abstention, the largest integer s with s/n <= 1/5 is floor(n/5)
+# EXACTLY — no rounding choice, no new parameter.
+#
+#     n=5 -> 1     n=4 -> 0     n=3 -> 0
+#
+# The old integer 1 was invariant across n, which reads reassuring and is not:
+# it held a 3-framework stock to a 33% exit bar and a 4-framework stock to 25%,
+# against 20% for everyone else. The threshold stood still while abstention
+# walked scores down into it. Measured 2026-07-27: GREENPOWER.NS went 2-of-4 to
+# 1-of-3 in a single universe run because lynch_category flipped to unknown.
+# Trajectory unchanged, Graham unchanged, nothing about the business moved, and
+# the next review would have said SELL ALL.
+#
+# One principle governs both directions — NEVER make the abstaining stock worse
+# off than the 5-denominator rule. _effective_gate satisfies it by being
+# lenient-or-equal to the exact form; this satisfies it by being exact.
+#
+# Note this also SUBSUMES the score-0 branch: at n < 5 the threshold is 0, so
+# "no thesis at all" is the only forced exit. Score 0 sells at every n either
+# way, which is correct — "every applicable framework fails" carries no
+# denominator.
+FORCED_EXIT_BASE = 1   # 1-of-5: the fraction the raw integer rule already meant
+
+
+def forced_exit_threshold(n_applicable: int) -> int:
+    """Largest score that still forces an exit, at this denominator."""
+    n = int(n_applicable or len(FRAMEWORKS))
+    return (FORCED_EXIT_BASE * n) // len(FRAMEWORKS)
+
+
+def forced_exit_applies(universe_row_or_df, ticker: str, now_score: int) -> bool:
+    """True when `now_score` is at or below the forced-exit ceiling for THIS
+    stock's applicable-framework count.
+
+    Missing row -> assume the full five, preserving today's behaviour. That path
+    is unreachable from the review caller (a missing row yields now_score 0,
+    which sells at every denominator), but a silent default that CHANGED
+    behaviour would be the worse failure.
+    """
+    df = universe_row_or_df
+    try:
+        row = df[df["ticker"] == ticker]
+        if len(row) == 0:
+            return int(now_score) <= forced_exit_threshold(len(FRAMEWORKS))
+        row = row.iloc[0]
+    except Exception:
+        return int(now_score) <= forced_exit_threshold(len(FRAMEWORKS))
+    n = len(_applicable_frameworks(row))
+    return int(now_score) <= forced_exit_threshold(n)
+
+
 def score_label(row, score=None) -> str:
     """Render a composite score with its TRUE denominator: "3 of 4", not "3/5".
 
