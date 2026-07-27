@@ -1354,8 +1354,32 @@ DRIFT_NULL_MOVE_LABEL = {
 # revision and above CSV rounding. Change it by argument. Never fit it.
 DRIFT_MATERIAL_PCT = 0.10
 
-# Below this, a score_continuous move is arithmetic, not a story.
-DRIFT_MATERIAL_CONTINUOUS = 0.05
+# ── Two drift floors, two denominators ────────────────────────────────────
+# One constant served both sites. They are not on the same scale:
+#     per-framework frac delta   lives on [-1, 1]
+#     total score_continuous     lives on [-5, 5]
+# so 0.05 asserted "5% of range" at one site and "1% of range" at the other.
+# Same error class as the abstention denominators and the raw-score gates: a
+# threshold counted against one denominator applied to another.
+#
+# OPEN (backlog): this floor is not uniform in EFFECT. trajectory_graded is
+# all-boolean in steps of 1-2, so its smallest possible frac move is 0.1 and
+# the floor never binds on it; graham/greenblatt/dorsey/lynch carry ramps and
+# move continuously. greenblatt_frac is a universe percentile recomputed every
+# run with ey = EBIT/EV on price, so it moves daily with no fundamental change.
+# A single floor therefore biases largest_move toward the coarsest framework.
+# Fixing it needs the per-framework delta distribution across consecutive
+# archive runs — a measurement, not an argument. Not fitted here.
+DRIFT_FLOOR_FRAMEWORK = 0.05
+
+# DERIVED, not chosen. If every framework moves just under the floor, the total
+# is len(FRAMEWORKS) x (floor - eps). Below that bound an alert could be
+# composed entirely of moves the per-framework site calls immaterial, and
+# continuous_drift would emit with largest_move = None — "your score moved,
+# cause unattributable." Sign-robust: all |d| < floor gives |sum d| < bound
+# whatever the signs. Expressed rather than literal so that per-framework
+# floors, when measured, carry the total with them instead of drifting apart.
+DRIFT_MATERIAL_TOTAL = len(FRAMEWORKS) * DRIFT_FLOOR_FRAMEWORK
 
 # Worst-case wins. Index 0 is worst. When several frameworks flip at once and
 # disagree about why, a single fundamental break makes the whole drop
@@ -1578,7 +1602,7 @@ def _continuous_drift(e: dict, c: dict) -> dict | None:
                if by_framework else None)
     # A "largest move" smaller than the noise floor is not a mover. Report none
     # rather than crown the biggest rounding error in the set.
-    if largest is not None and abs(by_framework[largest]) < DRIFT_MATERIAL_CONTINUOUS:
+    if largest is not None and abs(by_framework[largest]) < DRIFT_FLOOR_FRAMEWORK:
         largest = None
 
     return {
@@ -1636,11 +1660,13 @@ def _thesis_changes(entry: dict, current: dict) -> list:
         changes.append({"field": "slot_type",
                         "from": e.get("slot_type"), "to": c.get("slot_type")})
 
-    # Magnitude, not just direction. Emitted only above the noise floor, so a
-    # 0.01 refresh wobble never renders as news. Returns None on pre-edit-1
-    # traces, which is the correct silence.
+    # Magnitude, not just direction. Gated on the TOTAL bound, not the
+    # per-framework floor — those are different denominators and comparing the
+    # total against the framework floor is what let a 0.06 move spread across
+    # five sub-floor wobbles render as news with no nameable cause. Returns
+    # None on pre-edit-1 traces, which is the correct silence.
     cd = _continuous_drift(e, c)
-    if cd and abs(cd["delta"]) >= DRIFT_MATERIAL_CONTINUOUS:
+    if cd and abs(cd["delta"]) >= DRIFT_MATERIAL_TOTAL:
         changes.append({"field": "continuous_drift",
                         "from": cd["from"], "to": cd["to"], "detail": cd})
 
