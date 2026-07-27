@@ -1166,7 +1166,7 @@ def run_daily_tracker():
         investor_type = port.get("investor_type", "balanced")
 
         opps = universe_df[
-            (universe_df["score"] >= 4) &
+            selector.meets_score_mask(universe_df, 4) &
             (universe_df["quality_pass"] == True) &
             (~universe_df["ticker"].isin(held_tickers)) &
             (universe_df["pe"] > 0) &
@@ -1554,7 +1554,7 @@ def run_daily_tracker():
 
         trackable = universe_df[
             (universe_df["ticker"].isin(all_held | all_watched)) |
-            (universe_df["score"] >= 3)
+            selector.meets_score_mask(universe_df, 3)
         ].copy()
 
         score_rows = []
@@ -1603,7 +1603,7 @@ def run_daily_tracker():
                     prev_tickers = set(row["ticker"] for row in prev_resp.data)
 
                     new_high_scorers = universe_df[
-                        (universe_df["score"] >= 3) &
+                        selector.meets_score_mask(universe_df, 3) &
                         (universe_df["quality_pass"] == True) &
                         (~universe_df["ticker"].isin(prev_tickers))
                     ]
