@@ -137,7 +137,13 @@ def fetch_snippets(query: str, key: str, cx: str) -> tuple[str | None, str]:
         return None, "retrieval_failed"
 
     if resp.status_code != 200:
-        print(f"    CSE HTTP {resp.status_code}", file=sys.stderr)
+        # Log the BODY, not just the code. Google returns 403 for at least four
+        # distinct causes — quota exhausted, key restricted by IP/referrer, API
+        # not enabled on the project, key/cx mismatch — and only the body tells
+        # them apart. Printing the code alone is a check that discards its own
+        # evidence. The body carries no credentials.
+        detail = (resp.text or "")[:400].replace("\n", " ")
+        print(f"    CSE HTTP {resp.status_code}: {detail}", file=sys.stderr)
         return None, "retrieval_failed"
 
     items = resp.json().get("items", [])
@@ -278,7 +284,7 @@ def main() -> int:
 
     new_rows = []
     for field in FIELDS:
-        print(f"  {field['name']}")
+        print(f"  {field['name']}", flush=True)
         context, status = fetch_snippets(field["query"], key, cx)
         source_hash = (hashlib.sha256(context.encode("utf-8")).hexdigest()[:16]
                        if context else None)
@@ -303,7 +309,7 @@ def main() -> int:
         # not run", never "the job ran and found nothing" -- those have to stay
         # distinguishable or the null-rate falsifier is unmeasurable.
         new_rows.append(row)
-        print(f"    {row['status']}: {row['value']}")
+        print(f"    {row['status']}: {row['value']}", flush=True)
 
     if not new_rows:
         print("FATAL: zero rows produced", file=sys.stderr)
