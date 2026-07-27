@@ -19,6 +19,7 @@ from email.mime.multipart import MIMEMultipart
 from datetime import date, datetime, timedelta
 import json
 import verdict_engine
+import selector          # score_label + _applicable_frameworks (no Streamlit dep)
 from collections import defaultdict
 
 import pandas as pd
@@ -240,13 +241,22 @@ def build_weekly_recommendations(user_id, user_ports, universe_df, supabase):
                 "trajectory_pass": bool(row.get("trajectory_pass")) if pd.notna(row.get("trajectory_pass")) else False,
                 "lynch_pass": bool(row.get("lynch_pass")) if pd.notna(row.get("lynch_pass")) else False,
             }
-            v = verdict_engine.get_verdict_tier(score, True, pass_dict)
+            # n_applicable, not the default 5. Greenblatt abstains on
+            # financials/utilities and Lynch on a business his six categories
+            # cannot place; judging a stock against tests it never took
+            # understates the verdict — and this one goes out by email unreviewed.
+            _n_app = len(selector._applicable_frameworks(row))
+            v = verdict_engine.get_verdict_tier(score, True, pass_dict,
+                                                n_applicable=_n_app)
 
             stocks.append({
                 "ticker": row["ticker"],
                 "name": str(row.get("name", row["ticker"])),
                 "sector": str(row.get("sector", "N/A")),
                 "score": score,
+                # "3 of 4", not "3/5" — computed HERE because this is where the
+                # universe row is in scope; both render sites below just read it.
+                "score_label": selector.score_label(row, score),
                 "verdict": v,
                 "price": price,
                 "shares": shares,
@@ -422,7 +432,22 @@ Portfolio: {s['name']}{_paper_tag}
         if a.get("_appeared_in_count", 0) > 1:
             appeared = f" (flagged in {a['_appeared_in_count']} portfolios)"
 
-        line = f"- {a['headline']}{appeared}{passage_text}\n"
+        # W1 label as a CONSTRAINT, not decoration. portfolio_tracker already
+        # persists drift_reason via classify_score_change; it was simply never
+        # read here, so the model was asked to explain a score move with nothing
+        # deterministic to explain it from — and it inferred a cause.
+        # The classifier decides; the model only phrases.
+        _reason = detail.get("drift_reason")
+        _cause = ""
+        if _reason:
+            _cause = f" [CAUSE: {_reason}"
+            _fw = detail.get("drift_frameworks")
+            if _fw:
+                _fw_txt = ", ".join(_fw) if isinstance(_fw, list) else str(_fw)
+                _cause += f"; frameworks: {_fw_txt}"
+            _cause += "]"
+
+        line = f"- {a['headline']}{_cause}{appeared}{passage_text}\n"
 
         # Severity-first, same as build_plain_fallback. alert_type no longer
         # carries "danger"/"overvalued" — severity does, and this block sorts
@@ -453,7 +478,7 @@ Portfolio: {s['name']}{_paper_tag}
         for rec in recommendations:
             recs_block += f"\n{rec['horizon'].upper()} HORIZON ({rec['investor_type']} profile, ₹{rec['budget']:,} budget):\n"
             for s in rec["stocks"]:
-                recs_block += f"  {s['name']} ({s['ticker']}) — {s['score']}/5 {s['verdict']} — {s['shares']} shares @ ₹{s['price']:,.0f} = ₹{s['amount']:,.0f}\n"
+                recs_block += f"  {s['name']} ({s['ticker']}) — {s.get('score_label') or s['score']} {s['verdict']} — {s['shares']} shares @ ₹{s['price']:,.0f} = ₹{s['amount']:,.0f}\n"
             recs_block += f"  Total deployed: ₹{rec['total_amount']:,.0f}\n"
     if not recs_block:
         recs_block = "No new recommendations this week.\n"
@@ -558,7 +583,7 @@ def build_plain_fallback(name, summaries, alerts, recommendations=None):
         for rec in recommendations:
             lines.append(f"  {rec['horizon'].title()} horizon ({rec['investor_type']}, ₹{rec['budget']:,} budget):")
             for s in rec["stocks"]:
-                lines.append(f"    {s['name']} — {s['score']}/5 {s['verdict']} — {s['shares']}× ₹{s['price']:,.0f}")
+                lines.append(f"    {s['name']} — {s.get('score_label') or s['score']} {s['verdict']} — {s['shares']}× ₹{s['price']:,.0f}")
             lines.append(f"    Total: ₹{rec['total_amount']:,.0f}")
         lines.append("")
 
