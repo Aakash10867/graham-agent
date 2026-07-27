@@ -1450,7 +1450,7 @@ def generate_health_check(portfolio, holdings, universe_df, collection):
     try:
         overweight_sectors = [s for s, w in sector_weights.items() if w > 0.25]
         candidates = universe_df[
-            (universe_df["score"] >= 3) &
+            selector.meets_score_mask(universe_df, 3) &
             (universe_df["quality_pass"] == True) &
             (~universe_df["ticker"].isin([h.get("ticker") for h in holdings])) &
             (universe_df["pe"] > 0) &
@@ -1585,23 +1585,23 @@ def find_replacement_candidates(investor_type, time_horizon, exclude_tickers, cu
 
     # Same profile filtering as get_sip_candidates
     if investor_type == "defensive":
-        df = df[df["score"] >= 3]
+        df = df[selector.meets_score_mask(df, 3)]
         mask = df["graham_pass"] == True
         if mask.sum() >= 5:
             df = df[mask]
     elif investor_type == "enterprising":
-        df = df[df["score"] >= 2]
+        df = df[selector.meets_score_mask(df, 2)]
         mask = df["trajectory_pass"] == True
         if mask.sum() >= 5:
             df = df[mask]
     else:
-        df = df[df["score"] >= 2]
+        df = df[selector.meets_score_mask(df, 2)]
         mask = (df["greenblatt_pass"] == True) | (df["dorsey_pass"] == True)
         if mask.sum() >= 5:
             df = df[mask]
 
     if time_horizon == "short":
-        high_score = df[df["score"] >= 3]
+        high_score = df[selector.meets_score_mask(df, 3)]
         if len(high_score) >= 5:
             df = high_score
 
@@ -4607,9 +4607,10 @@ def find_investments(market: str) -> dict:
     if "quality_pass" in df.columns:
         df = df[df["quality_pass"] != False]
 
-    tier_4 = df[df["score"] == 4].copy()
-    tier_3 = df[df["score"] == 3].copy()
-    tier_2 = df[df["score"] == 2].copy()
+    _tiers = selector.score_tiers(df)
+    tier_4 = df[_tiers == 4].copy()
+    tier_3 = df[_tiers == 3].copy()
+    tier_2 = df[_tiers == 2].copy()
 
 
     
