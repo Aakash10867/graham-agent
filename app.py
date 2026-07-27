@@ -9544,13 +9544,15 @@ elif st.session_state.sb_view_mode == "portfolios":
                                     # Score 0 = no thesis. Score 1 without Graham = below buy threshold.
                                     # Both warrant exit. Score 1 WITH Graham = deep value exception, hold.
                                     #
-                                    # KNOWN GAP, deliberately not fixed here: these branches compare the
-                                    # RAW integer, so 1-of-3 and 1-of-5 both force a sell even though the
-                                    # former is a 2-of-5 equivalent. Same normalisation the verdict ladder
-                                    # now applies. Changing a SELL TRIGGER is a decision, not a display
-                                    # fix, so it is carved out rather than slipped in here. The reasoning
-                                    # text below is corrected either way — a user reading "0 of 3" is
-                                    # being told the truth about what was tested.
+                                    # GAP CLOSED 2026-07: the score-1 branch now
+                                    # asks selector.forced_exit_applies, which
+                                    # holds every stock to the same FRACTION
+                                    # (<= 1/5 of applicable frameworks). At n < 5
+                                    # the ceiling is 0, so only a total thesis
+                                    # failure forces an exit. The score-0 branch
+                                    # is unchanged and needs no guard — "every
+                                    # applicable framework fails" is
+                                    # denominator-invariant.
                                     if h["now_score"] == 0 and "SELL" not in action:
                                         action = f"🔴 SELL ALL ({h['shares']})"
                                         sell_qty = h["shares"]
@@ -9560,7 +9562,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                             f"No investment thesis exists. Redeploy capital."
                                         )
                                         confidence = "high"
-                                    elif h["now_score"] == 1 and "SELL" not in action:
+                                    elif h["now_score"] == 1 and selector.forced_exit_applies(universe_df, h["ticker"], 1) and "SELL" not in action:
                                         # Check if the lone pass is Graham (deep value exception)
                                         urow_check = universe_df[universe_df["ticker"] == h["ticker"]]
                                         graham_alive = (
