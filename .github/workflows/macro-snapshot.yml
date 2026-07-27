@@ -7,9 +7,7 @@ name: macro-snapshot
 
 on:
   schedule:
-    # 12:00 UTC = 17:30 IST, weekdays. After Indian market close, so the bond
-    # yield reading is a settled close rather than an intraday print.
-    - cron: '0 12 * * 1-5'
+    - cron: '0 2 * * 1-5'
   workflow_dispatch:
 
 permissions:
