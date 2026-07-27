@@ -441,6 +441,56 @@ def forced_exit_applies(universe_row_or_df, ticker: str, now_score: int) -> bool
     return int(now_score) <= forced_exit_threshold(n)
 
 
+# ── Score thresholds against the TRUE denominator ─────────────────────────
+# Every surface that gated on the raw integer `score` compared a numerator
+# counted over APPLICABLE frameworks to a threshold derived from FIVE. A stock
+# where Lynch abstains is scored out of 4 and held to 5/5's bar, so it silently
+# drops out of opportunity emails, replacement lists and radar pools.
+# Measured 2026-07-27 on 4,626 rows: 54% of the universe has n_applicable = 4.
+#
+# `score` and score_applicable were numerically identical on all 4,626 rows —
+# an abstaining framework's pass flag is False and contributes 0 either way.
+# These helpers still recount from PASS_FLAG rather than trusting that equality:
+# it is an empirical fact about today's data, not a guarantee.
+def score_applicable(df: pd.DataFrame):
+    """(n_applicable, score_applicable) per row, from the single source of
+    truth. Benchmarked at 0.40s on 4,626 x 125 — cheap enough that no second,
+    vectorised copy of _applicable_frameworks needs to exist."""
+    n, s = [], []
+    for _, r in df.iterrows():
+        app = _applicable_frameworks(r)
+        n.append(len(app))
+        s.append(sum(1 for f in app if bool(r.get(PASS_FLAG[f], False))))
+    return pd.Series(n, index=df.index), pd.Series(s, index=df.index)
+
+
+def meets_score_mask(df: pd.DataFrame, k: int) -> pd.Series:
+    """Boolean mask: does each row clear a k-of-5 FLOOR at its own denominator.
+    Drop-in for `df["score"] >= k`. Wraps _effective_gate — no new convention."""
+    n, s = score_applicable(df)
+    return s >= n.map(lambda x: _effective_gate(k, int(x)))
+
+
+def score_tiers(df: pd.DataFrame) -> pd.Series:
+    """Tier 4 / 3 / 2 / None as FRACTION BANDS. Drop-in for the `score == 4`,
+    `== 3`, `== 2` equality partition.
+
+    Fraction is forced here, not preferred. Under the integer convention at
+    n = 4: tier 4 -> int(3.2+.5) = 3, tier 3 -> int(2.4+.5) = 2, tier 2 ->
+    int(1.6+.5) = 2. Tiers 3 and 2 COLLIDE. Rounding survives one boundary, not
+    a partition of several.
+
+    Also fixes a defect the equality form carried independently of abstention:
+    `score == 4` never matched `score == 5`, so perfect-score stocks were
+    excluded from the candidate list entirely. Measured: 15 such rows."""
+    n, s = score_applicable(df)
+    out = []
+    for _n, _s in zip(n, s):
+        f = (_s / _n) if _n else 0.0
+        out.append(4 if f >= 4 / 5 else 3 if f >= 3 / 5 else 2 if f >= 2 / 5 else None)
+    return pd.Series(out, index=df.index, dtype=object)
+
+
 def score_label(row, score=None) -> str:
     """Render a composite score with its TRUE denominator: "3 of 4", not "3/5".
 
