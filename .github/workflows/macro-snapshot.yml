@@ -43,16 +43,26 @@ jobs:
       # rows BEFORE exiting non-zero on an all-retrievals-failed day. The record
       # of the failure is itself data the null-rate falsifier needs; losing it
       # would make an outage indistinguishable from the job never running.
+      #
+      # But the script can also die BEFORE writing anything (missing secrets,
+      # schema mismatch), leaving no file at all. That is a different state from
+      # "wrote failure rows" and must exit cleanly rather than handing git a
+      # path that does not exist. Stage first, then check --cached: that treats
+      # a new untracked file and a modified tracked file identically.
       - name: Commit series
         if: always()
         run: |
+          if [ ! -f macro_series.json ]; then
+            echo "no series file — nothing to commit"
+            exit 0
+          fi
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet macro_series.json 2>/dev/null; then
+          git add macro_series.json
+          if git diff --cached --quiet; then
             echo "no change to commit"
             exit 0
           fi
-          git add macro_series.json
           git commit -m "macro: readings $(date -u +%Y-%m-%d)"
           git pull --rebase --autostash origin ${{ github.ref_name }}
           git push
