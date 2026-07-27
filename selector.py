@@ -513,6 +513,63 @@ def _resolve_weights(policy: dict) -> dict:
     return {f: 100.0 * w.get(f, 0) / total for f in FRAMEWORKS}
 
 
+def _rank_population(df: pd.DataFrame, framework: str) -> pd.Series:
+    """Which rows belong in `framework`'s RANKED POPULATION.
+
+    Deliberately NOT _applicable_frameworks. That function answers the GATE's
+    question — "did this stock pass a test it faced" — and is untouched by this
+    change. This answers "does this row belong in the denominator of a
+    percentile". Same inputs, different question. They stay separate functions
+    because merging them is how an abstention concept acquires a second meaning,
+    which is the failure mode W2 spent a sprint unpicking.
+    """
+    if framework == "greenblatt":
+        excl = df.get("greenblatt_sector_excluded", pd.Series(False, index=df.index))
+        return ~excl.fillna(False).astype(bool)
+    if framework == "lynch":
+        cat = df.get("lynch_category", pd.Series("", index=df.index))
+        return cat.astype(str).str.strip() != "unknown"
+    return pd.Series(True, index=df.index)
+
+
+def _framework_percentile(df: pd.DataFrame, col: str, pop: pd.Series) -> pd.Series:
+    """Sector/pool blended percentile computed over `pop` ONLY.
+
+    Rows outside the population, and rows inside it with no value, get NaN and
+    are weighted out of _rank_score entirely. Previously they sat in the
+    denominator: lynch abstainers as a literal 0.0 at the bottom (inflating
+    everyone else by +0.123 on that component) and greenblatt NaNs at the TOP,
+    because na_option="bottom" places NaN at the HIGHEST percentiles — the
+    opposite of what the name reads like, and of the .fillna(0.0) that used to
+    sit beside it, which never fired.
+
+    Measured before the change (n=661 post-tier1): the applicable-row mean
+    matched closed form to three decimals — lynch (163+249.5)/661 = 0.624
+    observed 0.624; greenblatt 310/661 = 0.469 observed 0.470 — and the spread
+    scaled by exactly n_app/n. A framework's EFFECTIVE weight was its nominal
+    weight x its applicable fraction. Lynch ran at ~75% of the weight
+    _resolve_weights assigned it. Nobody chose that.
+
+    w = n/(n+K) now counts the per-(sector, framework) population, since the
+    population differs by framework. A sector with no members falls back
+    entirely to the pool percentile at w = 0 — the direction W2 already argued
+    for thin sectors.
+    """
+    vals = pd.to_numeric(df[col], errors="coerce")
+    mask = pop & vals.notna()
+    out = pd.Series(np.nan, index=df.index)
+    if not mask.any():
+        return out
+    sub_vals = vals.loc[mask]
+    sub_sector = df.loc[mask, "sector"]
+    p_pool = sub_vals.rank(pct=True, method="average")
+    p_sector = sub_vals.groupby(sub_sector).rank(pct=True, method="average")
+    n_sector = sub_sector.groupby(sub_sector).transform("size")
+    w_sector = (n_sector / (n_sector + SECTOR_SHRINK_K)).fillna(0.0)
+    out.loc[mask] = w_sector * p_sector.fillna(0.0) + (1.0 - w_sector) * p_pool.fillna(0.0)
+    return out
+
+
 def _attach_applicable(df: pd.DataFrame) -> pd.DataFrame:
     """Which frameworks can even evaluate this stock. Needed by rank AND gate."""
     return df.assign(_applicable=[_applicable_frameworks(r) for _, r in df.iterrows()])
@@ -545,9 +602,6 @@ def _tier3(df: pd.DataFrame, policy: dict) -> pd.DataFrame:
     w = _resolve_weights(policy)
     df = _attach_applicable(df.copy())
 
-    _n_sector = df.groupby("sector")["ticker"].transform("size")
-    _w_sector = (_n_sector / (_n_sector + SECTOR_SHRINK_K)).fillna(0.0)
-
     for f in FRAMEWORKS:
         col = SUBSCORE_GRADED.get(f)
         if col not in df.columns:          # pre-W0.1 archive rows
@@ -555,23 +609,24 @@ def _tier3(df: pd.DataFrame, policy: dict) -> pd.DataFrame:
         if col not in df.columns:
             df[f"_pct_{f}"] = 0.0
             continue
-        _p_sector = (df.groupby("sector")[col]
-                       .rank(pct=True, method="average", na_option="bottom")
-                       .fillna(0.0))
-        _p_pool = (df[col]
-                     .rank(pct=True, method="average", na_option="bottom")
-                     .fillna(0.0))
-        df[f"_pct_{f}"] = _w_sector * _p_sector + (1.0 - _w_sector) * _p_pool
+        df[f"_pct_{f}"] = _framework_percentile(df, col, _rank_population(df, f))
 
-    # Weight only over frameworks that APPLY to each stock, renormalized.
-    # A financial ranked on 4 frameworks must not be penalised for the absent
-    # fifth — that is the same abstention principle as the gate, applied to rank.
+    # Weight over frameworks whose PERCENTILE EXISTS, renormalized — not over
+    # frameworks that apply. A stock that abstains from one is not penalised for
+    # the absent fifth, and a stock we could not compute is not credited with a
+    # percentile it never earned. The GATE still counts _applicable; these are
+    # two different questions and _ranked_on records where they diverge.
     def _rank(row):
         app = row["_applicable"]
-        wt = sum(w[f] for f in app) or 1.0
-        return sum(w[f] * row[f"_pct_{f}"] for f in app) / wt
+        live = [f for f in app if pd.notna(row[f"_pct_{f}"])]
+        if not live:
+            return 0.0
+        wt = sum(w[f] for f in live) or 1.0
+        return sum(w[f] * row[f"_pct_{f}"] for f in live) / wt
 
     df["_rank_score"] = df.apply(_rank, axis=1)
+    df["_ranked_on"] = df.apply(
+        lambda r: tuple(f for f in r["_applicable"] if pd.notna(r[f"_pct_{f}"])), axis=1)
 
     tb_col, tb_high = PHILOSOPHY_TIEBREAK.get(
         policy.get("philosophy", "growth_at_fair_price"), (None, True))
@@ -949,6 +1004,7 @@ def select_portfolio(universe_df: pd.DataFrame, policy: dict,
                 "sector_depth": int(r["_sector_depth"]),
                 "rank_score": round(float(r["_rank_score"]), 4),
                 "applicable": list(app),
+                "ranked_on": list(r["_ranked_on"]),
                 "abstained": abstained,
                 "score_applicable": int(r["_score_applicable"]),
                 "effective_gate": int(r["_effective_gate"]),
