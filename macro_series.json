@@ -48,6 +48,54 @@
       "status": "retrieval_failed",
       "source_hash": null,
       "retrieval": "cse"
+    },
+    {
+      "date": "2026-07-27",
+      "field": "ltcg_pct",
+      "value": null,
+      "status": "retrieval_failed",
+      "source_hash": null,
+      "retrieval": "cse"
+    },
+    {
+      "date": "2026-07-27",
+      "field": "stcg_pct",
+      "value": null,
+      "status": "retrieval_failed",
+      "source_hash": null,
+      "retrieval": "cse"
+    },
+    {
+      "date": "2026-07-27",
+      "field": "ltcg_holding_months",
+      "value": null,
+      "status": "retrieval_failed",
+      "source_hash": null,
+      "retrieval": "cse"
+    },
+    {
+      "date": "2026-07-27",
+      "field": "ltcg_exemption_inr",
+      "value": null,
+      "status": "retrieval_failed",
+      "source_hash": null,
+      "retrieval": "cse"
+    },
+    {
+      "date": "2026-07-27",
+      "field": "rbi_cpi_projection_pct",
+      "value": null,
+      "status": "retrieval_failed",
+      "source_hash": null,
+      "retrieval": "cse"
+    },
+    {
+      "date": "2026-07-27",
+      "field": "india_10y_yield_pct",
+      "value": null,
+      "status": "retrieval_failed",
+      "source_hash": null,
+      "retrieval": "cse"
     }
   ]
 }
