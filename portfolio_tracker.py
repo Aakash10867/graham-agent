@@ -1103,7 +1103,8 @@ def run_daily_tracker():
 
             # Never fire a sell/defend alert off a carried-forward (stale) row:
             # a throttle-day refill is for continuity, not for triggering trades.
-            if entry_score - current_score >= 2 and not _is_stale:
+            _cmp = selector.comparable_score_drop(holding.get("entry_trace"), row.iloc[0], entry_score, current_score)
+            if _cmp["fires"] and not _is_stale:
                 # W1: WHY it fell, not just that it fell. A drop we can prove
                 # was price-only is a different event from one we can prove was
                 # the business. The classification is ADVISORY — it never gates
@@ -1118,11 +1119,12 @@ def run_daily_tracker():
                     print(f"  [W1] drift classification failed for {ticker}: {_e}")
                     _drift = {"reason": "unknown_inputs", "severity": "danger",
                               "newly_failing": [], "per_framework": {}}
-                _dd_headline = f"{holding.get('name', ticker)} score dropped {entry_score} -> {current_score}"
+                _dd_headline = selector.score_drop_headline(holding.get('name', ticker), _cmp, entry_score, current_score)
                 all_alerts.append(make_alert(
                     "score_drop", ticker, _dd_headline,
                     {"name": holding.get("name", ticker), "entry_score": entry_score,
                      "current_score": current_score, "reason": "score_drop",
+                     "comparable_frameworks": _cmp["n_common"], "comparable_delta": _cmp["delta"],
                      "drift_reason": _drift["reason"],
                      "drift_newly_failing": _drift["newly_failing"],
                      "drift_per_framework": _drift["per_framework"]},
