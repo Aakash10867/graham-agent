@@ -236,7 +236,22 @@ def build_mentor_prompt(name, stocks, alerts_for_user):
                     f"{p['author']} — {p['text'][:150]}" for p in passages[:1]
                 ) + "]"
 
-            alerts_block += f"- {a['headline']}{passage_text}\n"
+            # W1 label as a CONSTRAINT, not decoration. portfolio_tracker already
+            # persists drift_reason via classify_score_change; it was simply never
+            # read here, so rule 4 asked the model to judge "red flag or noise"
+            # with nothing deterministic to judge from — and it inferred a cause.
+            # The classifier decides; the model only phrases.
+            _reason = detail.get("drift_reason")
+            _cause = ""
+            if _reason:
+                _cause = f" [CAUSE: {_reason}"
+                _fw = detail.get("drift_frameworks")
+                if _fw:
+                    _fw_txt = ", ".join(_fw) if isinstance(_fw, list) else str(_fw)
+                    _cause += f"; frameworks: {_fw_txt}"
+                _cause += "]"
+
+            alerts_block += f"- {a['headline']}{_cause}{passage_text}\n"
     else:
         alerts_block = "No significant changes today."
 
@@ -257,6 +272,14 @@ Write a warm, honest daily email. Rules:
 3. If a stock's score improved or is near its 52-week low, gently remind them this could be a buying opportunity — but don't push. Say something like "this is the kind of setup Graham looked for" or "Dorsey would call this buying quality at a discount."
 3a. If a stock has a "THIS WEEK'S ANGLE" line, LEAD that stock's mention with it — it is a real, verified fact about where this stock ranks in the whole market (e.g. top 10% on earnings yield). State it plainly and explain the term simply. These angles ROTATE weekly so the stock stays fresh; do NOT invent facts beyond the angle given, and do NOT hype — if the angle reads implausibly strong (e.g. a >80% discount), soften to "unusually cheap" rather than quoting the raw number. If a stock has no angle line, keep it to a brief one-liner; it is resting this cycle.
 4. If a stock's quality flipped to FAIL or score dropped, be honest. Explain what it means and whether it's a red flag or just noise. A mentor doesn't sugarcoat.
+4a. Where an alert carries a [CAUSE: ...] tag, that cause is DETERMINISTIC — computed by comparing the stock's frameworks against the record from when it was added. You MUST use it and MUST NOT contradict or replace it with a cause of your own. Translate it into plain English:
+   - fundamental — the business itself weakened. This is the serious one.
+   - valuation — the PRICE moved; the business did not change. Often means it got more expensive, or cheaper.
+   - relative_rank — the business held, but peers improved past it.
+   - mixed — both the business and the price moved. Say so; do not pick one.
+   - unclear / unknown_inputs — we cannot attribute the change. SAY THAT PLAINLY ("the score moved but we can't say why yet"). Do not guess a reason to fill the gap.
+   If an alert has NO [CAUSE:] tag, do not speculate about why the score moved — describe what changed and stop.
+4b. Scores read "N of M", where M is how many frameworks APPLY to that business — not always 5. Greenblatt does not apply to banks or utilities (his own instruction), and Lynch does not apply to a business his six categories cannot place. A framework that abstains was NEVER TESTED. Never describe it as failed, missed, or a weakness, and never say a stock "only got 3 out of 5" when it scored 3 of 4.
 5. If the user left a personal note on a stock, reference it naturally. E.g., "You said you're waiting for PE below 12 — it's at 14 today, getting closer."
 6. End with ONE short educational nugget — a concept from Graham, Greenblatt, or Dorsey explained simply (e.g., "Here's what 'margin of safety' actually means in practice..."). Rotate topics daily. Don't repeat what you've said before.
 7. Sign off with a brief patience reminder. Vary it daily.
