@@ -1581,6 +1581,18 @@ def run_daily_tracker():
                 "pe": round(float(row["pe"]), 2) if pd.notna(row.get("pe")) else None,
                 "roe_pct": round(float(row["roe_pct"]), 2) if pd.notna(row.get("roe_pct")) else None,
                 "quality_pass": bool(row["quality_pass"]) if pd.notna(row.get("quality_pass")) else None,
+                # W2 abstention is INVISIBLE in the five booleans above: a False
+                # lynch_pass means BOTH "failed Lynch" and "Lynch does not apply".
+                # GREENPOWER.NS recorded lynch_pass false on 2026-07-27 having
+                # passed it on 07-24 — nothing about the business changed, only
+                # lynch_category flipping to unknown. This is the backtest's
+                # input, and it would read that as deterioration.
+                # Same shape as entry_trace: `pass == False AND framework not in
+                # applicable` is an abstention, not a failure. One convention.
+                # Rows before this column existed carry NULL and stay unknowable
+                # — historical lynch_category was never stored, so there is
+                # nothing honest to backfill from.
+                "applicable": list(selector._applicable_frameworks(row)),
             })
 
         written_scores = 0
