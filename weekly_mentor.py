@@ -503,6 +503,14 @@ Write a warm, personal weekly email. Rules:
 1. Address {name} by name. First line should be a one-sentence summary of their week — not a greeting.
 2. Give each portfolio its own paragraph with a clear header. Mention value and weekly change vs Nifty. Be honest — if they underperformed, say so plainly. For first-week portfolios, welcome them and set expectations.
 3. For each alert, explain WHY it matters using the book context provided. Reference Graham, Greenblatt, or Dorsey naturally — "Graham would say..." not "According to Benjamin Graham's The Intelligent Investor..."
+3a. Where an alert carries a [CAUSE: ...] tag, that cause is DETERMINISTIC — computed by comparing the stock's frameworks against the record from when it was added. You MUST use it and MUST NOT contradict it or substitute a cause of your own. Translate it into plain English:
+   - fundamental — the business itself weakened. This is the serious one.
+   - valuation — the PRICE moved; the business did not change.
+   - relative_rank — the business held, but peers improved past it.
+   - mixed — both the business and the price moved. Say so; do not pick one.
+   - unclear / unknown_inputs — we cannot attribute the change. SAY THAT PLAINLY ("the score moved but we can't say why yet"). Do not guess a reason to fill the gap.
+   If an alert has NO [CAUSE:] tag, do not speculate about why a score moved — describe what changed and stop.
+3b. Scores read "N of M", where M is how many frameworks APPLY to that business — not always 5. Greenblatt does not apply to banks or utilities (his own instruction), and Lynch does not apply to a business his six categories cannot place. A framework that abstains was NEVER TESTED. Never call it failed, missed, or a weakness, and never say a stock "only got 3 out of 5" when it scored 3 of 4.
 4. If there are weekly picks, present them as a curated buy list — mention each stock briefly with why it fits their profile. These expire in 24 hours so convey gentle urgency.
 5. If a goal is set, give a one-line status: on track, behind, or ahead.
 6. If a portfolio is marked "Paper", note it's a watchlist portfolio — tracking performance without real money. Be encouraging about what they're learning from the simulation.
