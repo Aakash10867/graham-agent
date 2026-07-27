@@ -491,6 +491,64 @@ def score_tiers(df: pd.DataFrame) -> pd.Series:
     return pd.Series(out, index=df.index, dtype=object)
 
 
+# ── Score DROP across time, on a stable denominator ───────────────────────
+# `entry_score - current_score >= 2` compares two integers counted over
+# possibly DIFFERENT applicable sets. When a holding loses a framework to
+# abstention, `score` falls by one with no business change and half the alert
+# threshold is spent before anything happens. Latent until W2 made Lynch
+# abstention live; measured 2026-07-27 on 21 holdings — LUPIN 5->4 and
+# GREENPOWER 4->3 each carried exactly one artifact point.
+#
+# Rule: count only frameworks applicable at BOTH ends. A framework that left is
+# counted at neither. No new parameter — the threshold is the 2-of-5 the raw
+# rule already meant, written so it survives a variable denominator:
+#     ceil(2 * n_common / 5)  ->  5:2  4:2  3:2  2:1
+#
+# Ratified fail direction: below MIN_COMPARABLE the score_drop alert does NOT
+# fire. Two frameworks is the least on which "deteriorated by 40%" means
+# anything, and a wrong LABEL is worse than silence — quality_pass and price
+# alerts are independent and still fire. A trace without applicable/passed
+# falls back to the RAW delta and is marked, so nothing silently stops
+# alerting.
+SCORE_DROP_BASE = 2        # 2-of-5: the fraction the raw integer rule meant
+MIN_COMPARABLE = 2         # below this, "40% worse" is not a claim we can make
+
+
+def score_drop_threshold(n_common: int) -> int:
+    """Smallest integer drop meeting the 2-of-5 fraction at this denominator."""
+    return max(1, math.ceil(SCORE_DROP_BASE * int(n_common) / len(FRAMEWORKS)))
+
+
+def comparable_score_drop(entry_trace, universe_row, entry_score, current_score) -> dict:
+    """Has the thesis deteriorated, counted only over comparable frameworks."""
+    et = entry_trace or {}
+    e_app, e_pass = et.get("applicable"), et.get("passed")
+    if not isinstance(e_app, list) or not isinstance(e_pass, list):
+        raw = int(entry_score) - int(current_score)
+        return {"comparable": False, "n_common": None, "entry_common": None,
+                "current_common": None, "delta": raw,
+                "fires": raw >= SCORE_DROP_BASE}
+    c_app = list(_applicable_frameworks(universe_row))
+    c_pass = [f for f in c_app if bool(universe_row.get(PASS_FLAG[f], False))]
+    common = [f for f in FRAMEWORKS if f in set(e_app) & set(c_app)]
+    e = sum(1 for f in common if f in set(e_pass))
+    c = sum(1 for f in common if f in set(c_pass))
+    return {"comparable": True, "n_common": len(common), "entry_common": e,
+            "current_common": c, "delta": e - c,
+            "fires": len(common) >= MIN_COMPARABLE
+                     and (e - c) >= score_drop_threshold(len(common))}
+
+
+def score_drop_headline(name: str, cmp: dict, entry_score, current_score) -> str:
+    """The raw pair is FALSE for a holding whose denominator moved — LUPIN would
+    read '4 -> 3' when nothing changed. State the basis alongside the numbers."""
+    if cmp.get("comparable"):
+        return (f"{name} score dropped {cmp['entry_common']} -> "
+                f"{cmp['current_common']} on the {cmp['n_common']} frameworks "
+                f"comparable to entry")
+    return f"{name} score dropped {entry_score} -> {current_score}"
+
+
 def score_label(row, score=None) -> str:
     """Render a composite score with its TRUE denominator: "3 of 4", not "3/5".
 
