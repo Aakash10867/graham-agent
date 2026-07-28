@@ -368,6 +368,14 @@ def _applicable_frameworks(row) -> tuple:
     excluded = set()
     if bool(row.get("greenblatt_sector_excluded", False)):
         excluded.add("greenblatt")
+    # Same reason, different balance-sheet shape. EBIT / (nwc + ppe) with a
+    # non-positive denominator is not a return on capital -- negative for a
+    # profitable business, positive for a loss-making one. Greenblatt's book
+    # is silent on it and his policy where the formula cannot price something
+    # is to exclude, not impute. Missing-data cases (no ca/cl, no EBIT) are
+    # deliberately NOT here: those keep failing.
+    if bool(row.get("greenblatt_capital_nonpositive", False)):
+        excluded.add("greenblatt")
     if str(row.get("lynch_category") or "").strip() == "unknown":
         excluded.add("lynch")
     if not excluded:
