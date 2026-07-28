@@ -127,9 +127,11 @@ FIELDS = [
                       "'FY2027')",
         "lo": 0.0, "hi": 15.0, "kind": "float",
         "extra": "target_fy",
-        "topic": "news",
-        "time_range": "month",
-        # The nearest thing to a sourced series available without a scraper.
+        # Three filters at once returned zero results on 2026-07-28. Keeping
+        # the domain restriction (it is the sourced-series property worth
+        # having) and dropping topic/time_range, which fought it: MPC
+        # statements are not indexed as recent news.
+        "topic": "general",
         "include_domains": ["rbi.org.in"],
     },
     {
@@ -190,6 +192,11 @@ def fetch_snippets(field: dict, key: str) -> tuple[str | None, str]:
 
     results = resp.json().get("results", [])
     if not results:
+        # 200 with zero results is a FILTER outcome, not an API failure. Name
+        # the filters so the next reader does not have to guess which one bit.
+        print(f"    0 results (topic={payload['topic']} "
+              f"time_range={payload.get('time_range', '-')} "
+              f"domains={payload.get('include_domains', '-')})", file=sys.stderr)
         return None, "retrieval_failed"
 
     lines = []
@@ -348,6 +355,11 @@ def main() -> int:
             row["value"] = vals.get("value")
             if field.get("extra"):
                 row[field["extra"]] = vals.get(field["extra"])
+            if status != "ok":
+                # Same rule as the HTTP body: a failure that discards its own
+                # evidence cannot be diagnosed. Retrieved snippets are public
+                # web text and carry no credentials.
+                print(f"    context sample: {context[:300]}", file=sys.stderr)
 
         # An explicit null row, ALWAYS. A missing date must mean "the job did
         # not run", never "the job ran and found nothing" -- those have to stay
