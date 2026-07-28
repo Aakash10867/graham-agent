@@ -5339,8 +5339,23 @@ def _extract_macro_scalar(context_text: str, field: str) -> dict:
     is safer than a confidently-wrong number feeding the review-diff).
     Returns {} on any failure — null is a first-class value, never fabricate.
     """
-    if not context_text or context_text.strip() in (
-        "No material recent developments found.", "Web search unavailable.", "Unavailable"):
+    # STRUCTURAL WHITELIST, not a blacklist. The previous guard named three
+    # exact sentinel strings, so anything else passed -- including
+    # get_web_context's own error returns, e.g. "Search API returned 403",
+    # which six call sites promote into a content slot via
+    # _r.get("context", _r.get("error", ...)). Gemini was then asked to extract
+    # an RBI CPI projection from an error message.
+    #
+    # Retrieved context always contains the bullet marker (CSE branch) or
+    # multi-line prose (Gemini grounding branch). An error string is a single
+    # short line with neither. Blacklists fail open; whitelists fail closed.
+    _t = (context_text or "").strip()
+    if not _t:
+        return {}
+    if _t in ("No material recent developments found.", "Web search unavailable.",
+              "Unavailable"):
+        return {}
+    if "\u2022" not in _t and "\n" not in _t and len(_t) < 200:
         return {}
 
     if field == "tax":
