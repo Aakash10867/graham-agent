@@ -3,22 +3,40 @@
 BUILT, NOT WIRED. Nothing in app.py, selector.py or deep_metrics.py reads this
 file or its output. It accumulates a dated series so that, for the first time,
 the extraction noise on these scalars becomes MEASURABLE rather than arguable.
-The decision about whether any of them should reach a recommendation is a
-separate, still-open question and must not be answered by this script existing.
+Whether any of them should reach a recommendation is a separate, still-open
+question and must not be answered by this script existing.
 
 WHY IT EXISTS
-The previous path called a web search per portfolio review, at review time.
-Consequences, all removed here:
+The previous path called a web search per portfolio review, at review time:
   1. Two users reviewing four hours apart could get different numbers, so
      `as_of` labelled when someone CLICKED, not the vintage of the fact.
-  2. On CSE 429 the old code fell through to Gemini google_search grounding —
-     a DIFFERENT retrieval stack. A diff between two snapshots could be partly
-     a diff between two search engines, and nothing recorded which ran.
+  2. On quota exhaustion it fell through to Gemini google_search grounding — a
+     DIFFERENT retrieval stack. A diff between two snapshots could be partly a
+     diff between two search engines, and nothing recorded which ran.
   3. Nothing was stored, so a real RBI revision and a bad parse were
      indistinguishable: you only ever saw two points.
 
-NO FALLBACK IS DELIBERATE. On CSE failure this records the failure. Falling
-back to a second retrieval system is the defect being removed, not resilience.
+WHY TAVILY AND NOT GOOGLE CUSTOM SEARCH  (decided 2026-07-28)
+Google CSE returns ~160-character SERP snippets ranked by relevance, not
+recency. Two consequences no amount of scheduling fixes: fragments truncate
+mid-sentence so a number arrives without its scope ("...projection at 4.0% for
+FY2027, revising Q3 to..."), and the top-5 set is temporally unordered so the
+extractor cannot tell a current projection from a 2024 one.
+
+Tavily addresses both directly. search_depth="advanced" returns parsed page
+content rather than a fragment, and include_domains lets the CPI query be
+restricted to rbi.org.in — which is much of what "replace with a sourced
+series" wanted, without a scraper.
+
+Separately and decisively: Google will not serve Custom Search JSON API on a
+project with no billing account. Confirmed across two projects, four key
+configurations, and a 13-hour propagation wait; the console reports the API
+Enabled while the API returns PERMISSION_DENIED at project level. Do not
+re-litigate this without a billing account attached.
+
+COST. 6 fields x ~22 weekdays x 2 credits (advanced) = ~264 credits/month
+against a 1,000/month free tier. Basic search would be ~132 but returns
+fragments, which is the thing being fixed.
 
 HARD BOUNDARY — india_10y_yield_pct is OBSERVE-ONLY and must not be wired to
 INDIA_10Y_BOND_RATE while deep_metrics.py:496-503 stands. That is a Gordon
@@ -32,7 +50,7 @@ import hashlib
 import json
 import os
 import sys
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timezone
 from statistics import median
 
 import requests
@@ -47,20 +65,26 @@ except ImportError:
 SERIES_PATH = "macro_series.json"
 SCHEMA_VERSION = 1
 
+TAVILY_URL = "https://api.tavily.com/search"
+
 # Extraction models, cheapest first. Same ladder as the app.
 EXTRACT_MODELS = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"]
 
-# The snippet assembler writes "- {title} ({source}): {snippet}" lines prefixed
-# with U+2022. Requiring that marker is a STRUCTURAL whitelist: text that did
-# not come from the snippet assembler cannot pass. The old guard blacklisted
-# three exact sentinel strings, so "Search API returned 403" sailed through and
-# was handed to the LLM as the evidence to extract a CPI projection from.
-# Blacklists fail open. Whitelists fail closed.
+# This script assembles the context text itself, one marker-prefixed line per
+# result. Requiring that marker downstream is a STRUCTURAL whitelist: text that
+# did not come from the assembler cannot pass. The old app-side guard
+# blacklisted three exact sentinel strings, so "Search API returned 403" sailed
+# through and was handed to the LLM as the evidence to extract a CPI projection
+# from. Blacklists fail open. Whitelists fail closed.
 SNIPPET_MARKER = "\u2022"
 
-# One query per SCALAR. Specificity is the whole point: a query that names one
-# number is far likelier to surface a snippet stating that number outright than
-# a broad "latest tax and inflation" sweep whose top hits are explainers.
+# One query per SCALAR. Specificity is the point: a query naming one number is
+# far likelier to surface a source stating that number than a broad sweep whose
+# top hits are explainers.
+#
+# time_range is set ONLY where recency genuinely matters. Tax rates are stable
+# legislative facts and the authoritative page may be old but still current, so
+# restricting them would exclude the best source. The bond yield moves daily.
 FIELDS = [
     {
         "name": "ltcg_pct",
@@ -68,6 +92,7 @@ FIELDS = [
         "prompt_key": "ltcg_pct (long-term capital gains rate on listed equity as a "
                       "percentage number, e.g. 12.5)",
         "lo": 0.0, "hi": 40.0, "kind": "float",
+        "topic": "general",
     },
     {
         "name": "stcg_pct",
@@ -75,6 +100,7 @@ FIELDS = [
         "prompt_key": "stcg_pct (short-term capital gains rate on listed equity as a "
                       "percentage number, e.g. 20.0)",
         "lo": 0.0, "hi": 40.0, "kind": "float",
+        "topic": "general",
     },
     {
         "name": "ltcg_holding_months",
@@ -82,16 +108,18 @@ FIELDS = [
         "prompt_key": "ltcg_holding_months (months a listed equity must be held to "
                       "qualify as long-term, e.g. 12)",
         "lo": 1.0, "hi": 60.0, "kind": "int",
+        "topic": "general",
     },
     {
         "name": "ltcg_exemption_inr",
         "query": "India LTCG annual exemption limit rupees listed equity",
         "prompt_key": "ltcg_exemption_inr (annual LTCG exemption in rupees, e.g. 125000)",
         "lo": 0.0, "hi": 10_000_000.0, "kind": "float",
+        "topic": "general",
     },
     {
         "name": "rbi_cpi_projection_pct",
-        "query": "RBI monetary policy statement CPI inflation projection percent",
+        "query": "RBI monetary policy statement CPI inflation projection",
         "prompt_key": "rbi_cpi_projection_pct (RBI's FORWARD projected CPI inflation as "
                       "a percentage number, e.g. 4.5 - NOT a fraction like 0.045; prefer "
                       "the official forward projection over a spot or current print), "
@@ -99,72 +127,90 @@ FIELDS = [
                       "'FY2027')",
         "lo": 0.0, "hi": 15.0, "kind": "float",
         "extra": "target_fy",
+        "topic": "news",
+        "time_range": "month",
+        # The nearest thing to a sourced series available without a scraper.
+        "include_domains": ["rbi.org.in"],
     },
     {
         "name": "india_10y_yield_pct",
-        "query": "India 10 year government bond yield percent today",
+        "query": "India 10 year government bond G-Sec yield",
         "prompt_key": "india_10y_yield_pct (the current India 10-year government bond "
                       "G-Sec yield as a percentage number, e.g. 6.8)",
         "lo": 0.0, "hi": 15.0, "kind": "float",
+        "topic": "finance",
+        "time_range": "week",
     },
 ]
 
 
 # ── Retrieval ─────────────────────────────────────────────────────────────
-def fetch_snippets(query: str, key: str, cx: str) -> tuple[str | None, str]:
+def fetch_snippets(field: dict, key: str) -> tuple[str | None, str]:
     """Return (context_text, status). No fallback to any other retrieval stack.
 
-    dateRestrict=d90 constrains the INDEX to recent documents. CSE ranks on
-    relevance and authority, not recency, so without it a well-linked 2024
-    article outranks a fresh thin one and the snippet set is temporally
-    unordered. This does not fix truncation -- snippets are still ~160-char
-    fragments -- but it removes the worst of the staleness.
+    Falling back to a second provider is the defect being removed, not
+    resilience: it made a diff between two snapshots partly a diff between two
+    search engines, undetectably. On failure this records the failure.
     """
+    payload = {
+        "query": field["query"],
+        # Parsed page content, not a 160-char fragment. 2 credits, not 1.
+        "search_depth": "advanced",
+        "max_results": 5,
+        "topic": field.get("topic", "general"),
+        "include_answer": False,
+        "include_raw_content": False,
+    }
+    if field.get("time_range"):
+        payload["time_range"] = field["time_range"]
+    if field.get("include_domains"):
+        payload["include_domains"] = field["include_domains"]
+
     try:
-        resp = requests.get(
-            "https://www.googleapis.com/customsearch/v1",
-            params={
-                "key": key,
-                "cx": cx,
-                "q": query,
-                "num": 5,
-                "dateRestrict": "d90",
+        resp = requests.post(
+            TAVILY_URL,
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
             },
-            timeout=20,
+            json=payload,
+            timeout=45,
         )
     except Exception as exc:
         print(f"    retrieval exception: {type(exc).__name__}", file=sys.stderr)
         return None, "retrieval_failed"
 
     if resp.status_code != 200:
-        # Log the BODY, not just the code. Google returns 403 for at least four
-        # distinct causes — quota exhausted, key restricted by IP/referrer, API
-        # not enabled on the project, key/cx mismatch — and only the body tells
-        # them apart. Printing the code alone is a check that discards its own
-        # evidence. The body carries no credentials.
+        # Log the BODY, not just the code. A status code alone is a check that
+        # discards its own evidence -- that cost several rounds of misdiagnosis
+        # against the previous provider. The body carries no credentials.
         detail = (resp.text or "")[:400].replace("\n", " ")
-        print(f"    CSE HTTP {resp.status_code}: {detail}", file=sys.stderr)
+        print(f"    Tavily HTTP {resp.status_code}: {detail}", file=sys.stderr)
         return None, "retrieval_failed"
 
-    items = resp.json().get("items", [])
-    if not items:
+    results = resp.json().get("results", [])
+    if not results:
         return None, "retrieval_failed"
 
     lines = []
-    for item in items:
+    for item in results:
+        content = (item.get("content") or "").replace("\n", " ").strip()
+        if not content:
+            continue
         lines.append(
             f"{SNIPPET_MARKER} {item.get('title', '')} "
-            f"({item.get('displayLink', '')}): "
-            f"{item.get('snippet', '').replace(chr(10), ' ')}"
+            f"({item.get('url', '')}): {content}"
         )
+    if not lines:
+        return None, "retrieval_failed"
     return "\n".join(lines), "ok"
 
 
 # ── Extraction ────────────────────────────────────────────────────────────
 def extract(context_text: str, field: dict, client) -> tuple[dict, str]:
-    """One scalar out of snippet prose. Returns (values, status)."""
+    """One scalar out of retrieved prose. Returns (values, status)."""
     if not context_text or SNIPPET_MARKER not in context_text:
-        # Structural whitelist. Not retrieved snippets -> not evidence.
+        # Structural whitelist. Not assembled results -> not evidence.
         return {}, "extraction_failed"
 
     prompt = (
@@ -232,15 +278,15 @@ def operative_value(readings: list, field_name: str, window: int = 5,
     """Rolling median of the last `window` OK readings, within max_span_days.
 
     BUILT, NOT WIRED -- no production caller. Here so the 10-weekday
-    falsification report can use the same definition the eventual consumer
-    would, rather than a second copy that drifts.
+    falsification report uses the same definition the eventual consumer would,
+    rather than a second copy that drifts.
 
     Median, not mean: the failure mode is one wild parse, not drift. RBI's
     projection is a step function with ~6 steps a year, so a 5-reading median
     lags a genuine step by 2-3 days and rejects everything else.
 
-    Re-runs on the same date are collapsed to the LAST reading for that date,
-    so a manual re-trigger does not double-weight a day.
+    Re-runs on the same date collapse to the LAST reading for that date, so a
+    manual re-trigger does not double-weight a day.
     """
     by_date = {}
     for r in readings:
@@ -266,11 +312,9 @@ def operative_value(readings: list, field_name: str, window: int = 5,
 
 # ── Main ──────────────────────────────────────────────────────────────────
 def main() -> int:
-    key = os.environ.get("GOOGLE_SEARCH_API_KEY")
-    cx = os.environ.get("GOOGLE_CSE_ID")
+    tav = os.environ.get("TAVILY_API_KEY")
     gem = os.environ.get("GEMINI_API_KEY")
-    missing = [n for n, v in (("GOOGLE_SEARCH_API_KEY", key),
-                              ("GOOGLE_CSE_ID", cx),
+    missing = [n for n, v in (("TAVILY_API_KEY", tav),
                               ("GEMINI_API_KEY", gem)) if not v]
     if missing:
         # A job that cannot read its evidence must FAIL, not report success on
@@ -285,7 +329,7 @@ def main() -> int:
     new_rows = []
     for field in FIELDS:
         print(f"  {field['name']}", flush=True)
-        context, status = fetch_snippets(field["query"], key, cx)
+        context, status = fetch_snippets(field, tav)
         source_hash = (hashlib.sha256(context.encode("utf-8")).hexdigest()[:16]
                        if context else None)
 
@@ -295,7 +339,7 @@ def main() -> int:
             "value": None,
             "status": status,
             "source_hash": source_hash,
-            "retrieval": "cse",
+            "retrieval": "tavily",
         }
 
         if status == "ok":
@@ -316,8 +360,8 @@ def main() -> int:
         return 1
 
     if all(r["status"] == "retrieval_failed" for r in new_rows):
-        # Every single retrieval failing is an infrastructure fact (expired
-        # key, CSE disabled), not a data outcome. Write the rows so the record
+        # Every retrieval failing is an infrastructure fact (bad key, credits
+        # exhausted, outage), not a data outcome. Write the rows so the record
         # is honest, then fail the build so it is noticed.
         series["readings"].extend(new_rows)
         with open(SERIES_PATH, "w", encoding="utf-8") as fh:
