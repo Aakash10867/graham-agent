@@ -165,7 +165,15 @@ PHILOSOPHY_TIEBREAK = {
     "growth_at_fair_price": ("lynch_peg_adjusted", True),
 }
 
-RANK_BAND = 0.05  # percentile points within which covariance may reorder
+# 2026-07-28: swept {0.005, 0.01, 0.02, 0.03, 0.05} against thresholds
+# pre-registered before the numbers were seen (median population <= 2, p90 <= 4).
+# At 0.05 the free pool held a median of 6 candidates and p90 of 10 -- not a tie
+# SET but a slate, and reordering ten candidates by covariance is security
+# selection, which this band explicitly disclaims. 0.02 is the largest width
+# that stays a tie set (median 2, p90 3-4) while leaving the tiebreak active on
+# 45-70% of calls. Caveat: 11-20 calls per site, so the 0.02/0.03 boundary rests
+# on a thin sample. band_sweep.py reproduces.
+RANK_BAND = 0.02
 
 # ── The conviction sleeve ──────────────────────────────────────────────────
 # Measured 2026-07: gate 3+ and gate 2+ produced IDENTICAL portfolios under all
