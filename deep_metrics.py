@@ -577,6 +577,12 @@ def compute_growth(data, income_stmt, shares):
 # ─── 5. MOAT DURABILITY (8 columns) ───
 
 def compute_moat(data, info, income_stmt, bs, cashflow, shares):
+    # Default here, NOT in compute_manipulation_flags. That function runs AFTER
+    # compute_moat and an unconditional default there resets the flag on every
+    # row -- which is exactly what happened on the first v5 run: 226 expected
+    # True, 0 observed. Defaults must be set before the branch that overrides
+    # them, never after.
+    data["greenblatt_capital_nonpositive"] = False
     """Compute moat durability metrics."""
     if income_stmt is None or income_stmt.empty:
         for col in ["greenblatt_roic", "greenblatt_roic_trend", "dorsey_roic",
@@ -899,10 +905,6 @@ def compute_manipulation_flags(data, income_stmt, bs, cashflow):
                  "greenblatt_sector_excluded", "greenblatt_low_pe_flag", "mulford_fcf_consistent"]
     for col in flag_cols:
         data[col] = None
-    # Default FALSE, not None. This flag answers "is the ratio meaningless?",
-    # and the answer is no unless the tc <= 0 branch says otherwise. A None
-    # here would be a third state the selector would have to guess about.
-    data["greenblatt_capital_nonpositive"] = False
 
     sector = data.get("sector", "")
     pe = _sf(data.get("pe"))
