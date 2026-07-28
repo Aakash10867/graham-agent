@@ -136,12 +136,22 @@ FIELDS = [
     },
     {
         "name": "india_10y_yield_pct",
-        "query": "India 10 year government bond G-Sec yield",
+        # 2026-07-28: "India 10 year government bond G-Sec yield" + topic=finance
+        # returned Investopedia's DURATION explainer -- semantic match on
+        # fixed-income concepts, not on today's print. Naming the instrument
+        # ("10Y") and the artifact ("bond yield today") anchors on quote pages
+        # rather than educational content.
+        "query": "India 10Y government bond yield today percent",
         "prompt_key": "india_10y_yield_pct (the current India 10-year government bond "
-                      "G-Sec yield as a percentage number, e.g. 6.8)",
+                      "G-Sec yield as a percentage number, e.g. 6.8). Return null "
+                      "unless the text states an actual India 10-year yield figure - "
+                      "do NOT return a number from a general explanation of bonds, "
+                      "duration, or interest rates",
         "lo": 0.0, "hi": 15.0, "kind": "float",
-        "topic": "finance",
+        "topic": "general",
         "time_range": "week",
+        "include_domains": ["tradingeconomics.com", "investing.com",
+                            "worldgovernmentbonds.com"],
     },
 ]
 
