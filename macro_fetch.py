@@ -247,6 +247,16 @@ def extract(context_text: str, field: dict, client) -> tuple[dict, str]:
     except Exception:
         return {}, "extraction_failed"
 
+    if not isinstance(parsed, dict):
+        # json.loads succeeding does not mean the shape is right. A model asked
+        # for an object sometimes returns a list of them. Validating that
+        # something PARSES and validating that it is the expected TYPE are two
+        # checks; only writing the first is how this crashed a whole run.
+        if isinstance(parsed, list) and parsed and isinstance(parsed[0], dict):
+            parsed = parsed[0]
+        else:
+            return {}, "extraction_failed"
+
     val = parsed.get(field["name"])
     try:
         val = float(val)
@@ -350,7 +360,16 @@ def main() -> int:
         }
 
         if status == "ok":
-            vals, status = extract(context, field, client)
+            try:
+                vals, status = extract(context, field, client)
+            except Exception as exc:
+                # Per-field isolation. An unhandled error in one extraction
+                # must not discard the other five fields' readings -- that is
+                # what happened on 2026-07-28, losing four good tax rows to a
+                # shape error in the fifth.
+                print(f"    extract raised {type(exc).__name__}: {exc}",
+                      file=sys.stderr)
+                vals, status = {}, "extraction_failed"
             row["status"] = status
             row["value"] = vals.get("value")
             if field.get("extra"):
