@@ -32,8 +32,7 @@ jobs:
 
       - name: Fetch macro scalars
         env:
-          GOOGLE_SEARCH_API_KEY: ${{ secrets.GOOGLE_SEARCH_API_KEY }}
-          GOOGLE_CSE_ID: ${{ secrets.GOOGLE_CSE_ID }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python macro_fetch.py
 
