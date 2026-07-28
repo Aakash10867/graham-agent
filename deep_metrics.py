@@ -608,7 +608,29 @@ def compute_moat(data, info, income_stmt, bs, cashflow, shares):
             if tangible_capital and tangible_capital > 0:
                 data["greenblatt_roic"] = round(ebit / tangible_capital * 100, 2)
             else:
+                # INAPPLICABILITY, not missing data. EBIT over a non-positive
+                # denominator is not a return on capital in either direction:
+                # a profitable business gets a NEGATIVE roic, and a loss-making
+                # one gets a POSITIVE one. Greenblatt excludes financials on
+                # exactly this reasoning -- the ratio is meaningless for that
+                # balance-sheet shape -- and says nothing about negative
+                # tangible capital anywhere in the book (checked: the appendix
+                # ROC definition, the screening steps, and every occurrence of
+                # "negative"). His demonstrated policy where the formula cannot
+                # price something is to EXCLUDE, never to impute. So this
+                # abstains rather than failing.
+                #
+                # The flag is required because `greenblatt_roic is None` has
+                # THREE causes -- this one, a missing ca/cl, and no EBIT -- and
+                # only this one is inapplicability. One flag carrying two
+                # meanings is the W2 root-cause defect; this keeps them apart.
+                #
+                # Distress protection is NOT this metric's job. Measured
+                # 2026-07-28: of 226 rows with tc <= 0, only 18 survive _tier1
+                # and 17 of those have positive EBIT. _tier1 and the
+                # Schilit/Mulford gate already strip the rest.
                 data["greenblatt_roic"] = None
+                data["greenblatt_capital_nonpositive"] = True
         else:
             data["greenblatt_roic"] = None
     else:
@@ -877,6 +899,10 @@ def compute_manipulation_flags(data, income_stmt, bs, cashflow):
                  "greenblatt_sector_excluded", "greenblatt_low_pe_flag", "mulford_fcf_consistent"]
     for col in flag_cols:
         data[col] = None
+    # Default FALSE, not None. This flag answers "is the ratio meaningless?",
+    # and the answer is no unless the tc <= 0 branch says otherwise. A None
+    # here would be a third state the selector would have to guess about.
+    data["greenblatt_capital_nonpositive"] = False
 
     sector = data.get("sector", "")
     pe = _sf(data.get("pe"))
