@@ -24,7 +24,19 @@ REASON_MAP = {
     "greenblatt_earnings_yield":   ("high", "pct",  "an earnings yield of {v:.1f}%"),
     "lynch_peg":                   ("low",  "raw",  "a PEG ratio of {v:.2f}"),
     "graham_ncav_ratio":           ("high", "raw",  "net current assets {v:.1f}x its market value"),
-    "buffett_margin_of_safety_pct":("high", "pct",  "~{v:.0f}% below its owner-earnings intrinsic value"),
+    # REMOVED 2026-07-28 — buffett_margin_of_safety_pct derives from
+    # deep_metrics.py:496-503, a Gordon growth model oe_ps*(1+g)/(r-g) with
+    # r = INDIA_10Y_BOND_RATE (7%) and g = min(ni_cagr, 15%). Two failure modes,
+    # and REASON_MAP's percentile ranking turns the second into a win:
+    #   g >= r  -> intrinsic value None -> excluded. Most healthy growers.
+    #   g -> r- -> denominator -> 0 -> MoS asymptotes to ~100% -> guaranteed
+    #              top quartile -> surfaced as a leading reason to buy,
+    #              DISPLACING genuine facts.
+    # The metric therefore favours companies growing just BELOW the government
+    # bond rate and hides everything growing faster — the inverse of what an
+    # owner-earnings margin of safety should select for. The column is still
+    # computed and stored; only the user-facing surface is withdrawn, pending a
+    # replacement intrinsic-value model. Do not re-add without that model.
     # ── Quality / profitability ──
     "roe_pct":                     ("high", "pct",  "a return on equity of {v:.0f}%"),
     "profit_margin":               ("high", "frac", "a net profit margin of {v:.0f}%"),
