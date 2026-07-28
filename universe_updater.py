@@ -31,7 +31,20 @@ import deep_metrics
 # History:
 #   1  2026-07-10  dividend_yield fraction->percent fix; trajectory_pass >= 8
 # ──────────────────────────────────────────────
-SCHEMA_VERSION = 4   # v4: W2 archetype engine — lynch_category REDEFINED
+SCHEMA_VERSION = 5   # v5: C1 — Greenblatt abstains on non-positive tangible capital
+# ── v4 -> v5 IS AN ADDITION PLUS AN APPLICABILITY CHANGE ───────────────
+# New column `greenblatt_capital_nonpositive`. No stored score moves:
+# greenblatt_roic, greenblatt_score and score are unchanged on every row. What
+# changes is n_applicable -- rows with tc <= 0 now carry 4 applicable
+# frameworks instead of 5, so _effective_gate holds them to the same FRACTION
+# of a smaller set. Selection moves; stored scores do not.
+# Measured 2026-07-28 on 4,626 rows: 226 rows have tc <= 0, of which 18 survive
+# _tier1 -- INDIAMART, NAUKRI, COLPAL, NUCLEUS, MATRIMONY, NIRLON, ENGINERSIN
+# among them. Those were recorded as FAILING a test that was never run.
+# Rows whose greenblatt_roic is None for missing ca/cl or missing EBIT are
+# UNAFFECTED and keep failing -- that is missing data, not inapplicability.
+# v4 rows carry no such column; treat pre-v5 cohorts as a separate experiment
+# for anything keyed on n_applicable.
 # ── v3 -> v4 IS A DECLARED BREAK, NOT AN ADDITION ──────────────────────
 # lynch_category is no longer computed by the old priority ladder, whose
 # cyclical branch keyed off graham_eps_cv > 0.5 — empirically a coin flip
@@ -1211,7 +1224,8 @@ def main():
         "schilit_dsi", "schilit_inventory_revenue_div", "schilit_wc_cffo_pct",
         "schilit_leverage_trend", "schilit_serial_acquirer", "goodwill_pct",
         "dorsey_cfo_ni_divergence", "dorsey_ar_growth_flag", "lynch_inventory_flag",
-        "greenblatt_sector_excluded", "greenblatt_low_pe_flag", "mulford_fcf_consistent",
+        "greenblatt_sector_excluded", "greenblatt_capital_nonpositive",
+        "greenblatt_low_pe_flag", "mulford_fcf_consistent",
         # Classification
         "lynch_category", "lynch_debt_healthy", "mulford_lifecycle_stage",
         "graham_ent_financial_pass",
