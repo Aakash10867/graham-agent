@@ -46,5 +46,11 @@
     "schema_version": 4,
     "n_universe": 4626,
     "n_investable": 2314
+  },
+  {
+    "date": "2026-07-28",
+    "schema_version": 4,
+    "n_universe": 4475,
+    "n_investable": 2201
   }
 ]
