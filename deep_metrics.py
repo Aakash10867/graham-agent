@@ -1481,14 +1481,28 @@ def compute_framework_verdicts(data):
     lynch_threshold = 6
     if cat == "slow_grower":
         lynch_threshold = 5  # Easier to pass for dividend payers
-    lynch_pass = lynch_s >= lynch_threshold
+    # W2 abstention. `unclassified` -> lynch_category "unknown", which matches
+    # no branch at 1235-1305, so lynch_s stays 0 and `0 >= 6` recorded a
+    # FAILURE on 2,320 rows (51.8% of universe). They have not failed Lynch;
+    # Lynch cannot evaluate them. selector._applicable_frameworks:379 already
+    # excludes them from the GATE -- this fixes the stored CLAIM, which is the
+    # half that was never wired. archetype.py:232-234 documents it as pending.
+    lynch_pass = None if cat == "unknown" else (lynch_s >= lynch_threshold)
 
     data["graham_pass"] = graham_pass
     data["greenblatt_pass"] = greenblatt_pass
     data["dorsey_pass"] = dorsey_buff_pass  # Keep column name for backward compat
     data["trajectory_pass"] = trajectory_pass
     data["lynch_pass"] = lynch_pass
-    data["score"] = sum([graham_pass, greenblatt_pass, dorsey_buff_pass, trajectory_pass, lynch_pass])
+    # `is True` keeps score BYTE-IDENTICAL to pre-abstention behaviour: None
+    # and False both contribute 0. No archive breaks, no reconcile break, no
+    # disturbance to backtest cohorts. The denominator is NOT stored here --
+    # score_history.applicable (jsonb, written from _applicable_frameworks) is
+    # the single source of truth for it. A second denominator computed in a
+    # second module is the pattern this project rejects.
+    _verdicts = (graham_pass, greenblatt_pass, dorsey_buff_pass,
+                 trajectory_pass, lynch_pass)
+    data["score"] = sum(1 for _v in _verdicts if _v is True)
     # Continuous mirror of the integer score (0-5). None frac -> 0, mirroring the
     # integer (where an unranked greenblatt fails its pass). Display/W1 only.
     data["score_continuous"] = round(sum(
