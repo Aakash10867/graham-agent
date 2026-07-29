@@ -602,7 +602,7 @@ def compute_moat(data, info, income_stmt, bs, cashflow, shares):
         latest_bs = bs_cols[-1]
         ca = _bs_row(bs, ["Current Assets", "Total Current Assets"], latest_bs)
         cl = _bs_row(bs, ["Current Liabilities", "Total Current Liabilities"], latest_bs)
-        cash = _sf(info.get("totalCash")) or 0
+        cash = 0  # V2 — see the v6 -> v7 schema note. NOT Greenblatt's denominator.
         st_debt = _bs_row(bs, ["Current Debt", "Short Long Term Debt", "Current Debt And Capital Lease Obligation"], latest_bs, 0)
         ppe = _bs_row(bs, ["Net PPE", "Property Plant Equipment Net", "Net Property Plant And Equipment"], latest_bs, 0)
         gw = _bs_row(bs, ["Goodwill"], latest_bs, 0)
