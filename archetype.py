@@ -439,8 +439,7 @@ def assign_archetype(data):
             "archetype_primary": "unclassified",
             "archetype_secondary": None,
             "archetype_confidence": round(top_ev, 4),
-            "archetype_basis": (f"unclassified: best={top_name} ev={top_ev:.2f} "
-                                f"< MIN_EVIDENCE {MIN_EVIDENCE}"),
+            "archetype_basis": (f"unclassified: no evidence -- every archetype scored 0.00" if top_ev == 0 else f"unclassified: best={top_name} ev={top_ev:.2f} < MIN_EVIDENCE {MIN_EVIDENCE}"),
         }
 
     # Dual label. Used ONLY to SUPPRESS sign flips where primary and secondary
