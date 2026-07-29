@@ -55,8 +55,8 @@
   },
   {
     "date": "2026-07-29",
-    "schema_version": 5,
+    "schema_version": 6,
     "n_universe": 4475,
-    "n_investable": 2230
+    "n_investable": 2224
   }
 ]
