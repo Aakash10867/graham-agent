@@ -31,7 +31,58 @@ import deep_metrics
 # History:
 #   1  2026-07-10  dividend_yield fraction->percent fix; trajectory_pass >= 8
 # ──────────────────────────────────────────────
-SCHEMA_VERSION = 6   # v6: Lynch abstains when the archetype engine cannot classify
+SCHEMA_VERSION = 7   # v7: Greenblatt tangible capital no longer subtracts info["totalCash"]
+# ── v6 -> v7 MOVES STORED SCORES. NOT AN ADDITION. ─────────────────────
+# deep_metrics.py:605 subtracted `info["totalCash"]` from current assets. Two
+# independent defects, both measured 2026-07-29:
+#   (a) DATE. info["totalCash"] is most-recent-quarter; `ca` is fiscal-year-end.
+#       APTECHT: info 352M vs balance-sheet columns 1,344M and 1,303M --
+#       matching NEITHER. The subtraction mixed two dates.
+#   (b) EXCHANGE. totalCash is absent for 100.0% of BSE rows and 3.8% of NSE,
+#       FLAT across every size quintile within BSE (P1-P5 all 100%), so it is
+#       an exchange effect and not a coverage/size effect. `or 0` turned absent
+#       into zero, so 47% of the rankable universe was scored with a DIFFERENT
+#       FORMULA inside a universe-wide percentile.
+#
+# Four variants measured universe-wide on 3,101 rankable rows. Reproduction of
+# both the stored roic and the stored greenblatt_frac verified at 99.9% before
+# any comparison was read. Combined-rank churn (the terminal; roic churn alone
+# overstates it):
+#     variant  cash term                spearman  top30  new abstentions
+#     V1       info totalCash (old)        --      --      0
+#     V2       none                       0.989    83%     0     <- ADOPTED
+#     V4       bs cash, date-matched      0.973    70%    50
+#     V3       bs cash - k*revenue        0.973    70%    35-40
+# `k` is NOT load-bearing: V3 is identical to V4 across a 2.5x range of k, so
+# Greenblatt's excess-cash refinement buys NOTHING measurable over fixing the
+# date. A specification that cannot change an outcome was not added.
+# V4 MANUFACTURES abstentions: of its 50, 26 are threshold artifacts
+# (margin > -0.15, a hair past zero) and 33 are blank-sector rows that die at
+# _tier1 anyway. Rejected.
+# V2 HALVES the exchange bias: median combined-rank gap BSE-NSE +428 -> +224.
+# The residual is plausibly a real population difference and V2 does not
+# pretend otherwise.
+#
+# HONEST LABEL: V2 IS NOT GREENBLATT'S DENOMINATOR. The book (appendix,
+# "Return on Capital") excludes EXCESS cash -- cash not needed to conduct the
+# business. V2 excludes none. V2 is the denominator computable IDENTICALLY for
+# every company in the universe. For a universe-wide relative percentile,
+# consistency across the ranked population dominates definitional fidelity:
+# applying the book's exclusion to 53% of the universe and not the rest is
+# worse than applying it to none. THIS IS A SPECIFICATION AND THE REASON IS
+# DATA AVAILABILITY. Do not annotate it as Greenblatt's number.
+#
+# Where the code already matches the book (verified against the PDF): ST
+# interest-bearing debt excluded from current liabilities (cl - st_debt, 607);
+# goodwill excluded (uses Net PPE). `gw`/`intang` are read at 608-609 and never
+# used -- vestigial, left alone deliberately.
+#
+# EXPECTED IMPACT: ~5 of any top 30 change. greenblatt_roic moves on every row
+# that had non-zero totalCash (NSE mostly); BSE rows are UNCHANGED because
+# their cash was already 0. Cohorts under schema_version <= 6 are NOT
+# comparable to v7 on greenblatt_roic, greenblatt_score, greenblatt_frac,
+# greenblatt_pass or score.
+# ── v5 -> v6 IS A DECLARED BREAK ON TWO TERMINAL COLUMNS ───────────────
 # ── v5 -> v6 IS A DECLARED BREAK ON TWO TERMINAL COLUMNS ───────────────
 # `lynch_pass` becomes None (was False) where lynch_category == "unknown", and
 # `archetype_basis` reports "no evidence" instead of naming an alphabetical
