@@ -101,15 +101,27 @@ def compute_balance_sheet(data, info, bs, shares):
     cr = _sf(data.get("current_ratio"))
     data["graham_current_ratio_pass"] = bool(cr and cr >= 2.0)
 
-    if bs is None or bs.empty or shares is None or shares <= 0:
-        # Set all BS-dependent columns to None
+    # graham_bvps reads info["bookValue"] and depends on NEITHER bs NOR shares.
+    # It was nulled by a gate that has nothing to do with it.
+    _bv = _sf(info.get("bookValue"))
+    data["graham_bvps"] = round(_bv, 2) if _bv else None
+
+    if bs is None or bs.empty:
+        # No balance sheet -> nothing below is computable. graham_bvps survives.
         for col in ["graham_ltd_vs_nca", "graham_net_current_assets", "graham_ncav_per_share",
-                     "graham_ncav_ratio", "graham_bvps", "graham_price_to_ntav",
+                     "graham_ncav_ratio", "graham_price_to_ntav",
                      "graham_net_cash", "lynch_net_cash_per_share",
                      "dorsey_financial_leverage", "dorsey_interest_coverage",
                      "dorsey_quick_ratio", "dorsey_clean_balance_sheet"]:
             data[col] = None
         return
+
+    # A missing share count is NOT a missing balance sheet. Only the four
+    # PER-SHARE columns become uncomputable; the other seven read bs/info
+    # directly. Nulling all twelve destroyed the whole balance-sheet picture
+    # for companies whose balance sheet was fully readable -- 180 rows fire
+    # this, 97.8% score 0 against a 53.0% baseline. Proof case 3PLAND.NS.
+    _has_sh = shares is not None and shares > 0
 
     cols = sorted(bs.columns)
     latest = cols[-1]
@@ -143,7 +155,7 @@ def compute_balance_sheet(data, info, bs, shares):
 
     # N1: NCAV per share
     total_liab = _bs_row(bs, ["Total Liabilities Net Minority Interest", "Total Liab"], latest)
-    if ca is not None and total_liab is not None:
+    if ca is not None and total_liab is not None and _has_sh:
         ncav = ca - total_liab
         data["graham_ncav_per_share"] = round(ncav / shares, 2)
     else:
@@ -156,13 +168,13 @@ def compute_balance_sheet(data, info, bs, shares):
     else:
         data["graham_ncav_ratio"] = None
 
-    # F3: Book Value per Share
-    data["graham_bvps"] = round(bvps, 2) if bvps else None
+    # F3: Book Value per Share — already set above the bs gate, before any
+    # early return could destroy it. Left here as a no-op for traceability.
 
     # E5: Price to Net Tangible Assets
     if total_assets is not None and total_liab is not None:
         ntav = total_assets - (intangibles or 0) - (goodwill or 0) - total_liab
-        ntav_ps = ntav / shares if shares > 0 else None
+        ntav_ps = ntav / shares if _has_sh else None
         if ntav_ps and ntav_ps > 0 and price:
             data["graham_price_to_ntav"] = round(price / ntav_ps, 2)
         else:
@@ -174,7 +186,9 @@ def compute_balance_sheet(data, info, bs, shares):
     if total_cash is not None and total_debt is not None:
         net_cash = total_cash - total_debt
         data["graham_net_cash"] = round(net_cash, 2)
-        data["lynch_net_cash_per_share"] = round(net_cash / shares, 2)
+        # graham_net_cash needs no share count; only the per-share form does.
+        data["lynch_net_cash_per_share"] = (round(net_cash / shares, 2)
+                                            if _has_sh else None)
     else:
         data["graham_net_cash"] = None
         data["lynch_net_cash_per_share"] = None
