@@ -5007,7 +5007,7 @@ def get_csv_financial_data(ticker: str) -> dict:
             "greenblatt_pass": bool(row.get("greenblatt_pass")) if row.get("greenblatt_pass") != "N/A" else False,
             "dorsey_pass": bool(row.get("dorsey_pass")) if row.get("dorsey_pass") != "N/A" else False,
             "trajectory_pass": bool(row.get("trajectory_pass")) if row.get("trajectory_pass") != "N/A" else False,
-            "lynch_pass": bool(row.get("lynch_pass")) if row.get("lynch_pass") != "N/A" else False,
+            "lynch_pass": False if (row.get("lynch_pass") in (None, "", "N/A") or pd.isna(row.get("lynch_pass"))) else bool(row.get("lynch_pass")),
         }
         score = int(row.get("score", 0)) if row.get("score") != "N/A" else 0
         quality_pass = bool(row.get("quality_pass")) if row.get("quality_pass") != "N/A" else False
