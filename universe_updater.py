@@ -31,7 +31,41 @@ import deep_metrics
 # History:
 #   1  2026-07-10  dividend_yield fraction->percent fix; trajectory_pass >= 8
 # ──────────────────────────────────────────────
-SCHEMA_VERSION = 5   # v5: C1 — Greenblatt abstains on non-positive tangible capital
+SCHEMA_VERSION = 6   # v6: Lynch abstains when the archetype engine cannot classify
+# ── v5 -> v6 IS A DECLARED BREAK ON TWO TERMINAL COLUMNS ───────────────
+# `lynch_pass` becomes None (was False) where lynch_category == "unknown", and
+# `archetype_basis` reports "no evidence" instead of naming an alphabetical
+# tie-break winner. NO STORED SCORE MOVES: reconcile on 4,476 rows shows
+# score, score_continuous, lynch_score, lynch_frac and every other terminal at
+# 0 mismatches. SELECTION IS ALSO UNCHANGED -- selector._applicable_frameworks
+# already excluded unclassified rows from the Lynch gate (W2 step 6 shipped);
+# only the stored CLAIM was still wrong, and archetype.py:232-234 documented it
+# as pending. This wires the half that was never wired.
+# Measured 2026-07-29 on 4,476 rows:
+#     lynch_pass False -> None      2,320 rows (51.8% of universe)
+#     archetype_basis rewritten     1,851 rows (those with top_ev == 0.00)
+#     score changed                     0 rows
+# The 1,851 are the rows where all five ranked evidence functions returned
+# exactly 0.0; the sort at archetype.py:432 is (-value, name), so a five-way
+# tie of zeros resolved ALPHABETICALLY and `best=asset_play` appeared on
+# 100.0% of them. _ev_asset_play returns only 1.0 or 0.0 and never wins on
+# merit at zero. That string is the deterministic trace the LLM phrases, so it
+# was telling users a shrinking company's best evidence was "asset play".
+# The remaining 469 unclassified rows have top_ev > 0 and keep the old message.
+# Root causes of the 1,851, measured and separated:
+#     ~2/3  ni_cagr_3y is None -- universe_updater:618 requires ni_y0 > 0 AND
+#           ni_y3 > 0, so one loss year kills it, and _ev_fast_grower /
+#           _ev_stalwart / _ev_slow_grower all return 0.0 on that guard.
+#      605  profitable both years but min(rev_cagr, ni_cagr) <= -5.04%.
+#           Shrinking. Lynch has no bucket for a profitable declining firm.
+#           Abstention is CORRECT for these; not a defect.
+#      331  the dead zone: a loss under 5% of revenue, so the CAGR dies and
+#           _ev_turnaround's materiality floor is not met either.
+# MIN_EVIDENCE = 0.50 is NOT the binding constraint and stays closed: 80% of
+# unclassified rows sit at top_ev exactly 0.000, only 3.0% within 0.05 of the
+# gate, and zero carry a secondary label.
+# Pre-v6 cohorts differ from v6 on lynch_pass and archetype_basis ONLY.
+# Anything keyed on score, n_applicable or selection spans the boundary safely.
 # ── v4 -> v5 IS AN ADDITION PLUS AN APPLICABILITY CHANGE ───────────────
 # New column `greenblatt_capital_nonpositive`. No stored score moves:
 # greenblatt_roic, greenblatt_score and score are unchanged on every row. What
