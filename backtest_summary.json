@@ -1,11 +1,11 @@
 {
   "status": "INSUFFICIENT_DATA",
   "matured_cohorts": 0,
-  "snapshots_clean": 14,
+  "snapshots_clean": 15,
   "min_required": 1,
   "horizon_trading_days": 63,
   "benchmark": "NIFTYBEES.NS",
-  "generated": "2026-07-28T16:43:22",
+  "generated": "2026-07-29T12:56:01",
   "caveats": [
     "Cross-sectional ladder: within a cohort all buckets share the same window, so a good/bad quarter lifts or sinks them together and cancels out of the high-minus-low spread.",
     "Daily cohorts overlap ~62/63 days \u2014 they sharpen the estimate but are NOT independent. The band uses effective N = calendar span / horizon, not the raw cohort count.",
