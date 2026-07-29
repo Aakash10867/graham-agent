@@ -31,7 +31,23 @@ import deep_metrics
 # History:
 #   1  2026-07-10  dividend_yield fraction->percent fix; trajectory_pass >= 8
 # ──────────────────────────────────────────────
-SCHEMA_VERSION = 7   # v7: Greenblatt tangible capital no longer subtracts info["totalCash"]
+SCHEMA_VERSION = 8   # v8: shares gate no longer nulls balance-sheet columns that do not use shares
+# ── v7 -> v8 POPULATES COLUMNS THAT WERE FALSELY NULL ──────────────────
+# compute_balance_sheet's gate was `bs empty OR shares missing` and nulled all
+# twelve BS-dependent columns. Only FOUR use `shares`. The other eight -- one
+# of which (graham_bvps) reads info["bookValue"] and needs neither bs nor
+# shares -- were destroyed for companies whose balance sheet was fully
+# readable. 180 rows fire the gate; 97.8% score 0 against a 53.0% baseline.
+# Proof case 3PLAND.NS: every input present, sharesOutstanding absent, all
+# twelve null.
+# Measured on the real function, same synthetic inputs:
+#     original shares=None -> 0/7 non-share columns set
+#     patched  shares=None -> 7/7 set, per-share four correctly None
+# Three sites required None-guards or the split alone CRASHES:
+#     148 ncav / shares      178 net_cash / shares      165 shares > 0
+# Direction is one-way: columns go None -> populated, never the reverse. No
+# row loses a value it previously had.
+# ── v6 -> v7 MOVES STORED SCORES. NOT AN ADDITION. ─────────────────────
 # ── v6 -> v7 MOVES STORED SCORES. NOT AN ADDITION. ─────────────────────
 # deep_metrics.py:605 subtracted `info["totalCash"]` from current assets. Two
 # independent defects, both measured 2026-07-29:
