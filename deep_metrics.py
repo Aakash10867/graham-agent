@@ -21,7 +21,47 @@ from archetype import assign_archetype, lynch_category_from
 # ─── Constants ───
 INDIA_10Y_BOND_RATE = 7.0        # Hardcoded, stable
 ADEQUATE_SIZE_INR = 2_000_000_000  # ₹200Cr (PPP-adjusted from Graham's $100M)
-COST_OF_CAPITAL_PROXY = 12.0     # Rough WACC for Indian equities
+# COST_OF_CAPITAL_PROXY — SPECIFICATION OF THIS PROJECT, not a book number.
+# Set 2026-07-29. Value UNCHANGED at 12.0; this edit only records why.
+#
+# Construction: Indian sovereign 10Y (~7.0) + ~5pp equity risk premium. That is
+# a standard build, but the 5pp is a JUDGEMENT, not sourced from any of the
+# seven books. None of Reilly & Brown, Graham, Dorsey or Buffett supplies an
+# India cost-of-capital figure.
+#
+# DELIBERATELY NOT written as `INDIA_10Y_BOND_RATE + EQUITY_RISK_PREMIUM`.
+# Expressing the derivation in code would be better documentation but would
+# COUPLE this to the bond rate, and the roadmap bars wiring the observed 10Y
+# until the Gordon singularity (496-503) is fixed. Coupling widens that fix's
+# blast radius from one column to four, and at ~10 survivors per percentage
+# point (below) a live sovereign drifting 50bps would silently move ~5
+# holdings. Kept independent on purpose; the derivation lives here where it
+# cannot propagate.
+#
+# Sensitivity, measured 2026-07-29 on 4,476 rows / 659 _tier1 survivors
+# (cocp_sweep.py; dorsey_pass reproduces as score >= 6 at 100.0%):
+#     proxy   survivors passing dorsey (>= 6 of 10)
+#      10.0   309   (+30)
+#      11.0   289   (+10)
+#      12.0   279   <- adopted
+#      13.0   270    (-9)
+#      14.0   261   (-18)
+# Smooth and roughly linear, ~10 survivors per pp. Load-bearing but NOT
+# knife-edged: no defensible value in 10-14 yields a materially different
+# portfolio. 12.0 also sits at p75 of dorsey_roic (12.89), admitting the top
+# 28.2% on return-on-capital -- a coincidence, not a justification, but it
+# indicates the value is not miscalibrated.
+#
+# NOT REPRICED. Nothing measured argues for a different number, and moving it
+# would be choosing a value to change the portfolio, which is backwards.
+# Revisit only with an external cost-of-capital source, not with a sweep.
+#
+# Consumed at FOUR sites, all comparing a percent-scale return:
+#   551   buffett_value_creating_growth   best_return > PROXY
+#   853   buffett_rational_allocation     roic > PROXY
+#   1176  dorsey_buffett_score D5         droic > PROXY  (+1 of 10)
+#   1195  dorsey_buffett_graded D5        same, graded
+COST_OF_CAPITAL_PROXY = 12.0
 
 
 # ─── Helpers ───
