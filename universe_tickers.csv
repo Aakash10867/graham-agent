@@ -486,7 +486,6 @@ ticker,name,exchange
 513511.BO,Panchmahal Steel Ltd.,BSE
 513513.BO,Aditya Ispat Ltd.,BSE
 513528.BO,Glittek Granites Ltd.,BSE
-513540.BO,Tamilnadu Steel Tubes Ltd.,BSE
 513544.BO,Mardia Samyoung Capillary Tubes Co.,BSE
 513548.BO,Sharda Ispat Ltd.,BSE
 513566.BO,Nova Iron & Steel Ltd.,BSE
@@ -741,7 +740,6 @@ ticker,name,exchange
 523620.BO,Phaarmasia Limited.,BSE
 523638.BO,IP Rings Ltd.,BSE
 523650.BO,YASH INNOVENTURES LIMITED,BSE
-523652.BO,Kkalpana Plastick Limited,BSE
 523660.BO,Waterbase Limited,BSE
 523672.BO,Flex Foods Ltd.,BSE
 523676.BO,Golkunda Diamonds & Jewellery Ltd.,BSE
@@ -2664,6 +2662,7 @@ ticker,name,exchange
 590160.BO,Tata Mutual Fund - Permitted,BSE
 5PAISA.NS,5Paisa Capital Limited,NSE
 63MOONS.NS,63 moons technologies limited,NSE
+751127.BO,Minolta Finance Ltd.,BSE
 780014.BO,Has Lifestyle Limited,BSE
 780016.BO,Web Element Solutions Limited,BSE
 780018.BO,Adhiraj Distributors Limited,BSE
@@ -3639,6 +3638,7 @@ INDOAMIN.NS,Indo Amines Limited,NSE
 INDOBORAX.NS,Indo Borax & Chemicals Limited,NSE
 INDOCO.NS,Indoco Remedies Limited,NSE
 INDOFARM.NS,Indo Farm Equipment Limited,NSE
+INDOMIM.NS,INDO-MIM Limited,NSE
 INDORAMA.NS,Indo Rama Synthetics (India) Limited,NSE
 INDOSTAR.NS,IndoStar Capital Finance Limited,NSE
 INDOTECH.NS,Indo Tech Transformers Limited,NSE
@@ -3882,6 +3882,7 @@ LAXMICOT.NS,Laxmi Cotspin Limited,NSE
 LAXMIDENTL.NS,Laxmi Dental Limited,NSE
 LAXMIINDIA.NS,Laxmi India Finance Limited,NSE
 LCCINFOTEC.NS,LCC Infotech Limited,NSE
+LCL.NS,Lohia Corp Limited,NSE
 LEMERITE.NS,Le Merite Exports Limited,NSE
 LEMONTREE.NS,Lemon Tree Hotels Limited,NSE
 LENSKART.NS,Lenskart Solutions Limited,NSE
@@ -5027,6 +5028,7 @@ XCHANGING.NS,Xchanging Solutions Limited,NSE
 XELPMOC.NS,Xelpmoc Design And Tech Limited,NSE
 XPROINDIA.NS,Xpro India Limited,NSE
 XTGLOBAL.NS,Xtglobal Infotech Limited,NSE
+XTRANET.NS,Xtranet Technologies Limited,NSE
 YASHO.NS,Yasho Industries Limited,NSE
 YATHARTH.NS,Yatharth Hospital & Trauma Care Services Limited,NSE
 YATRA.NS,Yatra Online Limited,NSE
