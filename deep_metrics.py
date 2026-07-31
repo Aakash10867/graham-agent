@@ -1393,6 +1393,64 @@ def terms_trajectory(data):
         "T4_debt_vs_growth":   (t4, float(t4), ("debt_growth", "rev_growth")),
         "T5_leverage_sane":    (t5, float(t5), ("de",)),
     }
+
+# ── Components of every ratio input, for drift attribution ────────────────
+# A term input like `pe` is a RATIO. When it moves, "price moved" and "earnings
+# moved" are different events with different meanings for an owner, and the
+# ratio alone cannot tell them apart. Naming the components lets the drift
+# labeller measure which side moved on THIS row, instead of assigning the
+# metric a standing price/business category — which would assert that the
+# denominator usually wins, unmeasured.
+#
+# `price` is the price component. Everything else is fundamental. There is no
+# list of "price-bearing metrics" anywhere; there is only the price column.
+TERM_INPUT_COMPONENTS = {
+    "pe":                ("price", "eps"),
+    "lynch_peg":         ("price", "eps", "ni_cagr_3y"),
+    "lynch_peg_adjusted": ("price", "eps", "ni_cagr_3y", "dividend_yield"),
+    "graham_ncav_ratio": ("price", "graham_ncav_per_share"),
+    "dividend_yield":    ("price", "eps", "graham_payout_ratio"),
+}
+ 
+# Ratio inputs whose components are NOT all stored. These get a delta and NO
+# verdict: "Dorsey lost 1 point, one-dollar test 1.04 -> 0.91" is the whole
+# truth available, and it beats a guessed category. Removing an entry here
+# means storing the missing component, never substituting a near-enough one.
+UNATTRIBUTABLE_INPUTS = frozenset({
+    # = pe_on_AVERAGE_eps * pb. The 4-year average EPS is not a stored column,
+    # and using trailing `eps` in its place is exactly the proxy substitution
+    # this design exists to remove.
+    "graham_pe_pb_composite",
+    # = 4-year market-cap delta over retained earnings. Retained earnings is
+    # not stored.
+    "buffett_one_dollar_test",
+})
+ 
+_LYNCH_CATEGORIES = ("fast_grower", "stalwart", "slow_grower", "cyclical",
+                     "turnaround", "asset_play")
+ 
+ 
+def term_input_columns():
+    """Every column a trace must carry to re-derive terms and attribute a flip.
+ 
+    DERIVED from the term tables, never declared. A hand-written list silently
+    goes short the first time a term gains an input — and a short trace reads
+    as "the input held", which is the failure mode the whole design targets.
+    Lynch is probed once per category because its branches are disjoint.
+    """
+    cols = set()
+    for fn in (terms_graham, terms_dorsey, terms_trajectory):
+        for t in fn({}).values():
+            cols.update(t[2])
+    for cat in _LYNCH_CATEGORIES:
+        for t in terms_lynch({"lynch_category": cat}).values():
+            cols.update(t[2])
+    for c in list(cols):
+        cols.update(TERM_INPUT_COMPONENTS.get(c, ()))
+    # lynch_category selects the branch; greenblatt has no terms, only a
+    # universe percentile, so it is attributed from its own two components.
+    cols.update(("lynch_category", "greenblatt_earnings_yield", "greenblatt_roic"))
+    return tuple(sorted(cols))
  
  
 def framework_terms(data):
