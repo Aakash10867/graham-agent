@@ -1160,41 +1160,275 @@ def _ramp_down(x, ideal, limit):
         return 1.0 if x <= ideal else 0.0
     return max(0.0, min(1.0, (limit - x) / (limit - ideal)))
 
+# ══ Framework term tables — SINGLE SOURCE for every framework sub-score ══
+# Each term returns a 3-tuple:  (integer_points, graded_points, input_columns)
+#
+#   integer_points  sum to the stored *_score column. compute_framework_verdicts
+#                   thresholds THAT into the pass flags, so the integer half is
+#                   what fires a drift alert.
+#   graded_points   sum to *_graded / *_frac, which feed score_continuous.
+#   input_columns   what the term actually reads.
+#
+# Both halves live in ONE table so a term can never be added to one and
+# forgotten in the other. The comment at the Lynch block promised exactly that
+# ("adds to BOTH on the same line so they cannot diverge"); this makes it
+# structural instead of a convention.
+#
+# input_columns exists so the drift labeller can attribute a flip to the INPUT
+# that moved, rather than assigning each term a standing price/business label.
+# Every ratio term below has a price denominator and a fundamental numerator
+# (div yield, PEG, PE, NCAV, one-dollar test, Graham number), so a standing
+# label would be a proxy for the thing we actually want measured — the same
+# substitution that made `pe`/`roe_pct` attribution collapse.
+#
+# VERIFIED against 4,473 stored v8 rows, 2026-07-31 (term_table_probe.py):
+# both halves and all four pass flags reproduce exactly, all six Lynch
+# categories, including 2,322 abstentions reproducing as None.
+#
+# Bump TERMS_VERSION whenever a term is added, removed or renamed. An
+# entry_trace carrying an older version has a SHORTER vector; that must read as
+# "not comparable", never as a term scoring zero.
+TERMS_VERSION = 1
+ 
+ 
+def terms_graham(data):
+    """Graham Defensive, /8. Integer = book thresholds; graded = book ramps."""
+    eps_growth = _sf(data.get("graham_eps_growth_pct_4y"))
+    pe_pb = _sf(data.get("graham_pe_pb_composite"))
+    gn = _sf(data.get("graham_number"))
+    price = _sf(data.get("price"))
+    gn_margin = ((gn - price) / price * 100) if (gn and price and price > 0) else None
+    size = 1 if data.get("graham_adequate_size") else 0
+    cr = 1 if data.get("graham_current_ratio_pass") else 0
+    ltd = 1 if data.get("graham_ltd_vs_nca") else 0
+    stable = 1 if data.get("graham_earnings_stable_4y") else 0
+    div = 1 if (data.get("dividend_consecutive_years") or 0) >= 5 else 0
+    epsg = 1 if (eps_growth is not None and eps_growth >= 33) else 0
+    pepb = 1 if (pe_pb is not None and 0 < pe_pb <= 22.5) else 0
+    gnum = 1 if (gn and price and price <= gn) else 0
+    return {
+        "D1_adequate_size":    (size, float(size), ("graham_adequate_size",)),
+        "D2_current_ratio":    (cr, _ramp(data.get("current_ratio"), 1.5, 2.0),
+                                ("graham_current_ratio_pass", "current_ratio")),
+        "D3_ltd_vs_nca":       (ltd, float(ltd), ("graham_ltd_vs_nca",)),
+        "D4_earnings_stable":  (stable, float(stable), ("graham_earnings_stable_4y",)),
+        "D5_dividend_record":  (div, float(div), ("dividend_consecutive_years",)),
+        "D6_eps_growth":       (epsg, _ramp(eps_growth, 0, 33),
+                                ("graham_eps_growth_pct_4y",)),
+        "D7c_pe_pb":           (pepb, float(pepb), ("graham_pe_pb_composite",)),
+        "D8_graham_number":    (gnum, _ramp(gn_margin, 0, 30),
+                                ("graham_number", "price")),
+    }
+ 
+ 
+def terms_dorsey(data):
+    """Dorsey moat + Buffett tenets, /10. No percentile grading — book ramps and
+    booleans only, so the framework stays absolute rather than relative."""
+    fcf_m = _sf(data.get("dorsey_fcf_margin"))
+    pm = _sf(data.get("profit_margin"))
+    roa = _sf(data.get("dorsey_roa"))
+    droic = _sf(data.get("dorsey_roic"))
+    odt = _sf(data.get("buffett_one_dollar_test"))
+    fcf_i = 1 if (fcf_m is not None and fcf_m >= 5) else 0
+    pm_i = 1 if (pm is not None and pm >= 0.15) else 0
+    roe_c = 1 if data.get("dorsey_roe_consistent") else 0
+    roa_i = 1 if (roa is not None and roa >= 6) else 0
+    roic_i = 1 if (droic is not None and droic > COST_OF_CAPITAL_PROXY) else 0
+    unlev = 1 if data.get("buffett_roe_unleveraged") else 0
+    odt_i = 1 if (odt is not None and odt >= 1.0) else 0
+    alloc = 1 if data.get("buffett_rational_allocation") else 0
+    ops = 1 if (data.get("graham_earnings_stable_4y")
+                and data.get("dorsey_consistent_cfo")) else 0
+    vcg = 1 if data.get("buffett_value_creating_growth") else 0
+    return {
+        "D1_fcf_margin":       (fcf_i, _ramp(fcf_m, 0, 5), ("dorsey_fcf_margin",)),
+        "D2_profit_margin":    (pm_i, _ramp(pm, 0, 0.15), ("profit_margin",)),
+        "D3_roe_consistent":   (roe_c, float(roe_c), ("dorsey_roe_consistent",)),
+        "D4_roa":              (roa_i, _ramp(roa, 6, 7), ("dorsey_roa",)),
+        "D5_roic_vs_wacc":     (roic_i, float(roic_i), ("dorsey_roic",)),
+        "B1_roe_unleveraged":  (unlev, float(unlev), ("buffett_roe_unleveraged",)),
+        "B2_one_dollar_test":  (odt_i, float(odt_i), ("buffett_one_dollar_test",)),
+        "B3_rational_alloc":   (alloc, float(alloc), ("buffett_rational_allocation",)),
+        "B4_consistent_ops":   (ops, float(ops),
+                                ("graham_earnings_stable_4y", "dorsey_consistent_cfo")),
+        "B5_value_creating":   (vcg, float(vcg), ("buffett_value_creating_growth",)),
+    }
+ 
+ 
+def terms_lynch(data):
+    """Lynch, /10, BRANCHED on lynch_category. Each category is a DIFFERENT term
+    set, so a category change replaces the whole vector — it must be reported as
+    a reclassification, never as terms moving. `unknown` returns {} (abstention:
+    no terms, not zero terms)."""
+    cat = data.get("lynch_category", "unknown")
+    peg = _sf(data.get("lynch_peg"))
+    peg_adj = _sf(data.get("lynch_peg_adjusted"))
+    debt_h = data.get("lynch_debt_healthy")
+    pe = _sf(data.get("pe"))
+    stable = 2 if data.get("graham_earnings_stable_4y") else 0
+    cfo = 2 if data.get("dorsey_consistent_cfo") else 0
+ 
+    if cat == "fast_grower":
+        pi = 3 if (peg is not None and peg < 1) else \
+             2 if (peg is not None and peg < 1.5) else \
+             1 if (peg is not None and peg < 2) else 0
+        gf = data.get("lynch_growth_flag")
+        gi = 3 if gf == "ideal" else 2 if gf == "acceptable" else 0
+        di = 2 if debt_h == "normal" else 1 if debt_h == "acceptable" else 0
+        return {
+            "FG1_peg":             (pi, 3 * _ramp_down(peg, 1.0, 2.0), ("lynch_peg",)),
+            "FG2_growth_flag":     (gi, float(gi), ("lynch_growth_flag",)),
+            "FG3_debt":            (di, float(di), ("lynch_debt_healthy",)),
+            "FG4_earnings_stable": (stable, float(stable), ("graham_earnings_stable_4y",)),
+        }
+    if cat == "stalwart":
+        pi = 3 if (pe is not None and 0 < pe <= 15) else \
+             2 if (pe is not None and 0 < pe <= 20) else 0
+        ai = 3 if (peg_adj is not None and peg_adj >= 2) else \
+             2 if (peg_adj is not None and peg_adj >= 1) else 0
+        di = 2 if debt_h in ("normal", "acceptable") else 0
+        return {
+            "ST1_pe":              (pi, (3 * _ramp_down(pe, 15, 20))
+                                    if (pe is not None and pe > 0) else 0.0, ("pe",)),
+            "ST2_peg_adjusted":    (ai, 3 * _ramp(peg_adj, 1, 2), ("lynch_peg_adjusted",)),
+            "ST3_debt":            (di, float(di), ("lynch_debt_healthy",)),
+            "ST4_earnings_stable": (stable, float(stable), ("graham_earnings_stable_4y",)),
+        }
+    if cat == "slow_grower":
+        consec = data.get("dividend_consecutive_years", 0) or 0
+        ci = 3 if consec >= 10 else 2 if consec >= 5 else 0
+        payout = _sf(data.get("graham_payout_ratio"))
+        pi = 3 if (payout and 30 <= payout <= 75) else \
+             1 if (payout and payout < 30) else 0
+        dy = _sf(data.get("dividend_yield"))
+        yi = 2 if (dy and dy > 0.04) else 1 if (dy and dy > 0.02) else 0
+        cb = 2 if data.get("dorsey_clean_balance_sheet") else 0
+        return {
+            "SG1_div_years":       (ci, float(ci), ("dividend_consecutive_years",)),
+            "SG2_payout":          (pi, float(pi), ("graham_payout_ratio",)),
+            "SG3_div_yield":       (yi, 2 * _ramp(dy, 0.02, 0.04), ("dividend_yield",)),
+            "SG4_clean_bs":        (cb, float(cb), ("dorsey_clean_balance_sheet",)),
+        }
+    if cat == "cyclical":
+        # Low PE = expensive (peak), high PE = cheap (trough), so PE is NOT
+        # rewarded here. Every term is sign/categorical — nothing ramps.
+        di = 3 if debt_h == "normal" else 2 if debt_h == "acceptable" else 0
+        accel = _sf(data.get("lynch_growth_acceleration"))
+        ai = 3 if (accel is not None and accel > 0) else 0
+        iv = 2 if data.get("lynch_inventory_flag") is False else 0
+        return {
+            "CY1_debt":            (di, float(di), ("lynch_debt_healthy",)),
+            "CY2_accel":           (ai, float(ai), ("lynch_growth_acceleration",)),
+            "CY3_inventory":       (iv, float(iv), ("lynch_inventory_flag",)),
+            "CY4_consistent_cfo":  (cfo, float(cfo), ("dorsey_consistent_cfo",)),
+        }
+    if cat == "turnaround":
+        ncps = _sf(data.get("lynch_net_cash_per_share"))
+        nc = 3 if (ncps is not None and ncps > 0) else 0
+        di = 3 if debt_h == "normal" else 2 if debt_h == "acceptable" else 0
+        ni_y0 = _sf(data.get("net_income_y0"))
+        pf = 2 if (ni_y0 and ni_y0 > 0) else 0
+        return {
+            "TA1_net_cash":        (nc, float(nc), ("lynch_net_cash_per_share",)),
+            "TA2_debt":            (di, float(di), ("lynch_debt_healthy",)),
+            "TA3_now_profitable":  (pf, float(pf), ("net_income_y0",)),
+            "TA4_consistent_cfo":  (cfo, float(cfo), ("dorsey_consistent_cfo",)),
+        }
+    if cat == "asset_play":
+        ncav_r = _sf(data.get("graham_ncav_ratio"))
+        ni = 4 if (ncav_r is not None and ncav_r <= 0.67) else \
+             2 if (ncav_r is not None and ncav_r <= 1.0) else 0
+        di = 3 if debt_h == "normal" else 0
+        gnc = _sf(data.get("graham_net_cash"))
+        nc = 3 if (gnc and gnc > 0) else 0
+        return {
+            "AP1_ncav":            (ni, (4 * _ramp_down(ncav_r, 0.67, 1.0))
+                                    if (ncav_r is not None and ncav_r > 0) else 0.0,
+                                    ("graham_ncav_ratio",)),
+            "AP2_debt":            (di, float(di), ("lynch_debt_healthy",)),
+            "AP3_net_cash":        (nc, float(nc), ("graham_net_cash",)),
+        }
+    return {}
+ 
+ 
+def terms_trajectory(data):
+    """Trajectory, /10. Direction of travel, price-independent — verified: not
+    one input column below is a price or a price derivative."""
+    ni_cagr = _sf(data.get("ni_cagr_3y"))
+    rev_cagr = _sf(data.get("revenue_cagr_3y"))
+    rev_g = _sf(data.get("rev_growth"))
+    debt_g = _sf(data.get("debt_growth"))
+    de = _sf(data.get("de"))
+ 
+    t1i = 3 if (ni_cagr is not None and ni_cagr > 15) else \
+          2 if (ni_cagr is not None and ni_cagr > 0) else 0
+    t1g = (2 + _ramp(ni_cagr, 0, 15)) if (ni_cagr is not None and ni_cagr > 0) else 0.0
+    t2 = 2 if (rev_cagr is not None and rev_cagr > 0) else 0
+ 
+    m_now = m_then = None
+    r0, n0 = _sf(data.get("revenue_y0")), _sf(data.get("net_income_y0"))
+    if r0 and r0 > 0 and n0 is not None:
+        m_now = n0 / r0
+    for _back in (3, 2):                      # y3, falling back to y2
+        rb = _sf(data.get(f"revenue_y{_back}"))
+        nb = _sf(data.get(f"net_income_y{_back}"))
+        if rb and rb > 0 and nb is not None:
+            m_then = nb / rb
+            break
+    t3 = 2 if (m_now is not None and m_then is not None and m_now > m_then) else 0
+ 
+    if debt_g is not None and rev_g is not None and debt_g < rev_g:
+        t4 = 2
+    elif debt_g is not None and debt_g < 0:
+        t4 = 2
+    else:
+        t4 = 0
+    t5 = 1 if (de is not None and de < 100) else 0
+    return {
+        "T1_earnings_cagr":    (t1i, t1g, ("ni_cagr_3y",)),
+        "T2_revenue_cagr":     (t2, float(t2), ("revenue_cagr_3y",)),
+        "T3_margin_expansion": (t3, float(t3),
+                                ("revenue_y0", "net_income_y0", "revenue_y2",
+                                 "net_income_y2", "revenue_y3", "net_income_y3")),
+        "T4_debt_vs_growth":   (t4, float(t4), ("debt_growth", "rev_growth")),
+        "T5_leverage_sane":    (t5, float(t5), ("de",)),
+    }
+ 
+ 
+def framework_terms(data):
+    """Every framework's term table for one row. The drift labeller's only
+    input. Greenblatt is absent by design: it has no terms, only a universe
+    percentile, so its flips are attributed from its own stored components."""
+    return {"graham": terms_graham(data), "dorsey_buffett": terms_dorsey(data),
+            "lynch": terms_lynch(data), "trajectory": terms_trajectory(data)}
+ 
+ 
+def _sum_terms(terms):
+    """(integer total, graded total) for one framework's term table.
+ 
+    Deliberately an explicit left-to-right loop, NOT sum(). CPython >= 3.12
+    gives sum() compensated (Neumaier) summation over floats, which is more
+    accurate than the `+=` accumulation this replaces — and therefore NOT
+    equal to it. On one row in 6,000 that moved dorsey_frac 0.4062 -> 0.4061
+    and score_continuous with it, i.e. the refactor's output would have
+    depended on the interpreter version. A behaviour-preserving refactor must
+    reproduce the old arithmetic exactly, including its rounding error."""
+    i_tot, g_tot = 0, 0.0
+    for t in terms.values():
+        i_tot += t[0]
+        g_tot += t[1]
+    return i_tot, g_tot
+
 
 def compute_spectrum_scores(data):
     """Compute all spectrum scores from the layer-1 metrics."""
 
-    # ── Graham Defensive Score (X/8) ──
-    graham_d = 0
-    if data.get("graham_adequate_size"): graham_d += 1
-    if data.get("graham_current_ratio_pass"): graham_d += 1
-    if data.get("graham_ltd_vs_nca"): graham_d += 1
-    if data.get("graham_earnings_stable_4y"): graham_d += 1
-    if (data.get("dividend_consecutive_years") or 0) >= 5: graham_d += 1
-    eps_growth = _sf(data.get("graham_eps_growth_pct_4y"))
-    if eps_growth is not None and eps_growth >= 33: graham_d += 1
-    pe_pb = _sf(data.get("graham_pe_pb_composite"))
-    if pe_pb is not None and 0 < pe_pb <= 22.5: graham_d += 1
-    gn = _sf(data.get("graham_number"))
-    price = _sf(data.get("price"))
-    if gn and price and price <= gn: graham_d += 1
+    # ── Graham Defensive Score (X/8) and GRADED (X.xx/8) ──
+    # Both halves from ONE term table (terms_graham). Integer spine unchanged:
+    # graham_pass, `score`, selection and backtest cohorts still read
+    # graham_defensive_score.
+    graham_d, graham_dg = _sum_terms(terms_graham(data))
     data["graham_defensive_score"] = graham_d
-
-    # ── Graham Defensive Score, GRADED (X.xx / 8) ──
-    # Parallel decimal. Integer above is untouched: graham_pass, `score`,
-    # selection and backtest cohorts all keep using the integer spine.
-    # Graded: D2 current ratio, D6 EPS growth, D8 Graham-number margin.
-    # Boolean (unchanged): D1 size, D3 LTD/NCA (ratio not stored), D4 stability,
-    #                      D5 dividend record, D7c PE×PB composite.
-    graham_dg  = 1.0 if data.get("graham_adequate_size") else 0.0                    # D1
-    graham_dg += _ramp(data.get("current_ratio"), 1.5, 2.0)                          # D2  ↑ 1.5→2.0
-    graham_dg += 1.0 if data.get("graham_ltd_vs_nca") else 0.0                       # D3
-    graham_dg += 1.0 if data.get("graham_earnings_stable_4y") else 0.0               # D4
-    graham_dg += 1.0 if (data.get("dividend_consecutive_years") or 0) >= 5 else 0.0  # D5
-    graham_dg += _ramp(eps_growth, 0, 33)                                            # D6  ↑ 0%→33%
-    graham_dg += 1.0 if (pe_pb is not None and 0 < pe_pb <= 22.5) else 0.0           # D7c
-    gn_margin  = ((gn - price) / price * 100) if (gn and price and price > 0) else None
-    graham_dg += _ramp(gn_margin, 0, 30)                                             # D8  ↑ 0%→30%
     data["graham_defensive_graded"] = round(graham_dg, 4)
     data["graham_frac"] = round(graham_dg / 8.0, 4)
 
@@ -1216,44 +1450,14 @@ def compute_spectrum_scores(data):
     data["greenblatt_score"] = None  # Filled by rank pass
     data["greenblatt_frac"] = None   # Filled by rank pass (continuous percentile, 0-1)
 
-    # ── Dorsey+Buffett Combined Score (X/10) ──
-    db_score = 0
-    # Dorsey 5 moat criteria
-    fcf_m = _sf(data.get("dorsey_fcf_margin"))
-    if fcf_m is not None and fcf_m >= 5: db_score += 1
-    pm = _sf(data.get("profit_margin"))
-    if pm is not None and pm >= 0.15: db_score += 1
-    if data.get("dorsey_roe_consistent"): db_score += 1
-    roa = _sf(data.get("dorsey_roa"))
-    if roa is not None and roa >= 6: db_score += 1
-    droic = _sf(data.get("dorsey_roic"))
-    if droic is not None and droic > COST_OF_CAPITAL_PROXY: db_score += 1
-    # Buffett 5 tenets
-    if data.get("buffett_roe_unleveraged"): db_score += 1
-    odt = _sf(data.get("buffett_one_dollar_test"))
-    if odt is not None and odt >= 1.0: db_score += 1
-    if data.get("buffett_rational_allocation"): db_score += 1
-    if data.get("graham_earnings_stable_4y") and data.get("dorsey_consistent_cfo"):
-        db_score += 1  # Consistent operations
-    if data.get("buffett_value_creating_growth"): db_score += 1
+    # ── Dorsey+Buffett Combined Score (X/10) and GRADED (X.xx/10) ──
+    # Both halves from ONE term table (terms_dorsey). No percentile grading:
+    # Dorsey is the pure-fundamental framework and must stay absolute.
+    db_score, db_graded = _sum_terms(terms_dorsey(data))
     data["dorsey_buffett_score"] = db_score
-
-    # ── Dorsey+Buffett Combined Score, GRADED (X.xx / 10) ──
-    # Parallel decimal; integer above untouched. Dorsey is W1's pure-fundamental
-    # framework, so NO percentile grading (would make it relative) — book ramps +
-    # boolean only. Graded: FCF margin, net margin, ROA.
-    db_graded  = _ramp(fcf_m, 0, 5)                                                    # D1  ↑ 0→5%
-    db_graded += _ramp(pm, 0, 0.15)                                                    # D2  ↑ 0→15%
-    db_graded += 1.0 if data.get("dorsey_roe_consistent") else 0.0                     # D3
-    db_graded += _ramp(roa, 6, 7)                                                      # D4  ↑ 6→7%
-    db_graded += 1.0 if (droic is not None and droic > COST_OF_CAPITAL_PROXY) else 0.0 # D5
-    db_graded += 1.0 if data.get("buffett_roe_unleveraged") else 0.0                   # B1
-    db_graded += 1.0 if (odt is not None and odt >= 1.0) else 0.0                      # B2
-    db_graded += 1.0 if data.get("buffett_rational_allocation") else 0.0               # B3
-    db_graded += 1.0 if (data.get("graham_earnings_stable_4y") and data.get("dorsey_consistent_cfo")) else 0.0  # consistent ops
-    db_graded += 1.0 if data.get("buffett_value_creating_growth") else 0.0             # B5
     data["dorsey_buffett_graded"] = round(db_graded, 4)
     data["dorsey_frac"] = round(db_graded / 10.0, 4)
+    fcf_m = _sf(data.get("dorsey_fcf_margin"))   # the 10-minute score below reads it
 
     # ── Dorsey 10-Minute Score (X/8) ──
     t10 = 0
@@ -1276,87 +1480,12 @@ def compute_spectrum_scores(data):
     if data.get("mulford_fcf_consistent"): t10 += 1
     data["dorsey_10min_score"] = t10
 
-    # ── Lynch Score (category-branching) ──
-    # Integer l_score keeps its existing tiers untouched. l_graded is the parallel
-    # decimal: numeric VALUATION checks (PEG, PE, PEG_adj, NCAV, div-yield) become
-    # smooth ramps off Lynch's own boundaries; every categorical / non-monotonic /
-    # boolean check adds to BOTH on the same line so they cannot diverge.
-    cat = data.get("lynch_category", "unknown")
-    l_score = 0
-    l_graded = 0.0
-    peg = _sf(data.get("lynch_peg"))
-    peg_adj = _sf(data.get("lynch_peg_adjusted"))
-    debt_h = data.get("lynch_debt_healthy")
-
-    if cat == "fast_grower":
-        if peg is not None and peg < 1: l_score += 3
-        elif peg is not None and peg < 1.5: l_score += 2
-        elif peg is not None and peg < 2: l_score += 1
-        l_graded += 3 * _ramp_down(peg, 1.0, 2.0)                          # PEG ↓ 1.0→2.0
-        growth_f = data.get("lynch_growth_flag")
-        if growth_f == "ideal": l_score += 3; l_graded += 3
-        elif growth_f == "acceptable": l_score += 2; l_graded += 2
-        if debt_h == "normal": l_score += 2; l_graded += 2
-        elif debt_h == "acceptable": l_score += 1; l_graded += 1
-        if data.get("graham_earnings_stable_4y"): l_score += 2; l_graded += 2
-        # Max 10
-
-    elif cat == "stalwart":
-        if pe is not None and 0 < pe <= 15: l_score += 3
-        elif pe is not None and 0 < pe <= 20: l_score += 2
-        l_graded += (3 * _ramp_down(pe, 15, 20)) if (pe is not None and pe > 0) else 0.0   # PE ↓ 15→20
-        if peg_adj is not None and peg_adj >= 2: l_score += 3
-        elif peg_adj is not None and peg_adj >= 1: l_score += 2
-        l_graded += 3 * _ramp(peg_adj, 1, 2)                               # PEG_adj ↑ 1→2
-        if debt_h in ("normal", "acceptable"): l_score += 2; l_graded += 2
-        if data.get("graham_earnings_stable_4y"): l_score += 2; l_graded += 2
-        # Max 10
-
-    elif cat == "slow_grower":
-        consec = data.get("dividend_consecutive_years", 0) or 0
-        if consec >= 10: l_score += 3; l_graded += 3
-        elif consec >= 5: l_score += 2; l_graded += 2
-        payout = _sf(data.get("graham_payout_ratio"))
-        if payout and 30 <= payout <= 75: l_score += 3; l_graded += 3
-        elif payout and payout < 30: l_score += 1; l_graded += 1
-        dy = _sf(data.get("dividend_yield"))
-        if dy and dy > 0.04: l_score += 2
-        elif dy and dy > 0.02: l_score += 1
-        l_graded += 2 * _ramp(dy, 0.02, 0.04)                             # div yield ↑ 0.02→0.04
-        if data.get("dorsey_clean_balance_sheet"): l_score += 2; l_graded += 2
-        # Max 10
-
-    elif cat == "cyclical":
-        # For cyclicals: low PE = expensive (peak), high PE = cheap (trough)
-        # So we DON'T reward low PE. All checks here are sign/categorical — nothing ramps.
-        if debt_h == "normal": l_score += 3; l_graded += 3
-        elif debt_h == "acceptable": l_score += 2; l_graded += 2
-        accel = _sf(data.get("lynch_growth_acceleration"))
-        if accel is not None and accel > 0: l_score += 3; l_graded += 3  # Recovering
-        inv_flag = data.get("lynch_inventory_flag")
-        if inv_flag is False: l_score += 2; l_graded += 2  # No inventory buildup
-        if data.get("dorsey_consistent_cfo"): l_score += 2; l_graded += 2
-        # Max 10
-
-    elif cat == "turnaround":
-        net_cash_ps = _sf(data.get("lynch_net_cash_per_share"))
-        if net_cash_ps is not None and net_cash_ps > 0: l_score += 3; l_graded += 3
-        if debt_h == "normal": l_score += 3; l_graded += 3
-        elif debt_h == "acceptable": l_score += 2; l_graded += 2
-        ni_y0 = _sf(data.get("net_income_y0"))
-        if ni_y0 and ni_y0 > 0: l_score += 2; l_graded += 2  # Now profitable
-        if data.get("dorsey_consistent_cfo"): l_score += 2; l_graded += 2
-        # Max 10
-
-    elif cat == "asset_play":
-        ncav_r = _sf(data.get("graham_ncav_ratio"))
-        if ncav_r is not None and ncav_r <= 0.67: l_score += 4
-        elif ncav_r is not None and ncav_r <= 1.0: l_score += 2
-        l_graded += (4 * _ramp_down(ncav_r, 0.67, 1.0)) if (ncav_r is not None and ncav_r > 0) else 0.0   # NCAV ↓ 0.67→1.0
-        if debt_h == "normal": l_score += 3; l_graded += 3
-        if _sf(data.get("graham_net_cash")) and data["graham_net_cash"] > 0: l_score += 3; l_graded += 3
-        # Max 10
-
+    # ── Lynch Score (category-branching) and GRADED ──
+    # Both halves from ONE term table (terms_lynch). Each category is a
+    # different term set; `unknown` returns {} — abstention, summing to 0
+    # exactly as before, which compute_framework_verdicts turns into
+    # lynch_pass = None rather than False.
+    l_score, l_graded = _sum_terms(terms_lynch(data))
     data["lynch_score"] = l_score
     data["lynch_graded"] = round(l_graded, 4)
     data["lynch_frac"] = round(l_graded / 10.0, 4)
@@ -1418,53 +1547,9 @@ def compute_trajectory_score(data):
       - Missing inputs score zero. A metric we cannot measure is not a metric
         the company passed. This is the only honest treatment of NaN.
     """
-    ni_cagr = _sf(data.get("ni_cagr_3y"))
-    rev_cagr = _sf(data.get("revenue_cagr_3y"))
-    rev_g = _sf(data.get("rev_growth"))
-    debt_g = _sf(data.get("debt_growth"))
-    de = _sf(data.get("de"))  # percent: 89.0 == D/E 0.89x
-
-    t = 0
-    t_graded = 0.0  # parallel decimal; integer t untouched. Price-independent => absolute.
-
-    # 1. Earnings compounding (0-3): sign threshold at 0 (shrinking vs growing),
-    #    then ramp 2->3 across 0->15% CAGR. Only check with a real gradient.
-    if ni_cagr is not None:
-        if ni_cagr > 15:
-            t += 3
-        elif ni_cagr > 0:
-            t += 2
-        if ni_cagr > 0:
-            t_graded += 2 + _ramp(ni_cagr, 0, 15)
-
-    # 2. Revenue compounding (0-2)
-    if rev_cagr is not None and rev_cagr > 0:
-        t += 2; t_graded += 2
-
-    # 3. Margin expansion, y3 -> y0 (0-2). Fall back to y2 if y3 absent.
-    m_now = m_then = None
-    r0, n0 = _sf(data.get("revenue_y0")), _sf(data.get("net_income_y0"))
-    if r0 and r0 > 0 and n0 is not None:
-        m_now = n0 / r0
-    for _back in (3, 2):
-        rb = _sf(data.get(f"revenue_y{_back}"))
-        nb = _sf(data.get(f"net_income_y{_back}"))
-        if rb and rb > 0 and nb is not None:
-            m_then = nb / rb
-            break
-    if m_now is not None and m_then is not None and m_now > m_then:
-        t += 2; t_graded += 2
-
-    # 4. Growth is not debt-funded (0-2)
-    if debt_g is not None and rev_g is not None and debt_g < rev_g:
-        t += 2; t_graded += 2
-    elif debt_g is not None and debt_g < 0:
-        t += 2; t_graded += 2
-
-    # 5. Leverage sane: D/E < 1.0x (0-1)
-    if de is not None and de < 100:
-        t += 1; t_graded += 1
-
+    # Both halves from ONE term table (terms_trajectory). Clip preserved: the
+    # term maxima sum to exactly 10, so it binds only defensively.
+    t, t_graded = _sum_terms(terms_trajectory(data))
     data["trajectory_score"] = max(0, min(10, t))
     t_graded = max(0.0, min(10.0, t_graded))
     data["trajectory_graded"] = round(t_graded, 4)
