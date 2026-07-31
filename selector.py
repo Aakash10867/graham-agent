@@ -2000,8 +2000,12 @@ def _current_facts(universe_row):
         "score_continuous": _num(_get("score_continuous")),
         "fracs": {f: _num(_get(col)) for f, col in FRAC_COL.items()},
         # Every column the term tables read, plus the components of each ratio
-        # among them. Raw, unrounded: these are re-scored, not displayed.
-        "term_inputs": {col: _get(col) for col in TERM_INPUT_COLS},
+        # among them. Unrounded: these are re-scored, not displayed. _jsonable,
+        # NOT _get: build_watch_trace's output is persisted straight to Supabase
+        # with no sanitiser (app.py:2997, 6939), and a numpy.bool_ or float64
+        # off a typed DataFrame raises on json.dumps. It also keeps this side
+        # byte-symmetric with the entry side, which is written with _jsonable.
+        "term_inputs": {col: _jsonable(_get(col)) for col in TERM_INPUT_COLS},
         "terms_version": TERMS_VERSION,
         "sector": _get("sector"),
     }
