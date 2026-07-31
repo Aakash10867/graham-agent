@@ -1845,14 +1845,17 @@ def _thesis_changes(entry: dict, current: dict) -> list:
     # list of names — existing renderers join it directly. The reason labels ride
     # alongside in a NEW key, so nothing that reads the old shape breaks.
     e_pass, c_pass = set(e.get("passed", [])), set(c.get("passed", []))
+    _flips = {f: _flip_detail(f, e, c) for f in (e_pass | c_pass)}
     _gained = sorted(c_pass - e_pass)
     if _gained:
         changes.append({"field": "newly_passing", "from": None, "to": _gained,
-                        "reasons": {f: _classify_flip(f, e, c) for f in _gained}})
+                        "reasons": {f: _flips[f][0] for f in _gained},
+                        "detail": {f: _flips[f][1] for f in _gained}})
     _lost = sorted(e_pass - c_pass)
     if _lost:
         changes.append({"field": "newly_failing", "from": None, "to": _lost,
-                        "reasons": {f: _classify_flip(f, e, c) for f in _lost}})
+                        "reasons": {f: _flips[f][0] for f in _lost},
+                        "detail": {f: _flips[f][1] for f in _lost}})
 
     # Conviction rank drift, when both entry and today were conviction picks.
     if e.get("conviction_rank") is not None and c.get("conviction_rank") is not None \
