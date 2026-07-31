@@ -45,6 +45,19 @@ from collections import defaultdict
 
 import numpy as np
 import pandas as pd
+ 
+# Drift attribution re-derives terms from stored inputs on BOTH sides, so the
+# term list exists once, in the file that scores. deep_metrics imports only
+# math/pandas/datetime/archetype/os/json and nothing in that chain imports
+# selector, so this edge is cheap and acyclic.
+from deep_metrics import (framework_terms, term_input_columns,
+                          TERM_INPUT_COMPONENTS, UNATTRIBUTABLE_INPUTS,
+                          TERMS_VERSION)
+ 
+# DERIVED from the term tables at import, never declared here. A hand-kept
+# list goes short the first time a term gains an input, and a short trace
+# reads as "the input held" - the exact failure this design removes.
+TERM_INPUT_COLS = term_input_columns()
 
 # ── Tier 1: investability floor ────────────────────────────────────────────
 # Calibrated 2026-07 against the measured distribution of the 4+ pool.
@@ -1035,6 +1048,31 @@ def _fill(pool: pd.DataFrame, q: dict, corr, k_conviction: int = 0) -> tuple[lis
     return chosen, slot_type
 
 
+def _jsonable(v):
+    """Trace values that are NOT all numbers: term inputs include booleans and
+    category strings (lynch_debt_healthy, lynch_growth_flag, lynch_category).
+ 
+    _num would flatten every one of those to None. Numerics are NOT rounded
+    here - these are re-scored by framework_terms(), not displayed, and
+    rounding an input before a threshold test can flip the term it feeds.
+    NaN -> None for the same reason as _num: NaN != NaN makes every later
+    diff report a change that never happened.
+    """
+    if v is None:
+        return None
+    if isinstance(v, (bool, np.bool_)):
+        return bool(v)
+    try:
+        if pd.isna(v):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(v, (int, float, np.integer, np.floating)):
+        f = float(v)
+        return f if math.isfinite(f) else None
+    return str(v)
+ 
+ 
 def _num(v, nd: int = 4):
     """Trace numbers must be JSON-safe and COMPARABLE. NaN/None/inf -> None;
     anything else -> a rounded float.
@@ -1206,6 +1244,13 @@ def select_portfolio(universe_df: pd.DataFrame, policy: dict,
                 "roe_pct": _num(r.get("roe_pct"), 3),
                 "score_continuous": _num(r.get("score_continuous")),
                 "fracs": {f: _num(r.get(col)) for f, col in FRAC_COL.items()},
+                # -- Term-level attribution inputs ------------------------
+                # INPUTS, not terms. Both sides get re-derived with today's
+                # framework_terms(), so a threshold change can never read as a
+                # business change. terms_version guards the comparison: an
+                # older vector is "not comparable", never a term scoring zero.
+                "term_inputs": {c: _jsonable(r.get(c)) for c in TERM_INPUT_COLS},
+                "terms_version": TERMS_VERSION,
             },
         })
 
@@ -1345,23 +1390,24 @@ _CONVICTION_SLOTS = {"conviction"}
 # of (roic_rank + ey_rank) and ey = EBIT/EV, so it moves on this stock's price,
 # this stock's EBIT/ROIC, or other stocks. Calling it relative-rank up front
 # would tell a user "nothing about your stock changed" while the price halved.
-FRAMEWORK_DRIFT_KIND = {
-    "graham":         "mixed",
-    "greenblatt":     "mixed",
-    "dorsey_buffett": "fundamental",
-    "trajectory":     "fundamental",
-    "lynch":          "mixed",
-}
+# RETIRED 2026-07-31. This table declared each framework's cause in advance,
+# and _classify_flip returned on it BEFORE looking at any input - so a Dorsey
+# flip driven entirely by buffett_one_dollar_test (a 4-year market-cap delta,
+# which moved on 87.4% of no-news rows) was labelled "fundamental" with no
+# price test ever run. Cause is now measured per row from the term that moved
+# and the components under it. Nothing declares a framework's cause any more.
+#
+# Measured on the live book before removal: of 8 down-flips, 7 were labelled
+# `unclear` -> danger because roe_pct (annual, from info) had not moved on 26
+# of 29 holdings and pe had cleared 10% on exactly 1. The residual case was
+# the modal case.
 
 # Where a 'mixed' framework flips but NEITHER pe nor roe moved. For greenblatt
 # that is the informative case — its own inputs held, so the universe moved
 # around it. For graham/lynch it means something we do not capture moved, and
 # the only honest label is that we cannot tell.
-DRIFT_NULL_MOVE_LABEL = {
-    "graham":     "unclear",
-    "greenblatt": "relative_rank",
-    "lynch":      "unclear",
-}
+# RETIRED with it. greenblatt's relative_rank survives as a MEASURED outcome
+# rather than a default: see _greenblatt_flip.
 
 # The noise floor for "this input MOVED". NOT a causal test — proving pe caused
 # a flip needs metric-level archive rows (Tier 2, gated to ~2027). This only
@@ -1404,6 +1450,7 @@ DRIFT_MATERIAL_TOTAL = len(FRAMEWORKS) * DRIFT_FLOOR_FRAMEWORK
 DRIFT_PRECEDENCE = (
     "fundamental",
     "mixed",
+    "departed",
     "unclear",
     "unknown_inputs",
     "valuation",
@@ -1418,11 +1465,12 @@ DRIFT_PRECEDENCE = (
 DRIFT_SEVERITY = {
     "fundamental":    "danger",
     "mixed":          "danger",
+    # A framework that left the comparison set. NOT a failure - but not benign
+    # either: one way to leave is to post a loss year, lose the archetype and
+    # drop out of Lynch, which is deterioration. Absence of evidence must not
+    # downgrade, and a departure is evidence that something moved.
+    "departed":       "danger",
     "unclear":        "danger",
-    "unknown_inputs": "danger",
-    "valuation":      "warning",
-    "relative_rank":  "warning",
-}
 
 # Watchlist ceiling is WARNING. Severity measures capital at risk, and a watched
 # stock is not owned — nothing is at stake but an intention. Same shape as
@@ -1525,6 +1573,10 @@ def _trace_facts(trace: dict) -> dict:
         "roe_pct": trace.get("roe_pct"),
         "score_continuous": trace.get("score_continuous"),
         "fracs": dict(trace.get("fracs") or {}),
+        # Absent on any trace written before step 3 -> None, which _term_diff
+        # reports as NOT comparable. Never as "the inputs held".
+        "term_inputs": trace.get("term_inputs"),
+        "terms_version": trace.get("terms_version"),
     }
 
 
@@ -1545,38 +1597,173 @@ def _moved(a, b, floor: float = DRIFT_MATERIAL_PCT):
     return abs(b - a) / abs(a) >= floor
 
 
-def _classify_flip(framework: str, e: dict, c: dict) -> str:
-    """Why did this framework flip? Deterministic label, never prose.
-
-    Classifies by WHICH input moved, not by whether it moved favourably —
-    direction is already carried by newly_passing vs newly_failing, and
-    duplicating it here would let the two disagree.
-
-    Vocabulary (closed set):
-      fundamental    the business moved
-      valuation      price moved, the business held
-      relative_rank  this stock's inputs held; the universe moved around it
-      mixed          both price and fundamentals moved
-      unclear        inputs held yet it flipped — something uncaptured moved
-      unknown_inputs pe or roe missing on one side; we cannot split it
+def _term_diff(framework: str, e: dict, c: dict):
+    """Which terms changed integer POINTS between entry and today.
+ 
+    Integer, not graded: compute_framework_verdicts thresholds the integer
+    sub-score into the pass flag, so the integer half is what fires an alert.
+    Where a term's two halves read different columns (D2 alone), attribution
+    follows the integer input.
+ 
+    Both sides are re-derived with TODAY's framework_terms() from stored
+    INPUTS. Storing terms instead would mean comparing points computed under
+    two different rule sets, so a threshold change would read as a business
+    change — the break MIN_RECONCILABLE_SCHEMA exists to prevent.
+ 
+    Returns (changed, comparable). comparable is False when either side cannot
+    be re-derived; the caller must then say so, never assume the inputs held.
     """
-    kind = FRAMEWORK_DRIFT_KIND.get(framework)
-    if kind == "fundamental":
-        return "fundamental"
-    if kind != "mixed":
-        return "unclear"
-
-    pe_moved = _moved(e.get("pe"), c.get("pe"))
-    roe_moved = _moved(e.get("roe_pct"), c.get("roe_pct"))
-    if pe_moved is None or roe_moved is None:
-        return "unknown_inputs"
-    if pe_moved and roe_moved:
+    e_in, c_in = e.get("term_inputs"), c.get("term_inputs")
+    if not isinstance(e_in, dict) or not isinstance(c_in, dict):
+        return [], False
+    if e.get("terms_version") != c.get("terms_version"):
+        return [], False
+    et = framework_terms(e_in).get(framework)
+    ct = framework_terms(c_in).get(framework)
+    if not et or not ct or set(et) != set(ct):
+        # Different term sets = a Lynch category change. The yardstick moved,
+        # not the business; that is a reclassification, reported by the caller.
+        return [], False
+    changed = []
+    for name in sorted(et):
+        if et[name][0] == ct[name][0]:
+            continue
+        moves = [{"column": col, "from": e_in.get(col), "to": c_in.get(col)}
+                 for col in et[name][2]
+                 if not _same_value(e_in.get(col), c_in.get(col))]
+        changed.append({"term": name, "from": et[name][0], "to": ct[name][0],
+                        "inputs": moves})
+    return changed, True
+ 
+ 
+def _same_value(a, b):
+    """Equality that does not mistake 2.0 for '2.0' or NaN for a difference."""
+    if a is None and b is None:
+        return True
+    if a is None or b is None:
+        return False
+    try:
+        return float(a) == float(b)
+    except (TypeError, ValueError):
+        return a == b
+ 
+ 
+def _verdict(changed, e_in, c_in):
+    """price vs fundamental, MEASURED on this row from component movement.
+ 
+    A ratio input (pe, PEG, dividend yield, NCAV ratio) moves when its price
+    component moves or when its fundamental component moves, and those mean
+    different things to an owner. TERM_INPUT_COMPONENTS names the components;
+    `price` is the price one and there is no other list.
+ 
+    Returns None where the evidence does not separate — an unattributable
+    input, or nothing measurable moved. None means "no verdict", and the
+    caller reports the DELTA alone. A guessed category would be worse than
+    the number.
+    """
+    price_moved = fund_moved = False
+    for ch in changed:
+        for m in ch["inputs"]:
+            col = m["column"]
+            if col in UNATTRIBUTABLE_INPUTS:
+                return None
+            comps = TERM_INPUT_COMPONENTS.get(col)
+            if comps is None:
+                # Not a ratio: the input is the thing it measures.
+                if col == "price":
+                    price_moved = True
+                else:
+                    fund_moved = True
+                continue
+            for comp in comps:
+                if _moved(e_in.get(comp), c_in.get(comp)):
+                    if comp == "price":
+                        price_moved = True
+                    else:
+                        fund_moved = True
+    if price_moved and fund_moved:
         return "mixed"
-    if pe_moved:
+    if price_moved:
         return "valuation"
-    if roe_moved:
+    if fund_moved:
         return "fundamental"
-    return DRIFT_NULL_MOVE_LABEL.get(framework, "unclear")
+    return None
+ 
+ 
+def _greenblatt_flip(e: dict, c: dict):
+    """Greenblatt has no terms — one universe percentile — so it is attributed
+    from its own two stored components, by arithmetic rather than declaration.
+ 
+    roic = EBIT / tangible capital;  ey = EBIT / EV.  EBIT is common to both.
+    So ey moving while roic holds means EV moved, i.e. price; roic moving means
+    tangible capital moved; both moving means EBIT moved and cannot be split.
+    Neither moving while the rank moved is the informative case: this stock's
+    inputs held and the universe moved around it.
+    """
+    e_in, c_in = e.get("term_inputs"), c.get("term_inputs")
+    if not isinstance(e_in, dict) or not isinstance(c_in, dict):
+        return "unknown_inputs", {"terms": [], "comparable": False}
+    ey = _moved(e_in.get("greenblatt_earnings_yield"),
+                c_in.get("greenblatt_earnings_yield"))
+    roic = _moved(e_in.get("greenblatt_roic"), c_in.get("greenblatt_roic"))
+    detail = {"terms": [], "comparable": True,
+              "components": {"greenblatt_earnings_yield":
+                             [e_in.get("greenblatt_earnings_yield"),
+                              c_in.get("greenblatt_earnings_yield")],
+                             "greenblatt_roic": [e_in.get("greenblatt_roic"),
+                                                 c_in.get("greenblatt_roic")]}}
+    if ey is None or roic is None:
+        return "unknown_inputs", detail
+    if ey and roic:
+        return "mixed", detail
+    if ey:
+        return "valuation", detail
+    if roic:
+        return "fundamental", detail
+    return "relative_rank", detail
+ 
+ 
+def _flip_detail(framework: str, e: dict, c: dict):
+    """Why did this framework flip? (label, detail).
+ 
+    detail carries the actual deltas — "Lynch lost 3 points: PEG 0.91 -> 1.62"
+    — which is the primary output. The label is a coarse summary that ABSTAINS
+    when the evidence does not separate; the delta never abstains.
+ 
+    Vocabulary (closed set):
+      fundamental    a fundamental component moved
+      valuation      price moved and no fundamental component did
+      mixed          both moved
+      relative_rank  this stock's inputs held; the universe moved around it
+      unclear        terms changed, nothing measurable moved under them
+      unknown_inputs cannot re-derive one side; we cannot split it
+    """
+    if framework == "greenblatt":
+        return _greenblatt_flip(e, c)
+    changed, comparable = _term_diff(framework, e, c)
+    if not comparable:
+        return "unknown_inputs", {"terms": [], "comparable": False}
+    detail = {"terms": changed, "comparable": True}
+    v = _verdict(changed, e.get("term_inputs") or {}, c.get("term_inputs") or {})
+    return (v or "unclear"), detail
+ 
+ 
+def _departure_cause(f: str, e: dict, c: dict):
+    """Why did `f` leave the comparison set? A departure is NOT a failure, but
+    it is not benign: losing the archetype (a loss year kills ni_cagr_3y) is
+    deterioration, and going dark on sector is a data loss. Both are reported;
+    neither is counted as a framework the business failed."""
+    e_in, c_in = e.get("term_inputs") or {}, c.get("term_inputs") or {}
+    out = {"framework": f, "was_passing": f in set(e.get("passed") or [])}
+    for col in ("lynch_category", "sector"):
+        a = e.get(col) if col == "sector" else e_in.get(col)
+        b = c.get(col) if col == "sector" else c_in.get(col)
+        if not _same_value(a, b):
+            out[col] = [a, b]
+    out["kind"] = "inputs_missing" if any(
+        v[1] is None for k, v in out.items()
+        if isinstance(v, list) and len(v) == 2) else "inputs_moved"
+    return out
 
 
 def _continuous_drift(e: dict, c: dict) -> dict | None:
@@ -1809,6 +1996,11 @@ def _current_facts(universe_row):
         "roe_pct": _num(_get("roe_pct"), 3),
         "score_continuous": _num(_get("score_continuous")),
         "fracs": {f: _num(_get(col)) for f, col in FRAC_COL.items()},
+        # Every column the term tables read, plus the components of each ratio
+        # among them. Raw, unrounded: these are re-scored, not displayed.
+        "term_inputs": {col: _get(col) for col in TERM_INPUT_COLS},
+        "terms_version": TERMS_VERSION,
+        "sector": _get("sector"),
     }
     applicable = set(_applicable_frameworks(row))
     passing = {f for f in FRAMEWORKS
@@ -1817,23 +2009,26 @@ def _current_facts(universe_row):
 
 
 def _label_flips(frameworks, entry, current, applicable):
-    """Per-framework labels for one direction, collapsed worst-case-wins."""
-    per = {}
+    """Per-framework labels AND deltas for one direction, worst-case-wins.
+ 
+    `frameworks` is already restricted to the COMPARABLE set by the caller, so
+    the old `f not in applicable -> unclear` branch is gone. It was written when
+    sector exclusion was the only way to leave `applicable` and called the case
+    "near-impossible"; v6 made Lynch abstention routine (2,328 rows) and it
+    became 2 of 8 live down-flips, each labelled `unclear` -> danger. A
+    departure is now its own event with its own cause, never a flip.
+    """
+    per, detail = {}, {}
     for f in sorted(frameworks):
-        if f not in applicable:
-            # Scoreable at entry, not scoreable now (sector exclusion changed).
-            # Near-impossible, but it must not read as the business breaking.
-            per[f] = "unclear"
-        else:
-            per[f] = _classify_flip(f, entry, current)
+        per[f], detail[f] = _flip_detail(f, entry, current)
     if not per:
-        return {}, None
+        return {}, {}, None
     # Unrecognised labels sort as WORST, never mildest: if _classify_flip grows
     # a label nobody mapped, the failure direction must be louder, not quieter.
     reason = min(per.values(),
                  key=lambda r: DRIFT_PRECEDENCE.index(r)
                  if r in DRIFT_PRECEDENCE else -1)
-    return per, reason
+    return per, detail, reason
 
 
 def classify_score_change(entry_trace: dict | None, universe_row) -> dict:
@@ -1868,20 +2063,42 @@ def classify_score_change(entry_trace: dict | None, universe_row) -> dict:
                 "down": {**blank, "severity": DRIFT_SEVERITY["unknown_inputs"]},
                 "up": dict(blank)}
 
+    # Compare on the frameworks applicable to BOTH sides - the same set the
+    # firing gate uses (comparable_score_drop). The gate and the explanation
+    # disagreeing is what put LUPIN and GREENPOWER on "lynch failed, danger"
+    # when Lynch had abstained on them.
+    e_app = entry.get("applicable")
+    e_app = set(e_app) & set(FRAMEWORKS) if isinstance(e_app, (list, tuple)) \
+        else set(FRAMEWORKS)
+    common = (e_app & applicable) & set(FRAMEWORKS)
+ 
     ep = set(entry_passed) & set(FRAMEWORKS)
-    newly_failing = ep - passing
-    newly_passing = passing - ep
-
-    down_pf, down_reason = _label_flips(newly_failing, entry, current, applicable)
-    up_pf, up_reason = _label_flips(newly_passing, entry, current, applicable)
-
+    newly_failing = (ep & common) - passing
+    newly_passing = (passing & common) - ep
+ 
+    # Frameworks that LEFT. Not failures - but not silent either: one way to
+    # leave is a loss year killing ni_cagr_3y, losing the archetype, and
+    # dropping out of Lynch, which is deterioration the user must hear about.
+    departed = sorted(e_app - applicable)
+    departures = [_departure_cause(f, entry, current) for f in departed]
+ 
+    down_pf, down_dt, down_reason = _label_flips(newly_failing, entry, current,
+                                                 applicable)
+    up_pf, up_dt, up_reason = _label_flips(newly_passing, entry, current,
+                                           applicable)
+    if down_reason is None and departures:
+        down_reason = "departed"
+ 
     return {
         "traceable": True,
+        "terms_version": current.get("terms_version"),
+        "comparable_frameworks": sorted(common),
+        "departed": departures,
         "down": {"frameworks": sorted(newly_failing), "per_framework": down_pf,
-                 "reason": down_reason,
+                 "detail": down_dt, "reason": down_reason,
                  "severity": DRIFT_SEVERITY.get(down_reason) if down_reason else None},
         "up": {"frameworks": sorted(newly_passing), "per_framework": up_pf,
-               "reason": up_reason},
+               "detail": up_dt, "reason": up_reason},
     }
 
 
@@ -1928,6 +2145,10 @@ def build_watch_trace(universe_row) -> dict:
     current, applicable, passing = _current_facts(universe_row)
     return {"passed": sorted(passing),
             "failed": sorted(applicable - passing),
+            # `applicable` was missing here, so comparable_score_drop could not
+            # function on a watchlist trace at all - it fell to the raw-score
+            # branch every time. Pre-existing; fixed with the rest.
+            "applicable": sorted(applicable),
             **current}
 
 # ══════════════════════════════════════════════════════════════════════════
