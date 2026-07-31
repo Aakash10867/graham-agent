@@ -1471,6 +1471,10 @@ DRIFT_SEVERITY = {
     # downgrade, and a departure is evidence that something moved.
     "departed":       "danger",
     "unclear":        "danger",
+    "unknown_inputs": "danger",
+    "valuation":      "warning",
+    "relative_rank":  "warning",
+}
 
 # Watchlist ceiling is WARNING. Severity measures capital at risk, and a watched
 # stock is not owned — nothing is at stake but an intention. Same shape as
