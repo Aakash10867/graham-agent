@@ -13,6 +13,7 @@ from datetime import date, timedelta
 from collections import Counter
 import requests as _requests
 import verdict_engine
+import economics
 # Pure: no Streamlit, no network, no LLM. That purity is what makes the W1
 # drift classification cheap enough to run inside the daily alert loop.
 import selector
@@ -247,38 +248,29 @@ def send_review_email(recipient, subject, body, smtp_user, smtp_pass):
     except Exception as e:
         print(f"  ✗ Review email failed for {recipient}: {e}")
 
-def compute_xirr_standalone(supabase, portfolio_id, current_value, nifty_shadow_value=None):
-    """Compute XIRR for a portfolio and its Nifty shadow. Standalone — no Streamlit dependency.
-    Returns (port_xirr_pct, nifty_xirr_pct) as percentages, or (None, None)."""
+def compute_xirr_standalone(econ, nifty_shadow_value=None):
+    """XIRR from EXTERNAL cash flows only (economics model (a)).
+
+    Buys and sells are internal transfers between cash and securities, not flows
+    into or out of the investor's pocket. Signing every buy negative and every
+    sell positive — the old behaviour — turned a same-day sell-and-rebuy into a
+    spurious round trip and, once sells started reaching the ledger, would have
+    reported a return on gross turnover. The only real flows are contributions;
+    the terminal value is total_assets (holdings + uninvested cash).
+
+    econ: output of economics.portfolio_economics(). No DB access.
+    Returns (port_xirr_pct, nifty_xirr_pct), or (None, None).
+    """
     try:
         from pyxirr import xirr
     except ImportError:
         return None, None
-    try:
-        txn_resp = supabase.table("sip_transactions").select(
-            "transaction_date, amount_inr, transaction_type"
-        ).eq("portfolio_id", str(portfolio_id)).order("transaction_date").execute()
-        txns = txn_resp.data or []
-    except Exception:
+    dates, amounts = economics.xirr_flows(econ)
+    if not dates or len(dates) < 2:
         return None, None
-    if not txns:
-        return None, None
-    dates = []
-    amounts = []
-    for t in txns:
-        d = date.fromisoformat(t["transaction_date"])
-        amt = float(t.get("amount_inr") or 0)
-        if t["transaction_type"] == "buy":
-            amounts.append(-amt)
-        else:
-            amounts.append(amt)
-        dates.append(d)
     # XIRR meaningless under 90 days
     if (date.today() - dates[0]).days < 90:
         return None, None
-    today = date.today()
-    dates.append(today)
-    amounts.append(float(current_value))
     try:
         port_xirr = xirr(dates, amounts)
     except Exception:
@@ -286,7 +278,7 @@ def compute_xirr_standalone(supabase, portfolio_id, current_value, nifty_shadow_
     port_xirr_pct = round(port_xirr * 100, 2) if port_xirr is not None else None
     nifty_xirr_pct = None
     if nifty_shadow_value and nifty_shadow_value > 0:
-        nifty_amounts = amounts[:-1] + [float(nifty_shadow_value)]
+        nifty_amounts = amounts[:-1] + [float(nifty_shadow_value) + float(econ.get("cash_balance") or 0.0)]
         try:
             n_xirr = xirr(dates, nifty_amounts)
             nifty_xirr_pct = round(n_xirr * 100, 2) if n_xirr is not None else None
@@ -732,7 +724,7 @@ def run_daily_tracker():
         return bench_px.get((port or {}).get("benchmark_ticker") or "NIFTYBEES.NS")
 
     # ── Fetch all transactions once ──
-    txn_resp = supabase.table("sip_transactions").select("portfolio_id, amount_inr, transaction_type, nifty_units").execute()
+    txn_resp = supabase.table("sip_transactions").select("id, created_at, portfolio_id, ticker, shares, price, amount_inr, transaction_type, transaction_date, nifty_units").execute()
     all_txns = txn_resp.data or []
 
     # ── Bootstrap: create genesis transactions for portfolios with holdings but no transactions ──
@@ -795,7 +787,7 @@ def run_daily_tracker():
                         "benchmark_ticker": _bt,
                     })).execute()
         # Refresh transactions after bootstrap
-        txn_resp = supabase.table("sip_transactions").select("portfolio_id, amount_inr, transaction_type, nifty_units").execute()
+        txn_resp = supabase.table("sip_transactions").select("id, created_at, portfolio_id, ticker, shares, price, amount_inr, transaction_type, transaction_date, nifty_units").execute()
         all_txns = txn_resp.data or []
         print("Bootstrap complete.")
 
@@ -849,24 +841,27 @@ def run_daily_tracker():
             total_invested += invested_inr
             current_total_value += (shares * live_price)
 
-        return_pct = ((current_total_value - total_invested) / total_invested) * 100 if total_invested > 0 else 0.0
+        # ── Portfolio economics: ONE computation, model (a). ──
+        # total_invested above is the cost basis of SURVIVING holdings and is no
+        # longer a return denominator: it shrinks when a position is sold, which
+        # deletes the loss along with the cost and makes realising a loser look
+        # like a gain. External capital never shrinks on a sale.
+        port_txns = [t for t in all_txns if t["portfolio_id"] == port_id]
+        econ = economics.portfolio_economics(port_txns, current_total_value)
+        return_pct = econ["return_pct"] if econ["return_pct"] is not None else 0.0
 
         # ── 1. Update leaderboard snapshot ──
         supabase.table("portfolios").update(_json_safe({
-            "current_value": round(current_total_value, 2),
-            "current_return_pct": round(return_pct, 2)
+            "current_value": round(econ["total_assets"], 2),
+            "current_return_pct": econ["return_pct"],
+            "cash_balance": econ["cash_balance"],
+            "realized_pnl": econ["realized_pnl"],
         })).eq("id", port_id).execute()
 
-        # ── 2. Compute cumulative invested & Nifty shadow from transaction ledger ──
-        port_txns = [t for t in all_txns if t["portfolio_id"] == port_id]
-        cumulative_invested = 0.0
+        # ── 2. Cumulative invested (= external capital) & benchmark shadow ──
+        cumulative_invested = econ["external_capital"]
         total_nifty_units = 0.0
         for t in port_txns:
-            amt = float(t.get("amount_inr") or 0)
-            if t.get("transaction_type") == "buy":
-                cumulative_invested += amt
-            else:
-                cumulative_invested -= amt
             total_nifty_units += float(t.get("nifty_units") or 0)
 
         _bp = _bench_price_for(port)
@@ -880,7 +875,12 @@ def run_daily_tracker():
         history_row = {
             "portfolio_id": port_id,
             "date": today_str,
+            # total_value stays "market value of holdings" so the risk series is
+            # unchanged; cash_balance is stored alongside it and the chart plots
+            # total_value + cash_balance. Without this the equity line drops on
+            # every sale date and never recovers, which is a fictitious loss.
             "total_value": round(current_total_value, 2),
+            "cash_balance": econ["cash_balance"],
             "daily_return_pct": round(return_pct, 2),
         }
         if cumulative_invested > 0:
@@ -895,7 +895,7 @@ def run_daily_tracker():
         ).execute()
 
         # ── Compute & store XIRR ──
-        _p_xirr, _n_xirr = compute_xirr_standalone(supabase, port_id, current_total_value, nifty_shadow)
+        _p_xirr, _n_xirr = compute_xirr_standalone(econ, nifty_shadow)
         _xirr_update = {}
         if _p_xirr is not None:
             _xirr_update["xirr_pct"] = _p_xirr
@@ -918,7 +918,10 @@ def run_daily_tracker():
             print(f"  Diversification score store failed (non-blocking): {e}")
 
         _div_label = "🟢" if _div_score >= 70 else "🟡" if _div_score >= 40 else "🔴"
-        print(f"Updated [{port['name']}]: Value {current_total_value:,.2f} | Return {return_pct:+.2f}%{_xirr_str} | Div {_div_label}{_div_score}")
+        _cash_str = f" | Cash {econ['cash_balance']:,.2f}" if econ["cash_balance"] > 0 else ""
+        print(f"Updated [{port['name']}]: Assets {econ['total_assets']:,.2f}{_cash_str} "
+              f"| Ext capital {econ['external_capital']:,.2f} | Return {return_pct:+.2f}%"
+              f"{_xirr_str} | Div {_div_label}{_div_score}")
         # Sprint 11: Portfolio risk & performance metrics (Reilly & Brown Ch 7, 18)
         try:
             _risk = compute_portfolio_risk_metrics(
@@ -942,7 +945,7 @@ def run_daily_tracker():
                 print(f"  Risk metrics: {_beta_str}{_sharpe_str}{_alpha_str}")
         except Exception as e:
             print(f"  Risk metrics failed (non-blocking): {e}")
-        _port_values[port_id] = (round(current_total_value, 2), round(return_pct, 2), _p_xirr, _n_xirr)
+        _port_values[port_id] = (round(econ["total_assets"], 2), round(return_pct, 2), _p_xirr, _n_xirr)
 
         # ── SIP budget management (30% cap for mid-cycle opportunities) ──
         sip_amount = port.get("sip_amount") or 0
