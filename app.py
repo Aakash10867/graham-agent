@@ -305,6 +305,35 @@ def live_price(ticker, fallback=0.0):
     except Exception:
         return float(fallback or 0.0)
 
+def record_withdrawal(sb, portfolio, user_id, amount_inr):
+    """Record money LEAVING the portfolio for the user's own bank.
+
+    Always raises on failure. A swallowed withdrawal is the worst row to lose:
+    the cash stays on the books, the next buy is funded from money that is not
+    there, external capital is understated, and every return figure after that
+    point is overstated - compounding with each cycle.
+
+    ticker/shares/price are NOT NULL in the schema and meaningless here, so the
+    row is tagged CASH / 0 / 0. economics.replay_ledger reads amount_inr only
+    for this type.
+    """
+    _bt = portfolio.get("benchmark_ticker") or "NIFTYBEES.NS"
+    _bp = live_price(_bt, 0.0)
+    _amt = round(float(amount_inr), 2)
+    sb.table("sip_transactions").insert({
+        "portfolio_id": str(portfolio["id"]),
+        "user_id": str(user_id),
+        "ticker": "CASH",
+        "shares": 0,
+        "price": 0,
+        "amount_inr": _amt,
+        "transaction_type": "withdrawal",
+        "transaction_date": datetime.date.today().isoformat(),
+        "nifty_price": round(_bp, 2) if _bp > 0 else None,
+        "nifty_units": round(-_amt / _bp, 6) if _bp > 0 else None,
+        "benchmark_ticker": _bt,
+    }).execute()
+
 
 KITE_RELAY_URL = "https://aakash10867.github.io/graham-agent/kite-basket.html"
 
@@ -356,21 +385,27 @@ def load_txns(sb, portfolio_id):
     try:
         return sb.table("sip_transactions").select(
             "id, created_at, ticker, shares, price, amount_inr, "
-            "transaction_type, transaction_date"
+            "transaction_type, transaction_date, nifty_price"
         ).eq("portfolio_id", str(portfolio_id)).execute().data or []
     except Exception:
         return []
 
 
-def portfolio_money(sb, portfolio_id, enriched_holdings):
+def portfolio_money(sb, portfolio_id, enriched_holdings, benchmark_ticker=None):
     """THE money computation for app.py. Decide once, display everywhere.
 
     Every site that shows invested / value / P&L / return calls this and nothing
     else. enriched_holdings must have come through enrich_holdings_live so
     current_value is a live market value.
+
+    benchmark_ticker: pass the portfolio's own benchmark to get shadow_value
+    back. The shadow is derived from EXTERNAL flows inside the replay, not from
+    summing the stored nifty_units column - that column treats a sale as a
+    withdrawal, which it is not.
     """
     mv = sum((h.get("current_value") or 0) for h in (enriched_holdings or []))
-    return economics.portfolio_economics(load_txns(sb, portfolio_id), mv)
+    _bp = live_price(benchmark_ticker, 0.0) if benchmark_ticker else None
+    return economics.portfolio_economics(load_txns(sb, portfolio_id), mv, _bp)
 
 
 def compute_portfolio_xirr(econ, current_nifty_shadow=None):
@@ -763,8 +798,10 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
         # beside a percentage gain.
         _ta = float(portfolio.get("current_value") or 0)
         _cash = float(portfolio.get("cash_balance") or 0)
+        _wd = float(portfolio.get("withdrawn") or 0)
         _rp = portfolio.get("current_return_pct")
-        _ext = round(_ta / (1 + _rp / 100.0), 2) if (_rp is not None and _rp != -100) else _ta
+        # return_pct = (assets + withdrawn - ext) / ext, so ext = (assets + withdrawn) / (1 + r)
+        _ext = round((_ta + _wd) / (1 + _rp / 100.0), 2) if (_rp is not None and _rp != -100) else (_ta + _wd)
         econ = {
             "external_capital": _ext,
             "cash_balance": _cash,
@@ -772,7 +809,8 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
             "total_assets": _ta,
             "realized_pnl": float(portfolio.get("realized_pnl") or 0),
             "unrealized_pnl": 0.0,
-            "total_pnl": round(_ta - _ext, 2),
+            "withdrawn": _wd,
+            "total_pnl": round(_ta + _wd - _ext, 2),
             "return_pct": _rp,
         }
     current_val = econ["total_assets"]
@@ -780,6 +818,7 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
     pnl = econ["total_pnl"]
     return_pct = econ["return_pct"] if econ["return_pct"] is not None else 0
     cash_bal = econ.get("cash_balance", 0) or 0
+    withdrawn_amt = econ.get("withdrawn", 0) or 0
  
     port_xirr = xirr_data[0] if xirr_data else None
     nifty_xirr = xirr_data[1] if xirr_data else None
@@ -815,6 +854,15 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
             _kpi("Alpha", f"{alpha_xirr:+.1f}%" if alpha_xirr is not None else "—", alpha_hex),
         ]
  
+    # Withdrawals are value returned to the investor. They sit in the P&L
+    # numerator, never netted off invested capital, so the KPI row alone would
+    # not explain why assets are below capital on a winding-down portfolio.
+    kpi_note = None
+    if withdrawn_amt > 0:
+        kpi_note = (f"Includes Rs. {fmt_inr(withdrawn_amt, symbol='')} already withdrawn "
+                    f"to your bank. Capital Invested is what you paid in and does not "
+                    f"fall when money is taken back out.")
+
     kpi_col = W / 3
     kpi_data = [kpi_row1]
     if kpi_row2:
@@ -847,6 +895,11 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
         ("LINEBEFORE", (2, 0), (2, -1), 0.5, BORDER),
     ]))
     story.append(kpi_table)
+    if kpi_note:
+        story.append(Spacer(1, 2*mm))
+        story.append(Paragraph(
+            f'<font size="8" color="#64748B">{kpi_note}</font>',
+            ParagraphStyle("KPINote", fontName="Helvetica", fontSize=8, leading=11)))
     story.append(Spacer(1, 4*mm))
 
     # Sprint 11: IPS Policy Summary
@@ -8130,12 +8183,13 @@ elif st.session_state.sb_view_mode == "portfolios":
                             # Was recomputing (value - surviving cost basis) and
                             # writing it over the tracker's correct figure, which
                             # made every refresh after a sale re-introduce the bug.
-                            _e = portfolio_money(sb, port["id"], _enr)
+                            _e = portfolio_money(sb, port["id"], _enr, port.get("benchmark_ticker"))
                             sb.table("portfolios").update({
                                 "current_value": _e["total_assets"],
                                 "current_return_pct": _e["return_pct"],
                                 "cash_balance": _e["cash_balance"],
                                 "realized_pnl": _e["realized_pnl"],
+                                "withdrawn": _e["withdrawn"],
                             }).eq("id", port["id"]).execute()
                             _rp_txt = f"{_e['return_pct']:+.1f}%" if _e["return_pct"] is not None else "n/a"
                             st.toast(f"Refreshed: {fmt_inr(_e['total_assets'])} ({_rp_txt})")
@@ -8144,6 +8198,49 @@ elif st.session_state.sb_view_mode == "portfolios":
                             st.toast("No holdings to refresh.")
                     except Exception as _e:
                         st.error(f"Refresh failed: {_e}")
+
+                # ── Withdraw cash (Sprint 15) ──
+                # Sale proceeds sit as cash until they are redeployed or taken out.
+                # Without this the ledger never learns the money left: the next buy
+                # gets funded from cash that no longer exists, external capital is
+                # understated, and every return after that point is overstated.
+                _cash_now = float(port.get("cash_balance") or 0)
+                if _cash_now > 0:
+                    with st.expander(f"💸 Withdraw cash ({fmt_inr(_cash_now)} uninvested)"):
+                        st.caption(
+                            "Record money you moved out of your broker to your own bank. "
+                            "This does not reduce your invested capital — that already "
+                            "happened. It records value coming back to you, which is what "
+                            "keeps your return honest."
+                        )
+                        _wd_amt = st.number_input(
+                            "Amount withdrawn (Rs.)", min_value=0.0, max_value=float(_cash_now),
+                            value=float(_cash_now), format="%.2f", key=f"wd_amt_{port['id']}",
+                        )
+                        if st.button("Record withdrawal", key=f"wd_go_{port['id']}", width="stretch"):
+                            if _wd_amt <= 0:
+                                st.error("Enter an amount above 0.")
+                            else:
+                                try:
+                                    record_withdrawal(sb, port, st.session_state.sb_user_id, _wd_amt)
+                                    _e2 = portfolio_money(
+                                        sb, port["id"],
+                                        enrich_holdings_live(
+                                            sb.table("holdings").select("*").eq(
+                                                "portfolio_id", port["id"]).execute().data or [],
+                                            cache_key=str(port["id"])),
+                                        port.get("benchmark_ticker"))
+                                    sb.table("portfolios").update({
+                                        "current_value": _e2["total_assets"],
+                                        "current_return_pct": _e2["return_pct"],
+                                        "cash_balance": _e2["cash_balance"],
+                                        "realized_pnl": _e2["realized_pnl"],
+                                        "withdrawn": _e2["withdrawn"],
+                                    }).eq("id", port["id"]).execute()
+                                    st.success(f"Recorded withdrawal of {fmt_inr(_wd_amt)}.")
+                                    st.rerun()
+                                except Exception as _we:
+                                    st.error(f"Withdrawal not recorded: {_we}")
                 _px = port.get("xirr_pct")
                 if _px is not None:
                     _nx = port.get("nifty_xirr_pct")
@@ -8300,6 +8397,9 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 live_price = float(detail.get("price", 0)) if detail.get("price") else 0.0
                                 act_now = detail.get("act_now", False)
                                 budget_left = float(port.get("sip_budget_remaining") or 0)
+                                # Cash on hand BEFORE this buy, so the opportunity
+                                # cap can be charged the external portion only.
+                                _cash_before = float(port.get("cash_balance") or 0)
 
                                 suggested_qty = int(budget_left // live_price) if live_price > 0 and budget_left > 0 else 0
 
@@ -8347,8 +8447,13 @@ elif st.session_state.sb_view_mode == "portfolios":
                                                     "price_at_entry": round(buy_price, 2),
                                                     "score_at_entry": detail.get("score"),
                                                 }).execute()
-                                                record_transaction(sb, port["id"], st.session_state.sb_user_id, ticker, buy_qty, buy_price, invested, "buy")
-                                                new_budget = max(0, budget_left - invested)
+                                                record_transaction(sb, port["id"], st.session_state.sb_user_id, ticker, buy_qty, buy_price, invested, "buy",
+                                                                   benchmark_ticker=port.get("benchmark_ticker"))
+                                                # The opportunity cap limits NEW capital, not gross
+                                                # spend. Buying with idle sale proceeds deploys nothing
+                                                # new, so it must not burn the month's allowance.
+                                                _external_spent = max(0.0, invested - _cash_before)
+                                                new_budget = max(0, budget_left - _external_spent)
                                                 sb.table("portfolios").update({
                                                     "sip_budget_remaining": round(new_budget, 2)
                                                 }).eq("id", port["id"]).execute()
@@ -8665,7 +8770,8 @@ elif st.session_state.sb_view_mode == "portfolios":
                         # Live, not the last history row: the ledger and live
                         # prices are both current, whereas the history row is as
                         # of the last tracker run. One basis for every number here.
-                        _econ = portfolio_money(sb, port["id"], display_holdings)
+                        _econ = portfolio_money(sb, port["id"], display_holdings,
+                                                port.get("benchmark_ticker"))
                         last_shadow = float(hist_df["nifty_shadow_value"].iloc[-1]) if has_shadow else None
                         days_tracked = (hist_df["date"].iloc[-1] - hist_df["date"].iloc[0]).days
 
@@ -8688,13 +8794,23 @@ elif st.session_state.sb_view_mode == "portfolios":
                                       help="Market value of holdings plus any uninvested cash from sales.")
                             m3.metric("P&L", f"{fmt_inr(profit)}", delta=f"{simple_ret:+.1f}%")
 
-                            if _econ["cash_balance"] > 0 or _econ["realized_pnl"] != 0:
+                            if _econ["cash_balance"] > 0 or _econ["realized_pnl"] != 0 or _econ["withdrawn"] > 0:
+                                _parts = [f"Holdings {fmt_inr(_econ['market_value'])}",
+                                          f"Cash {fmt_inr(_econ['cash_balance'])}"]
+                                if _econ["withdrawn"] > 0:
+                                    _parts.append(f"Withdrawn {fmt_inr(_econ['withdrawn'])}")
                                 st.caption(
-                                    f"Holdings {fmt_inr(_econ['market_value'])} · "
-                                    f"Cash {fmt_inr(_econ['cash_balance'])} — "
-                                    f"realized {fmt_inr(_econ['realized_pnl'])}, "
+                                    " · ".join(_parts) +
+                                    f" — realized {fmt_inr(_econ['realized_pnl'])}, "
                                     f"unrealized {fmt_inr(_econ['unrealized_pnl'])}."
                                 )
+                                if _econ["unreconciled_withdrawal"] > 0:
+                                    st.warning(
+                                        f"Withdrawals exceed recorded cash by "
+                                        f"{fmt_inr(_econ['unreconciled_withdrawal'])}. A sale or "
+                                        f"contribution is missing from the ledger — returns "
+                                        f"shown here are understated until it is added."
+                                    )
 
                             m4, m5 = st.columns(2)
                             if port_xirr is not None:
@@ -8952,7 +9068,8 @@ elif st.session_state.sb_view_mode == "portfolios":
                                             redact_holdings=True,
                                             chart_buf=None, narrative=None,
                                             xirr_data=None, score_data=None,
-                                            econ=portfolio_money(sb, port["id"], _share_h),
+                                            econ=portfolio_money(sb, port["id"], _share_h,
+                                                                 port.get("benchmark_ticker")),
                                         )
                                     else:
                                         _share_pdf = st.session_state[report_key]
@@ -8992,7 +9109,8 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 chart_buf = generate_portfolio_chart(hist_for_pdf)
  
                                 # Economics + XIRR (same basis, one computation)
-                                _pdf_econ = portfolio_money(sb, port["id"], hold_for_pdf)
+                                _pdf_econ = portfolio_money(sb, port["id"], hold_for_pdf,
+                                                            port.get("benchmark_ticker"))
                                 _pdf_nifty_sh = hist_for_pdf[-1].get("nifty_shadow_value") if hist_for_pdf else None
                                 xirr_data = compute_portfolio_xirr(_pdf_econ, _pdf_nifty_sh)
  
