@@ -36,6 +36,7 @@ import plotly.graph_objects as go
 import verdict_engine
 import deep_metrics
 import selector
+import economics
 
 def fmt_inr(value, decimals=0, symbol="₹"):
     """Indian-system digit grouping for money: 12,34,567 not 1,234,567.
@@ -348,43 +349,52 @@ def kite_basket_url(stocks):
     return f"{KITE_RELAY_URL}?api_key={urllib.parse.quote(key)}&data={urllib.parse.quote(json.dumps(data))}"
 
 
-def compute_portfolio_xirr(sb, portfolio_id, current_value, current_nifty_shadow=None):
-    """Compute XIRR for portfolio and its Nifty shadow.
-    Returns (port_xirr_pct, nifty_xirr_pct) as percentages, or None on failure/short duration."""
+def load_txns(sb, portfolio_id):
+    """Raw ledger rows for one portfolio. Every column economics.replay_ledger
+    needs, including created_at (the same-day tiebreak that makes a sell-then-
+    rebuy fund itself from cash instead of drawing fresh external capital)."""
+    try:
+        return sb.table("sip_transactions").select(
+            "id, created_at, ticker, shares, price, amount_inr, "
+            "transaction_type, transaction_date"
+        ).eq("portfolio_id", str(portfolio_id)).execute().data or []
+    except Exception:
+        return []
+
+
+def portfolio_money(sb, portfolio_id, enriched_holdings):
+    """THE money computation for app.py. Decide once, display everywhere.
+
+    Every site that shows invested / value / P&L / return calls this and nothing
+    else. enriched_holdings must have come through enrich_holdings_live so
+    current_value is a live market value.
+    """
+    mv = sum((h.get("current_value") or 0) for h in (enriched_holdings or []))
+    return economics.portfolio_economics(load_txns(sb, portfolio_id), mv)
+
+
+def compute_portfolio_xirr(econ, current_nifty_shadow=None):
+    """XIRR from EXTERNAL cash flows only (economics model (a)).
+
+    Buys and sells are internal transfers between cash and securities, not money
+    entering or leaving the investor's pocket. The previous version signed every
+    buy negative and every sell positive, which reports a return on gross
+    turnover and turns a same-day rotation into a fictitious round trip.
+
+    econ: output of portfolio_money(). Terminal value is total_assets.
+    """
     try:
         from pyxirr import xirr
     except ImportError:
         return None, None
 
-    try:
-        txn_resp = sb.table("sip_transactions").select(
-            "transaction_date, amount_inr, transaction_type"
-        ).eq("portfolio_id", str(portfolio_id)).order("transaction_date").execute()
-        txns = txn_resp.data or []
-    except Exception:
+    dates, amounts = economics.xirr_flows(econ)
+    if not dates or len(dates) < 2:
         return None, None
-
-    if not txns:
-        return None, None
-
-    dates = []
-    amounts = []
-    for t in txns:
-        d = datetime.date.fromisoformat(t["transaction_date"])
-        amt = float(t.get("amount_inr") or 0)
-        if t["transaction_type"] == "buy":
-            amounts.append(-amt)
-        else:
-            amounts.append(amt)
-        dates.append(d)
 
     # XIRR meaningless under 90 days
     if (datetime.date.today() - dates[0]).days < 90:
         return None, None
-
-    today = datetime.date.today()
-    dates.append(today)
-    amounts.append(float(current_value))
 
     try:
         port_xirr = xirr(dates, amounts)
@@ -395,7 +405,9 @@ def compute_portfolio_xirr(sb, portfolio_id, current_value, current_nifty_shadow
 
     nifty_xirr_pct = None
     if current_nifty_shadow and current_nifty_shadow > 0:
-        nifty_amounts = amounts[:-1] + [float(current_nifty_shadow)]
+        # The shadow holds securities only; the portfolio's uninvested cash is
+        # added so both sides are measured on the same total-assets basis.
+        nifty_amounts = amounts[:-1] + [float(current_nifty_shadow) + float(econ.get("cash_balance") or 0.0)]
         try:
             n_xirr = xirr(dates, nifty_amounts)
             nifty_xirr_pct = round(n_xirr * 100, 2) if n_xirr is not None else None
@@ -619,7 +631,7 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
                            chart_buf=None, narrative=None,
                            xirr_data=None, goal_data=None, goal_chart_buf=None,
                            sector_data=None, score_data=None, user_name=None,
-                           redact_holdings=False):
+                           redact_holdings=False, econ=None):
     """Generate a premium Alpha Report PDF for a portfolio."""
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
@@ -741,10 +753,33 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
     story.append(Paragraph("Executive Summary", s_heading))
  
     sip = portfolio.get("sip_amount", 0)
-    current_val = sum(h.get("current_value", 0) for h in holdings) if holdings else portfolio.get("current_value", 0)
-    return_pct = portfolio.get("current_return_pct", 0) or 0
-    total_invested = sum(h.get("sip_amount_inr", 0) for h in holdings) if holdings else 0
-    pnl = current_val - total_invested if current_val > 0 and total_invested > 0 else 0
+    # One basis for all three KPIs. Previously pnl came from live holdings while
+    # return_pct came from the cached portfolios column, so this row could print
+    # a loss in rupees next to a gain in percent.
+    if econ is None:
+        # Degraded path: fall back to the portfolio's cached economics columns,
+        # which the tracker writes on ONE consistent basis. Do not blend these
+        # with live holdings values — that blend is what printed a rupee loss
+        # beside a percentage gain.
+        _ta = float(portfolio.get("current_value") or 0)
+        _cash = float(portfolio.get("cash_balance") or 0)
+        _rp = portfolio.get("current_return_pct")
+        _ext = round(_ta / (1 + _rp / 100.0), 2) if (_rp is not None and _rp != -100) else _ta
+        econ = {
+            "external_capital": _ext,
+            "cash_balance": _cash,
+            "market_value": max(0.0, _ta - _cash),
+            "total_assets": _ta,
+            "realized_pnl": float(portfolio.get("realized_pnl") or 0),
+            "unrealized_pnl": 0.0,
+            "total_pnl": round(_ta - _ext, 2),
+            "return_pct": _rp,
+        }
+    current_val = econ["total_assets"]
+    total_invested = econ["external_capital"]
+    pnl = econ["total_pnl"]
+    return_pct = econ["return_pct"] if econ["return_pct"] is not None else 0
+    cash_bal = econ.get("cash_balance", 0) or 0
  
     port_xirr = xirr_data[0] if xirr_data else None
     nifty_xirr = xirr_data[1] if xirr_data else None
@@ -763,8 +798,9 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
  
     # Row 1: Value / Invested / P&L
     kpi_row1 = [
-        _kpi("Current Value", f"Rs. {fmt_inr(current_val, symbol='')}"),
-        _kpi("Total Invested", f"Rs. {fmt_inr(total_invested, symbol='')}"),
+        _kpi("Total Assets" if cash_bal > 0 else "Current Value",
+             f"Rs. {fmt_inr(current_val, symbol='')}"),
+        _kpi("Capital Invested", f"Rs. {fmt_inr(total_invested, symbol='')}"),
         _kpi("P&L", f"Rs. {pnl:+,.0f} ({return_pct:+.1f}%)", pnl_hex),
     ]
  
@@ -3759,10 +3795,15 @@ if st.session_state.sb_view_mode == "chat" and not st.session_state.messages:
         sb = get_supabase()
         # Fetch the top 3 public portfolios by current return
         leaderboard_resp = sb.table("portfolios").select(
-            "name, investor_type, time_horizon, current_return_pct, xirr_pct, nifty_xirr_pct"
-        ).order("current_return_pct", desc=True).limit(3).execute()
-        
-        top_portfolios = leaderboard_resp.data
+            "name, investor_type, time_horizon, current_return_pct, xirr_pct, "
+            "nifty_xirr_pct, is_paper"
+        ).not_.is_("current_return_pct", "null").order(
+            "current_return_pct", desc=True).limit(20).execute()
+
+        # is_paper filtered in Python: .eq(False) drops NULLs in Postgres, and a
+        # simulated portfolio topping a PUBLIC board is a truthfulness failure.
+        top_portfolios = [p for p in (leaderboard_resp.data or [])
+                          if not p.get("is_paper")][:3]
         
         if top_portfolios:
             st.markdown("### 🏆 Top Performing Portfolios")
@@ -8080,13 +8121,18 @@ elif st.session_state.sb_view_mode == "portfolios":
                                .eq("portfolio_id", port["id"]).execute().data) or []
                         if _rh:
                             _enr = enrich_holdings_live(_rh, cache_key=None)
-                            _cv = round(sum(h["current_value"] for h in _enr), 2)
-                            _inv = sum(h.get("sip_amount_inr", 0) for h in _rh)
-                            _rp = round((_cv - _inv) / _inv * 100, 2) if _inv else 0.0
-                            sb.table("portfolios").update(
-                                {"current_value": _cv, "current_return_pct": _rp}
-                            ).eq("id", port["id"]).execute()
-                            st.toast(f"Refreshed: {fmt_inr(_cv)} ({_rp:+.1f}%)")
+                            # Was recomputing (value - surviving cost basis) and
+                            # writing it over the tracker's correct figure, which
+                            # made every refresh after a sale re-introduce the bug.
+                            _e = portfolio_money(sb, port["id"], _enr)
+                            sb.table("portfolios").update({
+                                "current_value": _e["total_assets"],
+                                "current_return_pct": _e["return_pct"],
+                                "cash_balance": _e["cash_balance"],
+                                "realized_pnl": _e["realized_pnl"],
+                            }).eq("id", port["id"]).execute()
+                            _rp_txt = f"{_e['return_pct']:+.1f}%" if _e["return_pct"] is not None else "n/a"
+                            st.toast(f"Refreshed: {fmt_inr(_e['total_assets'])} ({_rp_txt})")
                             st.rerun()
                         else:
                             st.toast("No holdings to refresh.")
@@ -8539,7 +8585,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                 # ── Stacked Absolute Chart + XIRR ──
                 try:
                     hist_resp = sb.table("portfolio_history").select(
-                        "date, total_value, cumulative_invested, nifty_shadow_value"
+                        "date, total_value, cash_balance, cumulative_invested, nifty_shadow_value"
                     ).eq("portfolio_id", port["id"]).order("date").execute()
                     hist_data = hist_resp.data
 
@@ -8550,6 +8596,17 @@ elif st.session_state.sb_view_mode == "portfolios":
 
                         has_invested = "cumulative_invested" in hist_df.columns and hist_df["cumulative_invested"].notna().sum() >= 2
                         has_shadow = "nifty_shadow_value" in hist_df.columns and hist_df["nifty_shadow_value"].notna().sum() >= 2
+
+                        # total_value is holdings only. Uninvested sale proceeds
+                        # are real assets; without adding them the line drops on
+                        # every sale date and never recovers — a fictitious loss.
+                        # Rows written before cash_balance existed are NULL, and
+                        # no sale had been recorded then, so 0 is exactly right.
+                        if "cash_balance" in hist_df.columns:
+                            hist_df["cash_balance"] = hist_df["cash_balance"].fillna(0)
+                        else:
+                            hist_df["cash_balance"] = 0
+                        hist_df["total_assets"] = hist_df["total_value"] + hist_df["cash_balance"]
 
                         fig = go.Figure()
 
@@ -8572,9 +8629,9 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 hovertemplate="₹%{y:,.0f}<extra>" + _bench['label'] + " shadow</extra>",
                             ))
 
-                        # 3. Reality Line (bold)
+                        # 3. Reality Line (bold) — holdings + uninvested cash
                         fig.add_trace(go.Scatter(
-                            x=hist_df["date"], y=hist_df["total_value"],
+                            x=hist_df["date"], y=hist_df["total_assets"],
                             line=dict(color="#1D4ED8", width=2.5),
                             name="Portfolio",
                             hovertemplate="₹%{y:,.0f}<extra>Portfolio</extra>",
@@ -8599,25 +8656,39 @@ elif st.session_state.sb_view_mode == "portfolios":
                         )
 
                         # ── Metrics below chart ──
-                        last_val = float(hist_df["total_value"].iloc[-1])
-                        last_invested = float(hist_df["cumulative_invested"].iloc[-1]) if has_invested else None
+                        # Live, not the last history row: the ledger and live
+                        # prices are both current, whereas the history row is as
+                        # of the last tracker run. One basis for every number here.
+                        _econ = portfolio_money(sb, port["id"], display_holdings)
                         last_shadow = float(hist_df["nifty_shadow_value"].iloc[-1]) if has_shadow else None
                         days_tracked = (hist_df["date"].iloc[-1] - hist_df["date"].iloc[0]).days
 
-                        # Compute XIRR
-                        current_total = sum(h.get("current_value", 0) for h in display_holdings) if holdings else last_val
-                        port_xirr, nifty_xirr = compute_portfolio_xirr(
-                            sb, port["id"], current_total, last_shadow
-                        )
+                        port_xirr, nifty_xirr = compute_portfolio_xirr(_econ, last_shadow)
+
+                        last_invested = _econ["external_capital"]
+                        last_val = _econ["total_assets"]
 
                         if last_invested and last_invested > 0:
-                            profit = last_val - last_invested
-                            simple_ret = (profit / last_invested) * 100
+                            profit = _econ["total_pnl"]
+                            simple_ret = _econ["return_pct"] if _econ["return_pct"] is not None else 0.0
 
                             m1, m2, m3 = st.columns(3)
-                            m1.metric("Invested", f"{fmt_inr(last_invested)}")
-                            m2.metric("Current Value", f"{fmt_inr(last_val)}")
+                            m1.metric("Capital Invested", f"{fmt_inr(last_invested)}",
+                                      help="What you actually paid in from outside. A sale converts "
+                                           "shares to cash inside the portfolio; it does not give you "
+                                           "capital back, so this never falls when you sell.")
+                            m2.metric("Total Assets" if _econ["cash_balance"] > 0 else "Current Value",
+                                      f"{fmt_inr(last_val)}",
+                                      help="Market value of holdings plus any uninvested cash from sales.")
                             m3.metric("P&L", f"{fmt_inr(profit)}", delta=f"{simple_ret:+.1f}%")
+
+                            if _econ["cash_balance"] > 0 or _econ["realized_pnl"] != 0:
+                                st.caption(
+                                    f"Holdings {fmt_inr(_econ['market_value'])} · "
+                                    f"Cash {fmt_inr(_econ['cash_balance'])} — "
+                                    f"realized {fmt_inr(_econ['realized_pnl'])}, "
+                                    f"unrealized {fmt_inr(_econ['unrealized_pnl'])}."
+                                )
 
                             m4, m5 = st.columns(2)
                             if port_xirr is not None:
@@ -8632,7 +8703,9 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 alpha = round(port_xirr - nifty_xirr, 1)
                                 m5.metric(f"Alpha vs {_bench['label']}", f"{alpha:+.1f}%", delta=f"{_bench['label']} XIRR {nifty_xirr:+.1f}%")
                             elif has_shadow and last_shadow and last_invested > 0:
-                                nifty_simple = ((last_shadow - last_invested) / last_invested) * 100
+                                # Shadow holds securities only; add the portfolio's
+                                # cash so both sides are on a total-assets basis.
+                                nifty_simple = (((last_shadow + _econ["cash_balance"]) - last_invested) / last_invested) * 100
                                 alpha_simple = simple_ret - nifty_simple
                                 m5.metric(f"vs {_bench['label']}", f"{alpha_simple:+.1f}%", delta=f"{_bench['label']} {nifty_simple:+.1f}%")
                             else:
@@ -8866,12 +8939,14 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 _redact = st.session_state.get(f"redact_{port['id']}", True)
                                 with st.spinner("Generating share link..."):
                                     if _redact:
+                                        _share_h = st.session_state.get(f"_pdf_holdings_{port['id']}", [])
                                         _share_pdf = generate_portfolio_pdf(
                                             port,
-                                            st.session_state.get(f"_pdf_holdings_{port['id']}", []),
+                                            _share_h,
                                             redact_holdings=True,
                                             chart_buf=None, narrative=None,
                                             xirr_data=None, score_data=None,
+                                            econ=portfolio_money(sb, port["id"], _share_h),
                                         )
                                     else:
                                         _share_pdf = st.session_state[report_key]
@@ -8910,10 +8985,10 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 # Chart (Plotly stacked → PNG via kaleido, matplotlib fallback)
                                 chart_buf = generate_portfolio_chart(hist_for_pdf)
  
-                                # XIRR
-                                _pdf_cur_val = sum(h.get("current_value", 0) for h in hold_for_pdf)
+                                # Economics + XIRR (same basis, one computation)
+                                _pdf_econ = portfolio_money(sb, port["id"], hold_for_pdf)
                                 _pdf_nifty_sh = hist_for_pdf[-1].get("nifty_shadow_value") if hist_for_pdf else None
-                                xirr_data = compute_portfolio_xirr(sb, port["id"], _pdf_cur_val, _pdf_nifty_sh)
+                                xirr_data = compute_portfolio_xirr(_pdf_econ, _pdf_nifty_sh)
  
                                 # Goal projection + chart
                                 goal_data = None
@@ -9041,7 +9116,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                                     xirr_data=xirr_data, goal_data=goal_data,
                                     goal_chart_buf=goal_chart_buf,
                                     sector_data=sector_data, score_data=score_data,
-                                    user_name=_pdf_name,
+                                    user_name=_pdf_name, econ=_pdf_econ,
                                 )
                                 st.session_state[f"_pdf_holdings_{port['id']}"] = hold_for_pdf
                                 st.session_state[report_key] = pdf_bytes
@@ -9725,10 +9800,14 @@ elif st.session_state.sb_view_mode == "portfolios":
                     port_pnl = total_current - total_entry
                     port_ret = (port_pnl / total_entry * 100) if total_entry > 0 else 0
 
+                    # Position-level, NOT portfolio-level: total_entry is the cost
+                    # basis of the open positions under review. It excludes closed
+                    # positions and any uninvested cash, so it is deliberately
+                    # labelled differently from the portfolio numbers above.
                     m1, m2, m3, m4 = st.columns(4)
-                    m1.metric("Invested", f"{fmt_inr(total_entry)}")
-                    m2.metric("Current Value", f"{fmt_inr(total_current)}")
-                    m3.metric("P&L", f"{fmt_inr(port_pnl)}", delta=f"{port_ret:+.1f}%")
+                    m1.metric("Cost basis (open)", f"{fmt_inr(total_entry)}")
+                    m2.metric("Value now", f"{fmt_inr(total_current)}")
+                    m3.metric("Unrealized P&L", f"{fmt_inr(port_pnl)}", delta=f"{port_ret:+.1f}%")
 
                     # Portfolio-level Nifty alpha
                     _enriched_data = review_state.get("enriched", [])
