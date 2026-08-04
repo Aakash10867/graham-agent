@@ -292,12 +292,21 @@ def compute_diversification_score(holdings, universe_df=None):
     if not holdings or len(holdings) == 0:
         return 0
 
-    total_value = sum(h.get("current_value", 0) or h.get("sip_amount_inr", 0) or 0 for h in holdings)
-    if total_value <= 0:
-        return 0
-
     def _val(h):
         return h.get("current_value", 0) or h.get("sip_amount_inr", 0) or 0
+
+    # allocate_shares deliberately keeps unfunded names in `holdings` with
+    # shares=0 so their allocation_pct target survives to the next SIP cycle.
+    # They are TARGETS, not POSITIONS. Counting them here inflated adequacy
+    # (a 9-stock portfolio with 6 pending targets scored as 15/12 = 100) and
+    # deflated the HHI score by padding n_sectors with zero-weight sectors.
+    holdings = [h for h in holdings if _val(h) > 0]
+    if not holdings:
+        return 0
+
+    total_value = sum(_val(h) for h in holdings)
+    if total_value <= 0:
+        return 0
 
     # ── 1. Sector HHI inverted (40%) ──
     sector_weights = {}
