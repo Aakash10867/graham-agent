@@ -250,12 +250,25 @@ def allocate_shares(stocks, sip_amount, existing_shares=None):
 
     return result, round(remaining, 2)
 
-def record_transaction(sb, portfolio_id, user_id, ticker, shares, price, amount_inr, txn_type="buy", nifty_cache=None):
-    """Record a buy/sell in sip_transactions with Nifty BeES shadow data. Non-blocking."""
+def record_transaction(sb, portfolio_id, user_id, ticker, shares, price, amount_inr, txn_type="buy", nifty_cache=None,
+                       benchmark_ticker=None, raise_on_error=False):
+    """Record a buy/sell in sip_transactions with benchmark shadow data.
+
+    benchmark_ticker: the PORTFOLIO's own benchmark. Passing None keeps the old
+    NIFTYBEES default, but any portfolio benchmarked elsewhere had its shadow
+    silently mispriced by every app-side transaction before this was added.
+
+    raise_on_error: buys may stay non-blocking (the holding row is the record of
+    truth and the tracker's genesis bootstrap can reconstruct them). SELLS MUST
+    NOT. A swallowed sell insert permanently loses the proceeds, and nothing can
+    reconstruct them. Sell callers pass True and write the ledger BEFORE
+    mutating holdings.
+    """
+    _bt = benchmark_ticker or "NIFTYBEES.NS"
     nifty_px = nifty_cache
     if nifty_px is None:
         try:
-            nifty_px = yf.Ticker("NIFTYBEES.NS").fast_info.last_price
+            nifty_px = yf.Ticker(_bt).fast_info.last_price
         except Exception:
             nifty_px = None
     nifty_u = None
@@ -274,10 +287,22 @@ def record_transaction(sb, portfolio_id, user_id, ticker, shares, price, amount_
             "transaction_date": datetime.date.today().isoformat(),
             "nifty_price": round(nifty_px, 2) if nifty_px else None,
             "nifty_units": nifty_u,
+            "benchmark_ticker": _bt,
         }).execute()
     except Exception as e:
+        if raise_on_error:
+            raise
         print(f"Txn log failed (non-blocking): {e}")
     return nifty_px
+
+
+def live_price(ticker, fallback=0.0):
+    """Best-effort last traded price, falling back to a caller-supplied number."""
+    try:
+        _p = yf.Ticker(ticker).fast_info.last_price
+        return float(_p) if _p and _p > 0 else float(fallback or 0.0)
+    except Exception:
+        return float(fallback or 0.0)
 
 
 KITE_RELAY_URL = "https://aakash10867.github.io/graham-agent/kite-basket.html"
@@ -8168,8 +8193,28 @@ elif st.session_state.sb_view_mode == "portfolios":
                                     )
                                     c1, c2 = st.columns(2)
                                     with c1:
+                                        _sell_px = st.number_input(
+                                            "Sell price (Rs.)", min_value=0.0,
+                                            value=float(live_price(ticker, h_match.get("price_at_entry", 0))),
+                                            format="%.2f", key=f"defend_px_{a_id}",
+                                            help="Defaults to last traded price. Override with your actual Kite fill.",
+                                        )
                                         if st.button("🛡️ Confirm Sell", key=f"defend_confirm_{a_id}", width="stretch"):
-                                            if sell_qty > 0:
+                                            if sell_qty > 0 and _sell_px > 0:
+                                                # Ledger first. If this insert fails the holding is
+                                                # left untouched and the user can retry; the reverse
+                                                # order loses the proceeds forever.
+                                                try:
+                                                    record_transaction(
+                                                        sb, port["id"], st.session_state.sb_user_id,
+                                                        ticker, sell_qty, _sell_px,
+                                                        round(sell_qty * _sell_px, 2), "sell",
+                                                        benchmark_ticker=port.get("benchmark_ticker"),
+                                                        raise_on_error=True,
+                                                    )
+                                                except Exception as _e:
+                                                    st.error(f"Sale not recorded, holding unchanged: {_e}")
+                                                    st.stop()
                                                 new_shares = max_shares - sell_qty
                                                 if new_shares <= 0:
                                                     sb.table("holdings").delete().eq("id", h_match["id"]).execute()
@@ -8182,6 +8227,8 @@ elif st.session_state.sb_view_mode == "portfolios":
                                                 sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
                                                 st.success(f"Sold {sell_qty} shares of {ticker}.")
                                                 st.rerun()
+                                            elif sell_qty > 0:
+                                                st.error("Enter a sell price above 0.")
                                     with c2:
                                         if st.button("Dismiss", key=f"defend_dismiss_{a_id}", width="stretch"):
                                             sb.table("portfolio_alerts").update({"is_read": True}).eq("id", a_id).execute()
@@ -9079,27 +9126,41 @@ elif st.session_state.sb_view_mode == "portfolios":
                                         width="stretch"
                                     ):
                                         try:
-                                            if sell_shares == 0:
-                                                sb.table("holdings").delete().eq(
-                                                    "portfolio_id", port["id"]
-                                                ).eq("ticker", act_ticker).execute()
-                                                st.success(f"Removed {act_ticker} from portfolio.")
+                                            # Both branches now resolve the holding FIRST: the old
+                                            # "sell all" path deleted the row without ever knowing
+                                            # how many shares left the portfolio, so the sale could
+                                            # not be written to the ledger even in principle.
+                                            h_resp = sb.table("holdings").select("*").eq(
+                                                "portfolio_id", port["id"]
+                                            ).eq("ticker", act_ticker).execute()
+                                            h = (h_resp.data or [None])[0]
+                                            if not h:
+                                                st.warning(f"{act_ticker} is no longer held.")
+                                                st.stop()
+                                            _held = int(h.get("shares") or 0)
+                                            _qty = _held if sell_shares == 0 else min(int(sell_shares), _held)
+                                            _px = live_price(act_ticker, h.get("price_at_entry", 0))
+                                            if _qty <= 0 or _px <= 0:
+                                                st.error("No live price for this ticker — sale not recorded. "
+                                                         "Use Review, where you can enter the fill price.")
+                                                st.stop()
+                                            record_transaction(
+                                                sb, port["id"], st.session_state.sb_user_id,
+                                                act_ticker, _qty, _px, round(_qty * _px, 2), "sell",
+                                                benchmark_ticker=port.get("benchmark_ticker"),
+                                                raise_on_error=True,
+                                            )
+                                            new_shares = _held - _qty
+                                            if new_shares <= 0:
+                                                sb.table("holdings").delete().eq("id", h["id"]).execute()
+                                                st.success(f"Sold all {_qty} shares of {act_ticker} at {fmt_inr(_px)}.")
                                             else:
-                                                h_resp = sb.table("holdings").select("*").eq(
-                                                    "portfolio_id", port["id"]
-                                                ).eq("ticker", act_ticker).execute()
-                                                if h_resp.data:
-                                                    h = h_resp.data[0]
-                                                    new_shares = max(0, h["shares"] - sell_shares)
-                                                    if new_shares == 0:
-                                                        sb.table("holdings").delete().eq("id", h["id"]).execute()
-                                                    else:
-                                                        new_invested = new_shares * h.get("price_at_entry", 0)
-                                                        sb.table("holdings").update({
-                                                            "shares": new_shares,
-                                                            "sip_amount_inr": round(new_invested, 2)
-                                                        }).eq("id", h["id"]).execute()
-                                                st.success(f"Sold {sell_shares} shares of {act_ticker}.")
+                                                new_invested = new_shares * h.get("price_at_entry", 0)
+                                                sb.table("holdings").update({
+                                                    "shares": new_shares,
+                                                    "sip_amount_inr": round(new_invested, 2)
+                                                }).eq("id", h["id"]).execute()
+                                                st.success(f"Sold {_qty} shares of {act_ticker} at {fmt_inr(_px)}.")
                                             st.rerun()
                                         except Exception as e:
                                             st.error(f"Failed: {e}")
@@ -9814,27 +9875,41 @@ elif st.session_state.sb_view_mode == "portfolios":
                                         width="stretch"
                                     ):
                                         try:
-                                            if sell_shares == 0:
-                                                sb.table("holdings").delete().eq(
-                                                    "portfolio_id", port["id"]
-                                                ).eq("ticker", act_ticker).execute()
-                                                st.success(f"Removed {act_ticker} from portfolio.")
+                                            # Both branches now resolve the holding FIRST: the old
+                                            # "sell all" path deleted the row without ever knowing
+                                            # how many shares left the portfolio, so the sale could
+                                            # not be written to the ledger even in principle.
+                                            h_resp = sb.table("holdings").select("*").eq(
+                                                "portfolio_id", port["id"]
+                                            ).eq("ticker", act_ticker).execute()
+                                            h = (h_resp.data or [None])[0]
+                                            if not h:
+                                                st.warning(f"{act_ticker} is no longer held.")
+                                                st.stop()
+                                            _held = int(h.get("shares") or 0)
+                                            _qty = _held if sell_shares == 0 else min(int(sell_shares), _held)
+                                            _px = live_price(act_ticker, h.get("price_at_entry", 0))
+                                            if _qty <= 0 or _px <= 0:
+                                                st.error("No live price for this ticker — sale not recorded. "
+                                                         "Use Review, where you can enter the fill price.")
+                                                st.stop()
+                                            record_transaction(
+                                                sb, port["id"], st.session_state.sb_user_id,
+                                                act_ticker, _qty, _px, round(_qty * _px, 2), "sell",
+                                                benchmark_ticker=port.get("benchmark_ticker"),
+                                                raise_on_error=True,
+                                            )
+                                            new_shares = _held - _qty
+                                            if new_shares <= 0:
+                                                sb.table("holdings").delete().eq("id", h["id"]).execute()
+                                                st.success(f"Sold all {_qty} shares of {act_ticker} at {fmt_inr(_px)}.")
                                             else:
-                                                h_resp = sb.table("holdings").select("*").eq(
-                                                    "portfolio_id", port["id"]
-                                                ).eq("ticker", act_ticker).execute()
-                                                if h_resp.data:
-                                                    h = h_resp.data[0]
-                                                    new_shares = max(0, h["shares"] - sell_shares)
-                                                    if new_shares == 0:
-                                                        sb.table("holdings").delete().eq("id", h["id"]).execute()
-                                                    else:
-                                                        new_invested = new_shares * h.get("price_at_entry", 0)
-                                                        sb.table("holdings").update({
-                                                            "shares": new_shares,
-                                                            "sip_amount_inr": round(new_invested, 2)
-                                                        }).eq("id", h["id"]).execute()
-                                                st.success(f"Sold {sell_shares} shares of {act_ticker}.")
+                                                new_invested = new_shares * h.get("price_at_entry", 0)
+                                                sb.table("holdings").update({
+                                                    "shares": new_shares,
+                                                    "sip_amount_inr": round(new_invested, 2)
+                                                }).eq("id", h["id"]).execute()
+                                                st.success(f"Sold {_qty} shares of {act_ticker} at {fmt_inr(_px)}.")
                                             st.rerun()
                                         except Exception as e:
                                             st.error(f"Failed: {e}")
@@ -10017,26 +10092,43 @@ elif st.session_state.sb_view_mode == "portfolios":
 
                     # ── Single update button ──
                     if st.button("✅ Portfolio Updated", key=f"apply_{port['id']}", width="stretch"):
+                        def _apply_sale(_r, _h_id, _qty):
+                            """Ledger first, then holdings. Returns False and leaves the
+                            holding untouched if the sale cannot be recorded."""
+                            _px = _r.get("_now_price") or _r.get("_entry_price") or 0
+                            if _qty <= 0 or _px <= 0:
+                                st.error(f"No usable price for {_r.get('_ticker')} — sale not recorded.")
+                                return False
+                            try:
+                                record_transaction(
+                                    sb, port["id"], st.session_state.sb_user_id,
+                                    _r["_ticker"], _qty, _px, round(_qty * _px, 2), "sell",
+                                    benchmark_ticker=port.get("benchmark_ticker"),
+                                    raise_on_error=True,
+                                )
+                            except Exception as _e:
+                                st.error(f"Sale of {_r.get('_ticker')} not recorded, holding unchanged: {_e}")
+                                return False
+                            _new = _r["Shares"] - _qty
+                            if _new <= 0:
+                                sb.table("holdings").delete().eq("id", _h_id).execute()
+                            else:
+                                sb.table("holdings").update({
+                                    "shares": _new,
+                                    "sip_amount_inr": round(_new * _r["_entry_price"], 2),
+                                }).eq("id", _h_id).execute()
+                            return True
+
                         for i, r in enumerate(review_rows):
                             h_id = r["_holding_id"]
                             if "SELL" in r["Action"]:
                                 sold = st.session_state.get(f"sold_{port['id']}_{h_id}", 0)
                                 if sold > 0:
-                                    new_shares = r["Shares"] - sold
-                                    if new_shares <= 0:
-                                        sb.table("holdings").delete().eq("id", h_id).execute()
-                                    else:
-                                        new_invested = new_shares * r["_entry_price"]
-                                        sb.table("holdings").update({"shares": new_shares, "sip_amount_inr": round(new_invested, 2)}).eq("id", h_id).execute()
+                                    _apply_sale(r, h_id, sold)
                             else:
                                 manual_sold = st.session_state.get(f"manual_sold_{port['id']}_{h_id}", 0)
                                 if manual_sold > 0:
-                                    new_shares = r["Shares"] - manual_sold
-                                    if new_shares <= 0:
-                                        sb.table("holdings").delete().eq("id", h_id).execute()
-                                    else:
-                                        new_invested = new_shares * r["_entry_price"]
-                                        sb.table("holdings").update({"shares": new_shares, "sip_amount_inr": round(new_invested, 2)}).eq("id", h_id).execute()
+                                    _apply_sale(r, h_id, manual_sold)
                                 else:
                                     new_qty = st.session_state.get(f"add_qty_{port['id']}_{h_id}", 0)
                                     buy_price = st.session_state.get(f"add_price_{port['id']}_{h_id}", 0.0)
