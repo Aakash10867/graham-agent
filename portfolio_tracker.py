@@ -733,7 +733,7 @@ def run_daily_tracker():
         return bench_px.get((port or {}).get("benchmark_ticker") or "NIFTYBEES.NS")
 
     # ── Fetch all transactions once ──
-    txn_resp = supabase.table("sip_transactions").select("id, created_at, portfolio_id, ticker, shares, price, amount_inr, transaction_type, transaction_date, nifty_units").execute()
+    txn_resp = supabase.table("sip_transactions").select("id, created_at, portfolio_id, ticker, shares, price, amount_inr, transaction_type, transaction_date, nifty_units, nifty_price").execute()
     all_txns = txn_resp.data or []
 
     # ── Bootstrap: create genesis transactions for portfolios with holdings but no transactions ──
@@ -796,7 +796,7 @@ def run_daily_tracker():
                         "benchmark_ticker": _bt,
                     })).execute()
         # Refresh transactions after bootstrap
-        txn_resp = supabase.table("sip_transactions").select("id, created_at, portfolio_id, ticker, shares, price, amount_inr, transaction_type, transaction_date, nifty_units").execute()
+        txn_resp = supabase.table("sip_transactions").select("id, created_at, portfolio_id, ticker, shares, price, amount_inr, transaction_type, transaction_date, nifty_units, nifty_price").execute()
         all_txns = txn_resp.data or []
         print("Bootstrap complete.")
 
@@ -856,7 +856,8 @@ def run_daily_tracker():
         # deletes the loss along with the cost and makes realising a loser look
         # like a gain. External capital never shrinks on a sale.
         port_txns = [t for t in all_txns if t["portfolio_id"] == port_id]
-        econ = economics.portfolio_economics(port_txns, current_total_value)
+        _bp = _bench_price_for(port)
+        econ = economics.portfolio_economics(port_txns, current_total_value, _bp)
         return_pct = econ["return_pct"] if econ["return_pct"] is not None else 0.0
 
         # ── 1. Update leaderboard snapshot ──
@@ -865,20 +866,26 @@ def run_daily_tracker():
             "current_return_pct": econ["return_pct"],
             "cash_balance": econ["cash_balance"],
             "realized_pnl": econ["realized_pnl"],
+            "withdrawn": econ["withdrawn"],
         })).eq("id", port_id).execute()
 
         # ── 2. Cumulative invested (= external capital) & benchmark shadow ──
+        # The shadow is now derived from EXTERNAL flows inside replay_ledger,
+        # priced at each row's own nifty_price. Summing the stored nifty_units
+        # column (+amt on buys, -amt on everything else) made a sale look like a
+        # withdrawal: sell, hold the cash, and the shadow fell even though no
+        # money had left. With withdrawals in the ledger it double-counted too.
         cumulative_invested = econ["external_capital"]
-        total_nifty_units = 0.0
-        for t in port_txns:
-            total_nifty_units += float(t.get("nifty_units") or 0)
-
-        _bp = _bench_price_for(port)
-        nifty_shadow = (round(total_nifty_units * _bp, 2)
-                        if (_bp and _bp > 0 and total_nifty_units > 0)
-                        else None)
+        nifty_shadow = econ["shadow_value"]
         if nifty_shadow is not None and not math.isfinite(nifty_shadow):
             nifty_shadow = None
+        if econ["shadow_incomplete"]:
+            print(f"  WARNING [{port['name']}]: a contribution had no benchmark "
+                  f"price on its ledger row; the shadow understates.")
+        if econ["unreconciled_withdrawal"] > 0:
+            print(f"  WARNING [{port['name']}]: withdrawals exceed known cash by "
+                  f"{econ['unreconciled_withdrawal']:,.2f} - a sale or contribution "
+                  f"is missing from the ledger.")
 
         # ── 3. Log history ──
         history_row = {
@@ -928,6 +935,7 @@ def run_daily_tracker():
 
         _div_label = "🟢" if _div_score >= 70 else "🟡" if _div_score >= 40 else "🔴"
         _cash_str = f" | Cash {econ['cash_balance']:,.2f}" if econ["cash_balance"] > 0 else ""
+        _cash_str += f" | Withdrawn {econ['withdrawn']:,.2f}" if econ["withdrawn"] > 0 else ""
         print(f"Updated [{port['name']}]: Assets {econ['total_assets']:,.2f}{_cash_str} "
               f"| Ext capital {econ['external_capital']:,.2f} | Return {return_pct:+.2f}%"
               f"{_xirr_str} | Div {_div_label}{_div_score}")
