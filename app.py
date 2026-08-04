@@ -2647,6 +2647,12 @@ def _commit_portfolio(portfolio: dict) -> dict:
         
         for s in allocated:
             amt = s["actual_amount"]
+            # allocate_shares returns EVERY candidate, with shares=0 for the ones
+            # this cycle could not fund. A zero-share holdings row is intentional
+            # (it carries allocation_pct to the next cycle), but a zero-rupee
+            # "buy" is not a transaction and has no business in the ledger.
+            if not (float(s.get("shares") or 0) > 0 and float(amt or 0) > 0):
+                continue
             nifty_u = round(float(amt) / nifty_px, 6) if (nifty_px and nifty_px > 0) else None
             
             txns_data.append({
