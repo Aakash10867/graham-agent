@@ -1700,7 +1700,7 @@ ticker,name,exchange
 539434.BO,Brilliant Portfolios Ltd.,BSE
 539435.BO,Richfield Financial Services Ltd.,BSE
 539449.BO,IGC Industries Limited,BSE
-539455.BO,ARYAVAN ENTERPRISE LIMITED,BSE
+539455.BO,ECOFINITY ATOMIX LIMITED,BSE
 539468.BO,Typhoon Financial Services Limited,BSE
 539469.BO,PANORAMA STUDIOS INTERNATIONAL LIMITED,BSE
 539470.BO,Shree Ganesh Biotech (India) Limited,BSE
@@ -2639,6 +2639,10 @@ ticker,name,exchange
 544842.BO,HDFC Mutual Fund,BSE
 544843.BO,ADVANCE TECHNOFORGE LIMITED,BSE
 544844.BO,POOJAA PRECISION ENGG. LIMITED,BSE
+544845.BO,ICICI Prudential Mutual Fund,BSE
+544846.BO,Edelweiss Mutual Fund,BSE
+544848.BO,H. R. HYGIENE PRODUCTS LIMITED,BSE
+544849.BO,Edelweiss Mutual Fund,BSE
 555555.BO,ICICI Prudential Mutual Fund,BSE
 590103.BO,Reliance Mutual Fund-Permitted,BSE
 590104.BO,Reliance Mutual Fund-Permitted,BSE
@@ -3969,6 +3973,7 @@ MANGALAM.NS,Mangalam Drugs And Organics Limited,NSE
 MANGLMCEM.NS,Mangalam Cement Limited,NSE
 MANINDS.NS,Man Industries (India) Limited,NSE
 MANINFRA.NS,Man Infraconstruction Limited,NSE
+MANIPALHOS.NS,Manipal Health Enterprises Limited,NSE
 MANKIND.NS,Mankind Pharma Limited,NSE
 MANOMAY.NS,Manomay Tex India Limited,NSE
 MANORAMA.NS,Manorama Industries Limited,NSE
@@ -4473,7 +4478,6 @@ RVNL.NS,Rail Vikas Nigam Limited,NSE
 RVTH.NS,Revathi Equipment India Limited,NSE
 S&SPOWER.NS,S&S Power Switchgears Limited,NSE
 SAATVIKGL.NS,Saatvik Green Energy Limited,NSE
-SABEVENTS.NS,Sab Events & Governance Now Media Limited,NSE
 SADBHAV.NS,Sadbhav Engineering Limited,NSE
 SADBHIN.NS,Sadbhav Infrastructure Project Limited,NSE
 SADHNANIQ.NS,Sadhana Nitrochem Limited,NSE
