@@ -8696,7 +8696,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                 # ── Stacked Absolute Chart + XIRR ──
                 try:
                     hist_resp = sb.table("portfolio_history").select(
-                        "date, total_value, cash_balance, cumulative_invested, nifty_shadow_value"
+                        "date, total_value, cash_balance, withdrawn, cumulative_invested, nifty_shadow_value"
                     ).eq("portfolio_id", port["id"]).order("date").execute()
                     hist_data = hist_resp.data
 
@@ -8713,11 +8713,18 @@ elif st.session_state.sb_view_mode == "portfolios":
                         # every sale date and never recovers — a fictitious loss.
                         # Rows written before cash_balance existed are NULL, and
                         # no sale had been recorded then, so 0 is exactly right.
-                        if "cash_balance" in hist_df.columns:
-                            hist_df["cash_balance"] = hist_df["cash_balance"].fillna(0)
-                        else:
-                            hist_df["cash_balance"] = 0
-                        hist_df["total_assets"] = hist_df["total_value"] + hist_df["cash_balance"]
+                        for _c in ("cash_balance", "withdrawn"):
+                            if _c in hist_df.columns:
+                                hist_df[_c] = hist_df[_c].fillna(0)
+                            else:
+                                hist_df[_c] = 0
+                        # Withdrawn money must stay ON the line. Without it the
+                        # series drops by the withdrawal on the day it happens
+                        # and never recovers - a cliff that is not a loss, sitting
+                        # under a flat invested line that correctly did not move.
+                        hist_df["total_assets"] = (hist_df["total_value"]
+                                                   + hist_df["cash_balance"]
+                                                   + hist_df["withdrawn"])
 
                         fig = go.Figure()
 
@@ -8734,7 +8741,7 @@ elif st.session_state.sb_view_mode == "portfolios":
                         # 2. Shadow Benchmark (dashed)
                         if has_shadow:
                             fig.add_trace(go.Scatter(
-                                x=hist_df["date"], y=hist_df["nifty_shadow_value"],
+                                x=hist_df["date"], y=hist_df["nifty_shadow_value"] + hist_df["withdrawn"],
                                 line=dict(color="#9CA3AF", width=1.5, dash="dash"),
                                 name=f"{_bench['label']} shadow",
                                 hovertemplate="₹%{y:,.0f}<extra>" + _bench['label'] + " shadow</extra>",
@@ -8825,9 +8832,15 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 alpha = round(port_xirr - nifty_xirr, 1)
                                 m5.metric(f"Alpha vs {_bench['label']}", f"{alpha:+.1f}%", delta=f"{_bench['label']} XIRR {nifty_xirr:+.1f}%")
                             elif has_shadow and last_shadow and last_invested > 0:
-                                # Shadow holds securities only; add the portfolio's
-                                # cash so both sides are on a total-assets basis.
-                                nifty_simple = (((last_shadow + _econ["cash_balance"]) - last_invested) / last_invested) * 100
+                                # Mirror the portfolio side exactly:
+                                #   portfolio (total_assets + withdrawn - ext) / ext
+                                #   benchmark (shadow_value  + withdrawn - ext) / ext
+                                # NOT + cash_balance. That term was correct only
+                                # while the shadow shrank on every sale; once the
+                                # shadow tracked external flows instead, adding
+                                # cash counted the same proceeds on both sides and
+                                # inflated the benchmark by the full sale amount.
+                                nifty_simple = (((last_shadow + _econ["withdrawn"]) - last_invested) / last_invested) * 100
                                 alpha_simple = simple_ret - nifty_simple
                                 m5.metric(f"vs {_bench['label']}", f"{alpha_simple:+.1f}%", delta=f"{_bench['label']} {nifty_simple:+.1f}%")
                             else:
