@@ -897,6 +897,7 @@ def run_daily_tracker():
             # every sale date and never recovers, which is a fictitious loss.
             "total_value": round(current_total_value, 2),
             "cash_balance": econ["cash_balance"],
+            "withdrawn": econ["withdrawn"],
             "daily_return_pct": round(return_pct, 2),
         }
         if cumulative_invested > 0:
