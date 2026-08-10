@@ -395,9 +395,15 @@ def g2_wiring():
           pargs is not None and "benchmark_ticker" in pargs, str(pargs))
 
     # The dead denominator. Any of these forms is the Sprint-14 bug returning.
+    # Plus the Sprint-15 asymmetry: crediting the portfolio's CASH to the
+    # benchmark. The shadow tracks external flows, so it never sold when you
+    # did; adding cash counts the same proceeds on both sides. Only WITHDRAWN
+    # belongs there, mirroring the portfolio numerator exactly.
     import re
     dead = re.compile(r"(_cv\s*-\s*_inv|current_total_value\s*-\s*total_invested"
-                      r"|current_val\s*-\s*total_invested)")
+                      r"|current_val\s*-\s*total_invested"
+                      r"|last_shadow\s*\+\s*_econ\[.cash_balance.\]"
+                      r"|nifty_shadow_value.{0,4}\+\s*hist_df\[.cash_balance.\])")
     hits = []
     for f in trees:
         for i, ln in enumerate(open(f, encoding="utf-8").read().split("\n"), 1):
