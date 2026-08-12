@@ -50,7 +50,6 @@ ticker,name,exchange
 500500.BO,Hindustan Motors Ltd.,BSE
 501110.BO,Sunrise Industrial Traders Ltd.,BSE
 501111.BO,Gold Rock Investments Ltd.,BSE
-501144.BO,Peoples Investments Ltd.,BSE
 501148.BO,Dalal Street Investments Ltd.,BSE
 501151.BO,Kartik Investments Trust Ltd.,BSE
 501261.BO,Lords Mark Industries Limited,BSE
@@ -731,7 +730,6 @@ ticker,name,exchange
 523309.BO,Shri Gang Industries & Allied Products Limited,BSE
 523315.BO,Purity Flex Pack Ltd,BSE
 523343.BO,Microse India Limited,BSE
-523351.BO,Standard Shoe Sole and Mould (India) Ltd,BSE
 523373.BO,Mini Diamonds (India) Ltd.,BSE
 523387.BO,HOMRE LIMITED,BSE
 523411.BO,ADC India Communications Limited,BSE
@@ -755,7 +753,6 @@ ticker,name,exchange
 523672.BO,Flex Foods Ltd.,BSE
 523676.BO,Golkunda Diamonds & Jewellery Ltd.,BSE
 523696.BO,Fortis Malar Hospitals Limited,BSE
-523712.BO,JMG Corporation Ltd,BSE
 523722.BO,Svam Software Ltd,BSE
 523732.BO,Ecoboard Industries Ltd,BSE
 523752.BO,TRANS INDIA HOUSE IMPEX LIMITED,BSE
@@ -796,7 +793,6 @@ ticker,name,exchange
 524480.BO,Riddhi Siddhi Gluco Biols Ltd,BSE
 524488.BO,SVC INDUSTRIES LIMITED,BSE
 524502.BO,Raaj Medisafe India Limited,BSE
-524504.BO,REVATI MEDIA LIMITED,BSE
 524506.BO,Coral Laboratories Ltd.,BSE
 524514.BO,Tulasee Bio-Ethanol Ltd.,BSE
 524516.BO,Bacil Pharma Ltd.,BSE
@@ -1418,7 +1414,6 @@ ticker,name,exchange
 532384.BO,Tyche Industries Ltd.,BSE
 532397.BO,KONNDOR INDUSTRIES LIMITED,BSE
 532402.BO,USG Tech Solutions Ltd,BSE
-532403.BO,Fourth Generation Information Systems Ltd,BSE
 532404.BO,Saven Technologies Ltd.,BSE
 532410.BO,Transcorp International Ltd.,BSE
 532425.BO,GENUS PRIME INFRA LIMITED,BSE
@@ -1461,6 +1456,7 @@ ticker,name,exchange
 533268.BO,SEA TV Network Limited,BSE
 533285.BO,RDB INFRASTRUCTURE AND POWER LIMITED,BSE
 533289.BO,Kesar Terminals & Infrastructure Limited,BSE
+533385.BO,Motilal Oswal Mutual Fund,BSE
 533407.BO,TRUE GREEN BIO ENERGY LIMITED,BSE
 533427.BO,VMS INDUSTRIES LIMITED,BSE
 533477.BO,Enkei wheels (India) Limited,BSE
@@ -2669,6 +2665,7 @@ ticker,name,exchange
 544856.BO,FUSION KLASSROOM EDUTECH LIMITED,BSE
 544857.BO,DSP Mutual Fund,BSE
 544858.BO,AEGEUS TECHNOLOGIES LIMITED,BSE
+544859.BO,G V ELECTRICALS LTD,BSE
 555555.BO,ICICI Prudential Mutual Fund,BSE
 590103.BO,Reliance Mutual Fund-Permitted,BSE
 590104.BO,Reliance Mutual Fund-Permitted,BSE
@@ -2677,11 +2674,11 @@ ticker,name,exchange
 590108.BO,Reliance Mutual Fund-Permitted,BSE
 590109.BO,Reliance Mutual Fund-Permitted,BSE
 590110.BO,Quantum Asset Management Co. Pvt. Ltd.,BSE
+590113.BO,Reliance Mutual Fund-Permitted,BSE
 590115.BO,Motilal Oswal Mutual Fund-Permitted,BSE
 590136.BO,Kotak Mahindra Mutual Fund - Permitted,BSE
 590137.BO,SBI Mutual Fund-Permitted,BSE
 590138.BO,SBI Mutual Fund-Permitted,BSE
-590139.BO,Kotak Mahindra Mutual Fund - Permitted,BSE
 590141.BO,Nippon India Mutual Fund - Permitted,BSE
 590142.BO,Nippon India Mutual Fund - Permitted,BSE
 590144.BO,Nippon India Mutual Fund - Permitted,BSE
@@ -2865,6 +2862,7 @@ APTUS.NS,Aptus Value Housing Finance India Limited,NSE
 AQYLON.NS,Aqylon Nexus Limited,NSE
 ARCHIDPLY.NS,Archidply Industries Limited,NSE
 ARCHIES.NS,Archies Limited,NSE
+ARDEE.NS,Ardee Industries Limited,NSE
 ARE&M.NS,Amara Raja Energy & Mobility Limited,NSE
 ARENTERP.NS,Rajdarshan Industries Limited,NSE
 ARFIN.NS,Arfin India Limited,NSE
@@ -4250,7 +4248,6 @@ ORIENTPPR.NS,Orient Paper & Industries Limited,NSE
 ORIENTTECH.NS,Orient Technologies Limited,NSE
 ORISSAMINE.NS,The Orissa Minerals Development Company Limited,NSE
 ORKLAINDIA.NS,Orkla India Limited,NSE
-ORTEL.NS,Ortel Communications Limited,NSE
 ORTINGLOBE.NS,ORTIN GLOBAL LIMITED,NSE
 OSIAHYPER.NS,Osia Hyper Retail Limited,NSE
 OSWALAGRO.NS,Oswal Agro Mills Limited,NSE
@@ -4786,6 +4783,7 @@ SVLL.NS,Shree Vasu Logistics Limited,NSE
 SVPGLOB.NS,SVP GLOBAL TEXTILES LIMITED,NSE
 SWANCORP.NS,SWAN CORP LIMITED,NSE
 SWANDEF.NS,Swan Defence and Heavy Industries Limited,NSE
+SWARAJ.NS,Swaraj Suiting Limited,NSE
 SWARAJENG.NS,Swaraj Engines Limited,NSE
 SWELECTES.NS,Swelect Energy Systems Limited,NSE
 SWIGGY.NS,Swiggy Limited,NSE
@@ -4798,7 +4796,7 @@ SYSTMTXC.NS,Systematix Corporate Services Limited,NSE
 TAALTECH.NS,Taal Tech Limited,NSE
 TAINWALCHM.NS,Tainwala Chemical and Plastic (I) Limited,NSE
 TAJGVK.NS,Taj GVK Hotels & Resorts Limited,NSE
-TAKE.NS,Take Solutions Limited,NSE
+TAKE.NS,TAKE Limited,NSE
 TALBROAUTO.NS,Talbros Automotive Components Limited,NSE
 TAMBOLIIN.NS,Tamboli Industries Limited,NSE
 TANLA.NS,Tanla Platforms Limited,NSE
