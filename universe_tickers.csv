@@ -352,7 +352,6 @@ ticker,name,exchange
 511601.BO,Yash Management & Satellite Ltd.,BSE
 511609.BO,ISL Consulting Ltd,BSE
 511626.BO,R.R.Financial Consultants Ltd.,BSE
-511632.BO,Olympic Management & Financial Serv,BSE
 511636.BO,DJS Stock & Shares Ltd.,BSE
 511644.BO,Omega Interactive Technologies Ltd.,BSE
 511654.BO,Sugal & Damani Share Brokers Ltd.,BSE
@@ -814,7 +813,6 @@ ticker,name,exchange
 524622.BO,iStreet Network Limited,BSE
 524624.BO,Gagan Gases Ltd.,BSE
 524628.BO,Parker Agro Chem Export Ltd.,BSE
-524632.BO,Shukra Pharmaceuticals Limited,BSE
 524634.BO,Alufluoride  Ltd.,BSE
 524636.BO,OXYGENTA PHARMACEUTICAL LIMITED,BSE
 524640.BO,Archit Organosys Limited,BSE
@@ -979,7 +977,6 @@ ticker,name,exchange
 530169.BO,Mohit Paper Mills Ltd.,BSE
 530171.BO,Daulat Securities Ltd.,BSE
 530175.BO,Odyssey Technologies Ltd.,BSE
-530177.BO,VK Global Industries Limited,BSE
 530179.BO,RSC International Limited,BSE
 530185.BO,Surat Trade and Mercantile Limited,BSE
 530187.BO,Atharv Enterprises Limited,BSE
@@ -1965,7 +1962,6 @@ ticker,name,exchange
 542248.BO,Deccan Health Care Limited,BSE
 542332.BO,Hi-Klass Trading and Investment Limited,BSE
 542376.BO,SPA Capital Services Limited,BSE
-542377.BO,Aar Shyam India Investment Company Limited,BSE
 542446.BO,Jonjua Overseas Limited,BSE
 542459.BO,Kranti Industries Limited,BSE
 542477.BO,GLAAM UP JWEL LIMITED,BSE
@@ -2666,6 +2662,7 @@ ticker,name,exchange
 544857.BO,DSP Mutual Fund,BSE
 544858.BO,AEGEUS TECHNOLOGIES LIMITED,BSE
 544859.BO,G V ELECTRICALS LTD,BSE
+544863.BO,LAPL AUTOMOTIVE LIMITED,BSE
 555555.BO,ICICI Prudential Mutual Fund,BSE
 590103.BO,Reliance Mutual Fund-Permitted,BSE
 590104.BO,Reliance Mutual Fund-Permitted,BSE
@@ -3437,6 +3434,7 @@ GEECEE.NS,GeeCee Ventures Limited,NSE
 GEEKAYWIRE.NS,Geekay Wires Limited,NSE
 GEMAROMA.NS,Gem Aromatics Limited,NSE
 GENCON.NS,Generic Engineering Construction and Projects Limited,NSE
+GENESYS-RE.NS,Genesys International Corporation Limited-RE,NSE
 GENESYS.NS,Genesys International Corporation Limited,NSE
 GENSOL.NS,Gensol Engineering Limited,NSE
 GENUSPAPER.NS,Genus Paper & Boards Limited,NSE
@@ -4602,6 +4600,7 @@ SHAKTIPUMP.NS,Shakti Pumps (India) Limited,NSE
 SHALBY.NS,Shalby Limited,NSE
 SHALPAINTS.NS,Shalimar Paints Limited,NSE
 SHANKARA.NS,Shankara Building Products Limited,NSE
+SHANTI-RE.NS,Shanti Gold International Limited-RE,NSE
 SHANTI.NS,Shanti Overseas (India) Limited,NSE
 SHANTIGEAR.NS,Shanthi Gears Limited,NSE
 SHANTIGOLD.NS,Shanti Gold International Limited,NSE
@@ -4635,6 +4634,7 @@ SHRINGARMS.NS,Shringar House of Mangalsutra Limited,NSE
 SHRIPISTON.NS,SPR Auto Technologies Limited,NSE
 SHRIRAMFIN.NS,Shriram Finance Limited,NSE
 SHRIRAMPPS.NS,Shriram Properties Limited,NSE
+SHUKRAPHAR.NS,Shukra Pharmaceuticals Limited,NSE
 SHYAMCENT.NS,Shyam Century Ferrous Limited,NSE
 SHYAMMETL.NS,Shyam Metalics and Energy Limited,NSE
 SHYAMTEL.NS,Shyam Telecom Limited,NSE
