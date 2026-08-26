@@ -1593,7 +1593,7 @@ ticker,name,exchange
 539506.BO,Adcon Capital Services Limited,BSE
 539516.BO,HDFC Mutual Fund,BSE
 539517.BO,HDFC Mutual Fund,BSE
-539519.BO,SATTVA SUKUN LIFECARE LIMITED,BSE
+539519.BO,TAVEXIA LIFECARE LIMITED,BSE
 539521.BO,Navigant Corporate Advisors Limited,BSE
 539522.BO,Grovy India Limited,BSE
 539526.BO,Suncare Traders Limited,BSE
@@ -2516,6 +2516,8 @@ ticker,name,exchange
 544876.BO,ENS Enterprises Limited,BSE
 544877.BO,Technocrats Plasma Systems Limited,BSE
 544878.BO,INVESCO MUTUAL FUND,BSE
+544883.BO,MOPSHOP DISTRIBUTION LIMITED,BSE
+544884.BO,Dhanwel Hybrid Seeds Limited,BSE
 555555.BO,ICICI Prudential Mutual Fund,BSE
 590103.BO,Reliance Mutual Fund-Permitted,BSE
 590104.BO,Reliance Mutual Fund-Permitted,BSE
@@ -3302,6 +3304,7 @@ FUSION.NS,Fusion Finance Limited,NSE
 GABRIEL.NS,Gabriel India Limited,NSE
 GAEL.NS,Gujarat Ambuja Exports Limited,NSE
 GAIL.NS,GAIL (India) Limited,NSE
+GAJA.NS,Gaja Alternative Asset Management Limited,NSE
 GALAPREC.NS,Gala Precision Engineering Limited,NSE
 GALAXYSURF.NS,Galaxy Surfactants Limited,NSE
 GALLANTT.NS,Gallantt Ispat Limited,NSE
@@ -3805,6 +3808,7 @@ KSB.NS,Ksb Limited,NSE
 KSCL.NS,Kaveri Seed Company Limited,NSE
 KSE.NS,KSE Limited,NSE
 KSHINTL.NS,KSH International Limited,NSE
+KSHITIJ-RE.NS,Kshitij Polyline Ltd-RE,NSE
 KSHITIJPOL.NS,Kshitij Polyline Limited,NSE
 KSL.NS,Kalyani Steels Limited,NSE
 KSOLVES.NS,Ksolves India Limited,NSE
