@@ -808,7 +808,6 @@ ticker,name,exchange
 526468.BO,Euro Leder Fashion Ltd.,BSE
 526471.BO,Winsome Breweries Ltd.,BSE
 526473.BO,Elegant Floriculture & Agrotech (In,BSE
-526477.BO,South Asian Enteprises Ltd.,BSE
 526479.BO,Sky Industries Ltd,BSE
 526488.BO,BHUDEVI INFRA PROJECTS LIMITED,BSE
 526490.BO,Pratik Panels Ltd.,BSE
@@ -1364,7 +1363,7 @@ ticker,name,exchange
 534732.BO,CASPIAN CORPORATE SERVICES LIMITED,BSE
 534733.BO,Aerpace Industries Limited,BSE
 534755.BO,Trio Mercantile & Trading Limited,BSE
-534796.BO,CDG PETCHEM LIMITED,BSE
+534796.BO,JUJHAR LOGISTICS  LIMITED,BSE
 534920.BO,iSERA LIFESCIENCES LIMITED,BSE
 535204.BO,Mukta Agriculture Limited,BSE
 535205.BO,Mystic Electronics Limited,BSE
@@ -1602,7 +1601,7 @@ ticker,name,exchange
 539543.BO,Valley Magnesite Company Limited,BSE
 539544.BO,Abhishek Infraventures Limited,BSE
 539546.BO,AGRIBIO SPIRITS LIMITED,BSE
-539552.BO,F MEC INTERNATIONAL FINANCIAL SERVICES LIMITED,BSE
+539552.BO,DHVIJA FINANCE LIMITED,BSE
 539559.BO,Deep Health AI India Limited,BSE
 539560.BO,MALT LAND DISTILLERIES LIMITED,BSE
 539561.BO,SUPHA PHARMACHEM LIMITED,BSE
@@ -2518,6 +2517,7 @@ ticker,name,exchange
 544878.BO,INVESCO MUTUAL FUND,BSE
 544883.BO,MOPSHOP DISTRIBUTION LIMITED,BSE
 544884.BO,Dhanwel Hybrid Seeds Limited,BSE
+544887.BO,UTI Mutual Fund,BSE
 555555.BO,ICICI Prudential Mutual Fund,BSE
 590103.BO,Reliance Mutual Fund-Permitted,BSE
 590104.BO,Reliance Mutual Fund-Permitted,BSE
@@ -3018,7 +3018,6 @@ CIFL.NS,Capital India Finance Limited,NSE
 CINELINE.NS,Cineline India Limited,NSE
 CINEVISTA.NS,Cinevista Limited,NSE
 CIPLA.NS,Cipla Limited,NSE
-CLCIND.NS,CLC Industries Limited,NSE
 CLEAN.NS,Clean Science and Technology Limited,NSE
 CLEANMAX.NS,Clean Max Enviro Energy Solutions Limited,NSE
 CLEDUCATE.NS,CL Educate Limited,NSE
@@ -4820,6 +4819,7 @@ TECILCHEM.NS,TECIL Chemicals and Hydro Power Limited,NSE
 TEGA.NS,Tega Industries Limited,NSE
 TEJASNET.NS,Tejas Networks Limited,NSE
 TEMBO.NS,Tembo Global Industries Limited,NSE
+TEMPSENS.NS,Tempsens Instruments (India) Limited,NSE
 TENNIND.NS,Tenneco Clean Air India Limited,NSE
 TERAI.NS,Terai Tea Company Limited,NSE
 TERASOFT.NS,Tera Software Limited,NSE
