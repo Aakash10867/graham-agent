@@ -134,7 +134,6 @@ ticker,name,exchange
 504959.BO,Stovec Industries Ltd.,BSE
 504988.BO,Welcast Steels Ltd.,BSE
 504998.BO,Western Ministil Ltd.,BSE
-505032.BO,Automobile Products of India Ltd.,BSE
 505212.BO,JAINEX AAMCOL LTD.,BSE
 505250.BO,G. G. Dandekar Properties Limited,BSE
 505299.BO,KPT INDUSTRIES LIMITED,BSE
@@ -239,6 +238,7 @@ ticker,name,exchange
 508941.BO,Panasonic Carbon India Co.Ltd,BSE
 508956.BO,HB Leasing & Finance Co. Ltd.,BSE
 508961.BO,Shricon Industries Ltd.,BSE
+508963.BO,TRUSTWAVE SECURITIES LIMITED,BSE
 508969.BO,Sulabh Engineers & Services Limited,BSE
 508980.BO,Frontier Capital Limited,BSE
 509003.BO,Transoceanic Properties Ltd.,BSE
@@ -526,7 +526,6 @@ ticker,name,exchange
 517170.BO,Edvenswa Enterprises Limited,BSE
 517172.BO,Pervasive Commodities Limited,BSE
 517201.BO,Switching Technologies Gunther Ltd.,BSE
-517230.BO,AURIQUE LIMITED,BSE
 517236.BO,Calcom Vision Ltd.,BSE
 517238.BO,Dynavision Limited,BSE
 517246.BO,BCC Fuba India Ltd.,BSE
@@ -574,7 +573,7 @@ ticker,name,exchange
 519299.BO,Prime Industries Ltd.,BSE
 519307.BO,Vikas WSP Ltd.,BSE
 519331.BO,VSF Projects Limited,BSE
-519353.BO,Bansisons Tea Industries Ltd.,BSE
+519353.BO,NOVYRA PHARMACHEM LIMITED,BSE
 519359.BO,Poona Dal And Oil Industries Ltd.,BSE
 519367.BO,Transglobe Foods Ltd.,BSE
 519413.BO,DATIWARE MARITIME INFRA LIMITED,BSE
@@ -2546,7 +2545,9 @@ ticker,name,exchange
 590160.BO,Tata Mutual Fund - Permitted,BSE
 5PAISA.NS,5Paisa Capital Limited,NSE
 63MOONS.NS,63 moons technologies limited,NSE
-751128.BO,S.I.Capital And Financial Services,BSE
+751131.BO,CONTAINE TECHNOLOGIES LIMITED,BSE
+751132.BO,Manoj Jewellers Limited,BSE
+751133.BO,ALAN SCOTT ENTERPRISES LIMITED,BSE
 780014.BO,Has Lifestyle Limited,BSE
 780016.BO,Web Element Solutions Limited,BSE
 780018.BO,Adhiraj Distributors Limited,BSE
@@ -2783,6 +2784,7 @@ ATLASCYCLE.NS,Atlas Cycles (Haryana) Limited,NSE
 ATUL.NS,Atul Limited,NSE
 ATULAUTO.NS,Atul Auto Limited,NSE
 AUBANK.NS,AU Small Finance Bank Limited,NSE
+AUGMONT.NS,Augmont Enterprises Limited,NSE
 AURIONPRO.NS,Aurionpro Solutions Limited,NSE
 AUROPHARMA.NS,Aurobindo Pharma Limited,NSE
 AURUM.NS,Aurum PropTech Limited,NSE
@@ -3518,6 +3520,7 @@ HPIL.NS,Hindprakash Industries Limited,NSE
 HPL.NS,HPL Electric & Power Limited,NSE
 HRYNSHP.NS,Hariyana Ship Breakers Limited,NSE
 HSCL.NS,Himadri Speciality Chemical Limited,NSE
+HTEL.NS,Hy-Tech Engineers Limited,NSE
 HTMEDIA.NS,HT Media Limited,NSE
 HUBTOWN.NS,Hubtown Limited,NSE
 HUDCO.NS,Housing & Urban Development Corporation Limited,NSE
@@ -3951,6 +3954,7 @@ MAYURUNIQ.NS,Mayur Uniquoters Ltd,NSE
 MAZDA.NS,Mazda Limited,NSE
 MAZDOCK.NS,Mazagon Dock Shipbuilders Limited,NSE
 MBAPL.NS,Madhya Bharat Agro Products Limited,NSE
+MBECL.NS,Mcnally Bharat Engineering Company Limited,NSE
 MBEL.NS,M & B Engineering Limited,NSE
 MBLINFRA.NS,MBL Infrastructure Limited,NSE
 MCCHRLS-B.NS,Mac Charles India Limited,NSE
@@ -4369,6 +4373,7 @@ RAMRAT.NS,Ram Ratna Wires Limited,NSE
 RANASUG.NS,Rana Sugars Limited,NSE
 RANEHOLDIN.NS,Rane Holdings Limited,NSE
 RATEGAIN.NS,Rategain Travel Technologies Limited,NSE
+RATNA-RE.NS,Ratnaveer Precision Engineering Limited-RE,NSE
 RATNAMANI.NS,Ratnamani Metals & Tubes Limited,NSE
 RATNAVEER.NS,Ratnaveer Precision Engineering Limited,NSE
 RAYMOND.NS,Raymond Limited,NSE
@@ -4641,6 +4646,7 @@ SKFINDUS.NS,SKF India (Industrial) Limited,NSE
 SKIPPER.NS,Skipper Limited,NSE
 SKMEGGPROD.NS,SKM Egg Products Export (India) Limited,NSE
 SKYGOLD.NS,SKY GOLD AND DIAMONDS LIMITED,NSE
+SKYWAYS.NS,Skyways Air Services Limited,NSE
 SMARTLINK.NS,Smartlink Holdings Limited,NSE
 SMARTWORKS.NS,Smartworks Coworking Spaces Limited,NSE
 SMCGLOBAL.NS,SMC Global Securities Limited,NSE
@@ -4770,6 +4776,7 @@ SWELECTES.NS,Swelect Energy Systems Limited,NSE
 SWIGGY.NS,Swiggy Limited,NSE
 SWISSMLTRY.NS,Swiss Military Consumer Goods Limited,NSE
 SWSOLAR.NS,Sterling and Wilson Renewable Energy Limited,NSE
+SYMBIOTEC.NS,Symbiotec Pharmalab Limited,NSE
 SYMPHONY.NS,Symphony Limited,NSE
 SYNCOMF.NS,Syncom Formulations (India) Limited,NSE
 SYNGENE.NS,Syngene International Limited,NSE
