@@ -473,7 +473,7 @@ ticker,name,exchange
 514113.BO,Adinath Textiles Ltd.,BSE
 514165.BO,Indian Acrylics Ltd,BSE
 514171.BO,Ceeta Industries Ltd.,BSE
-514177.BO,Rishabh Special Yarns Ltd,BSE
+514177.BO,IMPERA WORLDWIDE LIMITED,BSE
 514197.BO,S & T Corporation Limited,BSE
 514223.BO,Ramgopal Polytex Ltd,BSE
 514236.BO,TTL ENTERPRISES LIMITED,BSE
@@ -526,6 +526,7 @@ ticker,name,exchange
 517170.BO,Edvenswa Enterprises Limited,BSE
 517172.BO,Pervasive Commodities Limited,BSE
 517201.BO,Switching Technologies Gunther Ltd.,BSE
+517230.BO,AURIQUE LIMITED,BSE
 517236.BO,Calcom Vision Ltd.,BSE
 517238.BO,Dynavision Limited,BSE
 517246.BO,BCC Fuba India Ltd.,BSE
@@ -1138,6 +1139,7 @@ ticker,name,exchange
 531521.BO,Desh Rakshak Aushdhalaya Ltd.,BSE
 531525.BO,Ace Software Exports ltd.,BSE
 531529.BO,Softrak Venture Investments Ltd.,BSE
+531530.BO,Betala Global Securities Ltd.,BSE
 531533.BO,ACCEDERE LIMITED,BSE
 531537.BO,MIZZEN VENTURES LIMITED,BSE
 531539.BO,Rishabh Digha Steel And Allied Prod,BSE
@@ -2517,6 +2519,7 @@ ticker,name,exchange
 544883.BO,MOPSHOP DISTRIBUTION LIMITED,BSE
 544884.BO,Dhanwel Hybrid Seeds Limited,BSE
 544887.BO,UTI Mutual Fund,BSE
+544892.BO,Axis Mutual Fund,BSE
 555555.BO,ICICI Prudential Mutual Fund,BSE
 590103.BO,Reliance Mutual Fund-Permitted,BSE
 590104.BO,Reliance Mutual Fund-Permitted,BSE
@@ -2548,6 +2551,7 @@ ticker,name,exchange
 751131.BO,CONTAINE TECHNOLOGIES LIMITED,BSE
 751132.BO,Manoj Jewellers Limited,BSE
 751133.BO,ALAN SCOTT ENTERPRISES LIMITED,BSE
+751136.BO,Esaar (India) Ltd.,BSE
 780014.BO,Has Lifestyle Limited,BSE
 780016.BO,Web Element Solutions Limited,BSE
 780018.BO,Adhiraj Distributors Limited,BSE
@@ -2698,6 +2702,7 @@ ANIKINDS.NS,Anik Industries Limited,NSE
 ANKITMETAL.NS,Ankit Metal & Power Limited,NSE
 ANMOL.NS,Anmol India Limited,NSE
 ANNAPURNA.NS,Annapurna Swadisht Limited,NSE
+ANNU.NS,Annu Projects Limited,NSE
 ANSALAPI.NS,Ansal Properties & Infrastructure Limited,NSE
 ANSALBU.NS,Ansal Buildwell Limited,NSE
 ANTELOPUS.NS,Antelopus Selan Energy Limited,NSE
@@ -2916,7 +2921,6 @@ BLISSGVS.NS,Bliss GVS Pharma Limited,NSE
 BLKASHYAP.NS,B. L. Kashyap and Sons Limited,NSE
 BLS.NS,BLS International Services Limited,NSE
 BLSE.NS,BLS E-Services Limited,NSE
-BLUECHIP.NS,Blue Chip India Limited,NSE
 BLUECLOUDS.NS,Blue Cloud Softech Solutions Limited,NSE
 BLUECOAST.NS,Blue Coast Hotels Limited,NSE
 BLUEDART.NS,Blue Dart Express Limited,NSE
@@ -3176,6 +3180,7 @@ DSFCL.NS,DCM Shriram Fine Chemicals Limited,NSE
 DSKULKARNI.NS,DS Kulkarni Developers Limited,NSE
 DSSL.NS,Dynacons Systems & Solutions Limited,NSE
 DTIL.NS,Dhunseri Tea & Industries Limited,NSE
+DUCON-RE1.NS,Ducon Infratech Ltd-RE,NSE
 DUCON.NS,Ducon Infratechnologies Limited,NSE
 DVL.NS,Dhunseri Ventures Limited,NSE
 DWARKESH.NS,Dwarikesh Sugar Industries Limited,NSE
@@ -4991,6 +4996,7 @@ VGCL.NS,Vibrant Global Capital Limited,NSE
 VGL.NS,VARVEE GLOBAL LIMITED,NSE
 VGUARD.NS,V-Guard Industries Limited,NSE
 VHL.NS,Vardhman Holdings Limited,NSE
+VHLTD-RE1.NS,Viceroy Hotels Ltd-RE,NSE
 VHLTD.NS,Viceroy Hotels Limited,NSE
 VIDHIING.NS,Vidhi Specialty Food Ingredients Limited,NSE
 VIDYAWIRES.NS,Vidya Wires Limited,NSE
