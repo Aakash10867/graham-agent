@@ -388,6 +388,7 @@ ticker,name,exchange
 512307.BO,Typhoon Holdings Ltd.,BSE
 512344.BO,Aravali Securities & Finance Ltd.,BSE
 512345.BO,LEXORA GLOBAL LIMITED,BSE
+512359.BO,Sword-Edge Commercials Limited,BSE
 512361.BO,CUPID BREWERIES AND DISTILLERIES LIMITED,BSE
 512367.BO,Sheraton Properties & Finance Ltd.,BSE
 512377.BO,Magnanimous Trade & Finance Ltd.,BSE
@@ -558,7 +559,6 @@ ticker,name,exchange
 518075.BO,Suraj Products Ltd.,BSE
 519014.BO,Prashant India Ltd,BSE
 519031.BO,Shah Foods Ltd,BSE
-519064.BO,Khandelwal Extraction Ltd.,BSE
 519097.BO,Ritesh International Ltd,BSE
 519174.BO,Ashiana Agro Industries Ltd,BSE
 519191.BO,Retro Green Revolution Limited,BSE
@@ -2520,6 +2520,7 @@ ticker,name,exchange
 544884.BO,Dhanwel Hybrid Seeds Limited,BSE
 544887.BO,UTI Mutual Fund,BSE
 544892.BO,Axis Mutual Fund,BSE
+544895.BO,KWICK FORENSIC SOLUTIONS LIMITED,BSE
 555555.BO,ICICI Prudential Mutual Fund,BSE
 590103.BO,Reliance Mutual Fund-Permitted,BSE
 590104.BO,Reliance Mutual Fund-Permitted,BSE
@@ -2552,6 +2553,7 @@ ticker,name,exchange
 751132.BO,Manoj Jewellers Limited,BSE
 751133.BO,ALAN SCOTT ENTERPRISES LIMITED,BSE
 751136.BO,Esaar (India) Ltd.,BSE
+751139.BO,NCL Research And Financial Services,BSE
 780014.BO,Has Lifestyle Limited,BSE
 780016.BO,Web Element Solutions Limited,BSE
 780018.BO,Adhiraj Distributors Limited,BSE
@@ -3743,6 +3745,7 @@ KAYNES.NS,Kaynes Technology India Limited,NSE
 KCP.NS,KCP Limited,NSE
 KCPSUGIND.NS,KCP Sugar and Industries Corporation Limited,NSE
 KDDL.NS,KDDL Limited,NSE
+KDGREEN.NS,KD Green Industries Limited,NSE
 KEC.NS,KEC International Limited,NSE
 KECL.NS,Kirloskar Electric Company Limited,NSE
 KEEPLEARN.NS,DSJ Keep Learning Limited,NSE
@@ -3887,6 +3890,7 @@ LTM.NS,LTM Limited,NSE
 LTTS.NS,L&T Technology Services Limited,NSE
 LUMAXIND.NS,Lumax Industries Limited,NSE
 LUMAXTECH.NS,Lumax Auto Technologies Limited,NSE
+LUMINO.NS,Lumino Industries Limited,NSE
 LUPIN.NS,Lupin Limited,NSE
 LUXIND.NS,Lux Industries Limited,NSE
 LXCHEM.NS,Laxmi Organic Industries Limited,NSE
@@ -3924,7 +3928,6 @@ MANAKSTEEL.NS,Manaksia Steels Limited,NSE
 MANALIPETC.NS,Manali Petrochemicals Limited,NSE
 MANAPPURAM.NS,Manappuram Finance Limited,NSE
 MANBA.NS,Manba Finance Limited,NSE
-MANBRO.NS,Manbro Industries Limited,NSE
 MANCREDIT.NS,Mangal Credit and Fincorp Limited,NSE
 MANGALAM.NS,Mangalam Drugs And Organics Limited,NSE
 MANGLMCEM.NS,Mangalam Cement Limited,NSE
