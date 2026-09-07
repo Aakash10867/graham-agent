@@ -332,6 +332,7 @@ BESTAGRO,Best Agrolife Limited,NSE,INE052T01021
 BETA,Beta Drugs Limited,NSE,INE351Y01019
 BFINVEST,BF Investment Limited,NSE,INE878K01010
 BFUTILITIE,BF Utilities Limited,NSE,INE243D01012
+BGLOBAL,Bharatiya Global Infomedia Limited,NSE,INE224M01013
 BGRENERGY,BGR Energy Systems Limited,NSE,INE661I01014
 BHAGCHEM,Bhagiradha Chemicals & Industries Limited,NSE,INE414D01027
 BHAGERIA,Bhageria Industries Limited,NSE,INE354C01027
@@ -369,6 +370,7 @@ BLISSGVS,Bliss GVS Pharma Limited,NSE,INE416D01022
 BLKASHYAP,B. L. Kashyap and Sons Limited,NSE,INE350H01032
 BLS,BLS International Services Limited,NSE,INE153T01027
 BLSE,BLS E-Services Limited,NSE,INE0NLT01010
+BLUECHIP,Blue Chip India Limited,NSE,INE657B01025
 BLUECLOUDS,Blue Cloud Softech Solutions Limited,NSE,INE373T01047
 BLUECOAST,Blue Coast Hotels Limited,NSE,INE472B01011
 BLUEDART,Blue Dart Express Limited,NSE,INE233B01017
@@ -472,10 +474,12 @@ CIFL,Capital India Finance Limited,NSE,INE345H01024
 CINELINE,Cineline India Limited,NSE,INE704H01022
 CINEVISTA,Cinevista Limited,NSE,INE039B01026
 CIPLA,Cipla Limited,NSE,INE059A01026
+CLCIND,CLC Industries Limited,NSE,INE376C01038
 CLEAN,Clean Science and Technology Limited,NSE,INE227W01023
 CLEANMAX,Clean Max Enviro Energy Solutions Limited,NSE,INE647U01026
 CLEDUCATE,CL Educate Limited,NSE,INE201M01029
 CLSEL,Chaman Lal Setia Exports Limited,NSE,INE419D01026
+CMICABLES,CMI Limited,NSE,INE981B01011
 CMLL,Caliber Mining and Logistics Limited,NSE,INE11XY01018
 CMPDI,Central Mine Planning & Design Institute Limited,NSE,INE05HV01027
 CMRGREEN,CMR Green Technologies Limited,NSE,INE00WV01027
@@ -645,6 +649,7 @@ ECLERX,eClerx Services Limited,NSE,INE738I01010
 ECORECO,Eco Recycling Limited,NSE,INE316A01038
 ECOSMOBLTY,Ecos (India) Mobility & Hospitality Limited,NSE,INE06HJ01020
 EDELWEISS,Edelweiss Financial Services Limited,NSE,INE532F01054
+EDUCOMP,Educomp Solutions Limited,NSE,INE216H01027
 EFCIL,EFC (I) Limited,NSE,INE886D01026
 EICHERMOT,Eicher Motors Limited,NSE,INE066A01021
 EIDPARRY,EID Parry India Limited,NSE,INE126A01031
@@ -697,6 +702,7 @@ ERIS,Eris Lifesciences Limited,NSE,INE406M01024
 ESABINDIA,Esab India Limited,NSE,INE284A01012
 ESAFSFB,ESAF Small Finance Bank Limited,NSE,INE818W01011
 ESCORTS,Escorts Kubota Limited,NSE,INE042A01014
+ESDS,ESDS Software Solution Limited,NSE,INE0DRI01029
 ESSARSHPNG,Essar Shipping Limited,NSE,INE122M01019
 ESSENTIA,Integra Essentia Limited,NSE,INE418N01035
 ESTER,Ester Industries Limited,NSE,INE778B01029
@@ -790,6 +796,7 @@ GENUSPOWER,Genus Power Infrastructures Limited,NSE,INE955D01029
 GEOJITFSL,Geojit Financial Services Limited,NSE,INE007B01023
 GESHIP,The Great Eastern Shipping Company Limited,NSE,INE017A01032
 GFLLIMITED,GFL Limited,NSE,INE538A01037
+GFSTEELS,Grand Foundry Limited,NSE,INE534A01028
 GHCL,GHCL Limited,NSE,INE539A01019
 GHCLTEXTIL,GHCL Textiles Limited,NSE,INE0PA801013
 GICHSGFIN,GIC Housing Finance Limited,NSE,INE289B01019
@@ -1109,6 +1116,7 @@ JASH,Jash Engineering Limited,NSE,INE039O01029
 JAYAGROGN,Jayant Agro Organics Limited,NSE,INE785A01026
 JAYBARMARU,Jay Bharat Maruti Limited,NSE,INE571B01036
 JAYKAY,Jaykay Enterprises Limited,NSE,INE903A01025
+JAYKAY-RE1,Jaykay Enterprises Limited-RE,NSE,INE903A20025
 JAYNECOIND,Jayaswal Neco Industries Limited,NSE,INE854B01010
 JAYSREETEA,Jayshree Tea & Industries Limited,NSE,INE364A01020
 JBMA,JBM Auto Limited,NSE,INE927D01051
@@ -1264,7 +1272,6 @@ KSB,Ksb Limited,NSE,INE999A01023
 KSCL,Kaveri Seed Company Limited,NSE,INE455I01029
 KSE,KSE Limited,NSE,INE953E01022
 KSHINTL,KSH International Limited,NSE,INE987S01020
-KSHITIJ-RE,Kshitij Polyline Ltd-RE,NSE,INE013820027
 KSHITIJPOL,Kshitij Polyline Limited,NSE,INE013801027
 KSL,Kalyani Steels Limited,NSE,INE907A01026
 KSOLVES,Ksolves India Limited,NSE,INE0D6I01023
@@ -1474,6 +1481,7 @@ MOLDTKPAC,Mold-Tek Packaging Limited,NSE,INE893J01029
 MONARCH,Monarch Networth Capital Limited,NSE,INE903D01011
 MONEYBOXX,Moneyboxx Finance Limited,NSE,INE296Q01012
 MONTECARLO,Monte Carlo Fashions Limited,NSE,INE950M01013
+MORARJEE,Morarjee Textiles Limited,NSE,INE161G01027
 MOREPENLAB,Morepen Laboratories Limited,NSE,INE083A01026
 MOSCHIP,Moschip Technologies Limited,NSE,INE935B01025
 MOTHERSON,Samvardhana Motherson International Limited,NSE,INE775A01035
@@ -1509,6 +1517,7 @@ MVGJL,Manoj Vaibhav Gems N Jewellers Limited,NSE,INE0KNT01012
 MWL,Mangalam Worldwide Limited,NSE,INE0JYY01029
 MYSORPETRO,Mysore Petro Chemicals Limited,NSE,INE741A01011
 NACLIND,NACL Industries Limited,NSE,INE295D01020
+NAGAFERT,Nagarjuna Fertilizers and Chemicals Limited,NSE,INE454M01024
 NAGREEKCAP,Nagreeka Capital & Infrastructure Limited,NSE,INE245I01016
 NAGREEKEXP,Nagreeka Exports Limited,NSE,INE123B01028
 NAHARCAP,Nahar Capital and Financial Services Limited,NSE,INE049I01012
@@ -1646,6 +1655,7 @@ ORIENTTECH,Orient Technologies Limited,NSE,INE0PPK01015
 ORIRAIL,Oriental Rail Infrastructure Limited,NSE,INE457G01029
 ORISSAMINE,The Orissa Minerals Development Company Limited,NSE,INE725E01024
 ORKLAINDIA,Orkla India Limited,NSE,INE16NZ01023
+ORTEL,Ortel Communications Limited,NSE,INE849L01019
 ORTINGLOBE,ORTIN GLOBAL LIMITED,NSE,INE749B01020
 OSIAHYPER,Osia Hyper Retail Limited,NSE,INE06IR01021
 OSWALAGRO,Oswal Agro Mills Limited,NSE,INE142A01012
@@ -1693,6 +1703,7 @@ PEARLPOLY,Pearl Polymers Limited,NSE,INE844A01013
 PENIND,Pennar Industries Limited,NSE,INE932A01024
 PENINLAND,Peninsula Land Limited,NSE,INE138A01028
 PERMAGN,Permanent Magnets Limited,NSE,INE418E01018
+PERNIASPOP,Purple Style Labs Limited,NSE,INE0I1B01016
 PERSISTENT,Persistent Systems Limited,NSE,INE262H01021
 PETRONET,Petronet LNG Limited,NSE,INE347G01014
 PFC,Power Finance Corporation Limited,NSE,INE134E01011
@@ -1768,6 +1779,7 @@ PRICOLLTD,Pricol Limited,NSE,INE726V01018
 PRIMESECU,Prime Securities Limited,NSE,INE032B01021
 PRIMO,Primo Chemicals Limited,NSE,INE607A01022
 PRINCEPIPE,Prince Pipes And Fittings Limited,NSE,INE689W01016
+PRIORITY,Priority Jewels Limited,NSE,INE15EH01014
 PRISMX,Prismx Global Ventures Limited,NSE,INE286N01028
 PRITI,Priti International Limited,NSE,INE974Z01015
 PRITIKAUTO,Pritika Auto Industries Limited,NSE,INE583R01029
@@ -1796,6 +1808,7 @@ QUADFUTURE,Quadrant Future Tek Limited,NSE,INE0LRY01011
 QUESS,Quess Corp Limited,NSE,INE615P01015
 QUICKHEAL,Quick Heal Technologies Limited,NSE,INE306L01010
 QUINT,Quint Digital Limited,NSE,INE641R01017
+QUINTEGRA,Quintegra Solutions Limited,NSE,INE033B01011
 RACE,Race Eco Chain Limited,NSE,INE084Q01012
 RACLGEAR,RACL Geartech Limited,NSE,INE704B01017
 RADAAN,Radaan Mediaworks India Limited,NSE,INE874F01027
@@ -1814,6 +1827,7 @@ RAJRATAN,Rajratan Global Wire Limited,NSE,INE451D01029
 RAJRILTD,Raj Rayon Industries Limited,NSE,INE533D01032
 RAJSREESUG,Rajshree Sugars & Chemicals Limited,NSE,INE562B01019
 RAJTV,Raj Television Network Limited,NSE,INE952H01027
+RAJVIR,Rajvir Industries Limited,NSE,INE011H01014
 RALLIS,Rallis India Limited,NSE,INE613A01020
 RAMANEWS,Shree Rama Newsprint Limited,NSE,INE278B01020
 RAMAPHO,Rama Phosphates Limited,NSE,INE809A01032
@@ -1827,7 +1841,6 @@ RAMRAT,Ram Ratna Wires Limited,NSE,INE207E01023
 RANASUG,Rana Sugars Limited,NSE,INE625B01014
 RANEHOLDIN,Rane Holdings Limited,NSE,INE384A01010
 RATEGAIN,Rategain Travel Technologies Limited,NSE,INE0CLI01024
-RATNA-RE,Ratnaveer Precision Engineering Limited-RE,NSE,INE05CZ20011
 RATNAMANI,Ratnamani Metals & Tubes Limited,NSE,INE703B01027
 RATNAVEER,Ratnaveer Precision Engineering Limited,NSE,INE05CZ01011
 RAYMOND,Raymond Limited,NSE,INE301A01014
@@ -2097,6 +2110,7 @@ SJS,S.J.S. Enterprises Limited,NSE,INE284S01014
 SJVN,SJVN Limited,NSE,INE002L01015
 SKFINDIA,SKF India Limited,NSE,INE640A01023
 SKFINDUS,SKF India (Industrial) Limited,NSE,INE2J8701016
+SKIL,SKIL Infrastructure Limited,NSE,INE429F01012
 SKIPPER,Skipper Limited,NSE,INE439E01022
 SKMEGGPROD,SKM Egg Products Export (India) Limited,NSE,INE411D01023
 SKYGOLD,SKY GOLD AND DIAMONDS LIMITED,NSE,INE01IU01018
@@ -2263,7 +2277,7 @@ TATATECH,Tata Technologies Limited,NSE,INE142M01025
 TATVA,Tatva Chintan Pharma Chem Limited,NSE,INE0GK401011
 TBOTEK,TBO Tek Limited,NSE,INE673O01025
 TBZ,Tribhovandas Bhimji Zaveri Limited,NSE,INE760L01018
-TCC,TCC Concept Limited,NSE,INE887D01016
+TCC,TCC Concept Limited,NSE,INE887D01024
 TCI,Transport Corporation of India Limited,NSE,INE688A01022
 TCIEXP,TCI Express Limited,NSE,INE586V01016
 TCIFINANCE,TCI Finance Limited,NSE,INE911B01018
@@ -2395,6 +2409,7 @@ UNITDSPR,United Spirits Limited,NSE,INE854D01024
 UNITECH,Unitech Limited,NSE,INE694A01020
 UNITEDPOLY,United Polyfab Gujarat Limited,NSE,INE368U01029
 UNITEDTEA,The United Nilgiri Tea Estates Company Limited,NSE,INE458F01011
+UNIVAFOODS,Univa Foods Limited,NSE,INE275F01019
 UNIVASTU,Univastu India Limited,NSE,INE562X01013
 UNIVCABLES,Universal Cables Limited,NSE,INE279A01012
 UNIVPHOTO,Universus Photo Imagings Limited,NSE,INE03V001013
