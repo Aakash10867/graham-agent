@@ -94,3 +94,48 @@ jobs:
           ALERT_EMAIL_PASSWORD: ${{ secrets.ALERT_EMAIL_PASSWORD }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+
+  # ── Controls, Sprint 16 ───────────────────────────────────────────────
+  # preflight.py and reconcile.py were control functions that depended on the
+  # controlled person remembering to run them. They now run on their own.
+  #
+  # AFTER the commit, in a separate job, on purpose. Running them before it
+  # would let a control failure discard a 90-minute universe build — the
+  # 2026-07-09 lesson that split the tracker out of this workflow in the first
+  # place. Here a failure turns the job red and costs no data.
+  #
+  # `needs: update-universe` without `if: always()`: if the universe did not
+  # build, there is nothing new to check and a green-or-red verdict on
+  # yesterday's CSV would be noise.
+  controls:
+    needs: update-universe
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Same trap as track-portfolios: without this, checkout clones the
+          # commit that TRIGGERED the workflow, so the controls would silently
+          # validate yesterday's universe every single day.
+          ref: ${{ github.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install -r requirements.txt
+
+      # G3 reconciles the live ledger against holdings, which needs the DB.
+      # The secrets are already in this workflow for the tracker, so there is
+      # no reason to run the weaker version. --db makes a missing credential a
+      # FAILURE rather than a [SKIP]: in CI, where the credentials are supposed
+      # to be present, a silent skip is the check not running.
+      - name: preflight (wiring, economics, costs, rates, live ledger)
+        run: python preflight.py --csv universe_scored.csv --db
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+
+      # Archive integrity: every frozen row must still re-score to itself.
+      - name: reconcile (archive is re-scoreable)
+        run: python reconcile.py universe_scored.csv

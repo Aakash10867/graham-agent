@@ -37,7 +37,8 @@ import verdict_engine
 import deep_metrics
 import selector
 import economics
-
+import costs
+ 
 def fmt_inr(value, decimals=0, symbol="₹"):
     """Indian-system digit grouping for money: 12,34,567 not 1,234,567.
     symbol defaults to the rupee sign; pass symbol='' to prefix your own."""
@@ -264,6 +265,12 @@ def record_transaction(sb, portfolio_id, user_id, ticker, shares, price, amount_
     NOT. A swallowed sell insert permanently loses the proceeds, and nothing can
     reconstruct them. Sell callers pass True and write the ledger BEFORE
     mutating holdings.
+ 
+    cost_inr is computed HERE, at write time, and stored on the row. Not at read
+    time: Zerodha's rates change, and a cost recomputed years later at today's
+    rates is a different number from the one actually paid. Storing it freezes
+    the rate that applied on the day, which is the same point-in-time discipline
+    the score archive is built on.
     """
     _bt = benchmark_ticker or "NIFTYBEES.NS"
     nifty_px = nifty_cache
@@ -276,6 +283,11 @@ def record_transaction(sb, portfolio_id, user_id, ticker, shares, price, amount_
     if nifty_px and nifty_px > 0:
         raw = float(amount_inr) / nifty_px
         nifty_u = round(raw, 6) if txn_type == "buy" else round(-raw, 6)
+    # Sell-side carries the flat DP charge and is ~40x the buy-side cost at a
+    # Rs 333 position. costs.py is the single source of truth for the rates.
+    _ex = costs.exchange_for(ticker)
+    _cost = (costs.buy_cost(amount_inr, _ex) if txn_type == "buy"
+             else costs.sell_cost(amount_inr, _ex))
     try:
         sb.table("sip_transactions").insert({
             "portfolio_id": str(portfolio_id),
@@ -284,6 +296,7 @@ def record_transaction(sb, portfolio_id, user_id, ticker, shares, price, amount_
             "shares": float(shares),
             "price": round(float(price), 2),
             "amount_inr": round(float(amount_inr), 2),
+            "cost_inr": _cost,
             "transaction_type": txn_type,
             "transaction_date": datetime.date.today().isoformat(),
             "nifty_price": round(nifty_px, 2) if nifty_px else None,
@@ -327,6 +340,10 @@ def record_withdrawal(sb, portfolio, user_id, amount_inr):
         "shares": 0,
         "price": 0,
         "amount_inr": _amt,
+        # 0.0, never NULL. Moving cash to your own bank costs nothing, and that
+        # is a KNOWN zero — NULL means "cost unknown" and would wrongly count
+        # this row into cost_rows_missing.
+        "cost_inr": 0.0,
         "transaction_type": "withdrawal",
         "transaction_date": datetime.date.today().isoformat(),
         "nifty_price": round(_bp, 2) if _bp > 0 else None,
@@ -384,7 +401,7 @@ def load_txns(sb, portfolio_id):
     rebuy fund itself from cash instead of drawing fresh external capital)."""
     try:
         return sb.table("sip_transactions").select(
-            "id, created_at, ticker, shares, price, amount_inr, "
+            "id, created_at, ticker, shares, price, amount_inr, cost_inr, "
             "transaction_type, transaction_date, nifty_price"
         ).eq("portfolio_id", str(portfolio_id)).execute().data or []
     except Exception:
@@ -812,6 +829,11 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
             "withdrawn": _wd,
             "total_pnl": round(_ta + _wd - _ext, 2),
             "return_pct": _rp,
+            # None, not 0.0. This degraded path reconstructs economics from the
+            # portfolios table, which stores no cost total. It does not know what
+            # costs were paid, and a 0.0 here would assert that none were.
+            "total_costs_paid": None,
+            "cost_rows_missing": None,
         }
     current_val = econ["total_assets"]
     total_invested = econ["external_capital"]
@@ -1163,9 +1185,16 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
         if _semidev is not None: _method.append(f"Semi-deviation {_semidev*100:.1f}%")
         if _method:
             story.append(Paragraph("Methodology: " + " &middot; ".join(_method) + ".", s_small))
-
+ 
         _stamp = []
-        if _rfr_used is not None:  _stamp.append(f"risk-free rate {_rfr_used*100:.1f}%")
+        if _rfr_used is not None:
+            # Sprint 16: the rate is live (macro_read), so the stamp must say
+            # whether it was a reading or the fallback. Before this the column
+            # was never written and the stamp never rendered at all.
+            _rs = portfolio.get("rfr_status")
+            _src = ("" if _rs in (None, "ok")
+                    else f", fallback — live series {str(_rs).lower()}")
+            _stamp.append(f"risk-free rate {_rfr_used*100:.2f}%{_src}")
         if _hist_days is not None: _stamp.append(f"computed on {_hist_days} trading days of history")
         if _stamp:
             story.append(Paragraph("(" + "; ".join(_stamp) + ".)", s_small))
@@ -8800,8 +8829,10 @@ elif st.session_state.sb_view_mode == "portfolios":
                                       f"{fmt_inr(last_val)}",
                                       help="Market value of holdings plus any uninvested cash from sales.")
                             m3.metric("P&L", f"{fmt_inr(profit)}", delta=f"{simple_ret:+.1f}%")
-
-                            if _econ["cash_balance"] > 0 or _econ["realized_pnl"] != 0 or _econ["withdrawn"] > 0:
+ 
+                            _costs_paid = _econ.get("total_costs_paid") or 0
+                            if (_econ["cash_balance"] > 0 or _econ["realized_pnl"] != 0
+                                    or _econ["withdrawn"] > 0 or _costs_paid > 0):
                                 _parts = [f"Holdings {fmt_inr(_econ['market_value'])}",
                                           f"Cash {fmt_inr(_econ['cash_balance'])}"]
                                 if _econ["withdrawn"] > 0:
@@ -8809,7 +8840,8 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 st.caption(
                                     " · ".join(_parts) +
                                     f" — realized {fmt_inr(_econ['realized_pnl'])}, "
-                                    f"unrealized {fmt_inr(_econ['unrealized_pnl'])}."
+                                    f"unrealized {fmt_inr(_econ['unrealized_pnl'])}, "
+                                    f"costs {fmt_inr(_costs_paid)}."
                                 )
                                 if _econ["unreconciled_withdrawal"] > 0:
                                     st.warning(
@@ -8818,7 +8850,35 @@ elif st.session_state.sb_view_mode == "portfolios":
                                         f"contribution is missing from the ledger — returns "
                                         f"shown here are understated until it is added."
                                     )
-
+ 
+                            # Sprint 16. Costs get their OWN line rather than being
+                            # folded into P&L, because the number a user needs is
+                            # not "you lost a bit" — it is "exiting these 15 names
+                            # costs Rs 230 in depository charges alone". The exit
+                            # estimate is the decision-relevant half and the ledger
+                            # cannot know it yet, so it is computed live from the
+                            # holdings on screen.
+                            if _costs_paid > 0 or display_holdings:
+                                _n_scrips = len({h.get("ticker") for h in (display_holdings or [])
+                                                 if h.get("ticker")})
+                                _mv = _econ["market_value"]
+                                _dp_total = _n_scrips * costs.RATES["dp_per_scrip_sell"]
+                                _exit_cost = (_dp_total + _mv * costs.sell_rate()) if _n_scrips else 0.0
+                                _bits = [f"Transaction costs paid to date: {fmt_inr(_costs_paid)}"]
+                                if _econ.get("cost_rows_missing"):
+                                    # A total that understates must say so.
+                                    _bits.append(
+                                        f"{_econ['cost_rows_missing']} older "
+                                        f"transaction(s) predate cost tracking, so this "
+                                        f"understates")
+                                if _n_scrips and _mv > 0:
+                                    _bits.append(
+                                        f"selling all {_n_scrips} holdings today would cost "
+                                        f"about {fmt_inr(_exit_cost)} "
+                                        f"({_exit_cost / _mv * 100:.2f}% of value), of which "
+                                        f"{fmt_inr(_dp_total)} is the flat depository charge")
+                                st.caption(" · ".join(_bits) + ".")
+ 
                             m4, m5 = st.columns(2)
                             if port_xirr is not None:
                                 m4.metric("XIRR", f"{port_xirr:+.1f}%")

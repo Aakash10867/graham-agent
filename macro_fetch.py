@@ -1,10 +1,15 @@
 """macro_fetch.py — daily macro OBSERVATION layer.
 
-BUILT, NOT WIRED. Nothing in app.py, selector.py or deep_metrics.py reads this
-file or its output. It accumulates a dated series so that, for the first time,
-the extraction noise on these scalars becomes MEASURABLE rather than arguable.
-Whether any of them should reach a recommendation is a separate, still-open
-question and must not be answered by this script existing.
+WIRED AS OF SPRINT 16, PARTIALLY AND ON PURPOSE. For its first seven weeks this
+file had no consumer at all: ~264 Tavily credits a month producing 60KB nothing
+opened. macro_read.py is now the reader, and portfolio_tracker.get_india_rfr()
+is the first production consumer — india_10y_yield_pct became the risk-free
+rate in Sharpe, Sortino, Treynor, Jensen and CAPM.
+
+Everything else here is still OBSERVE-ONLY. The four tax fields and the CPI
+projection are exposed by macro_read for Sprints 18/20/21 and read by nothing.
+Exposing a reader is not a decision to use the number, and this script existing
+is not an argument that any of these belongs in a recommendation.
 
 WHY IT EXISTS
 The previous path called a web search per portfolio review, at review time:
@@ -38,12 +43,21 @@ COST. 6 fields x ~22 weekdays x 2 credits (advanced) = ~264 credits/month
 against a 1,000/month free tier. Basic search would be ~132 but returns
 fragments, which is the thing being fixed.
 
-HARD BOUNDARY — india_10y_yield_pct is OBSERVE-ONLY and must not be wired to
-INDIA_10Y_BOND_RATE while deep_metrics.py:496-503 stands. That is a Gordon
-growth model, oe_ps*(1+g)/(r-g), with r = the bond rate and g = min(ni_cagr,
-15%). At r = 7% every company with NI CAGR >= 7% yields None, and one at 6.9%
-yields ~1000x owner earnings. A live rate there would flip companies between
-"no value" and "absurd value" on a macro input. Fix the model first.
+HARD BOUNDARY — india_10y_yield_pct must not be wired to INDIA_10Y_BOND_RATE
+while deep_metrics.py:496-503 stands. That is a Gordon growth model,
+oe_ps*(1+g)/(r-g), with r = the bond rate and g = min(ni_cagr, 15%). At r = 7%
+every company with NI CAGR >= 7% yields None, and one at 6.9% yields ~1000x
+owner earnings. A live rate there would flip companies between "no value" and
+"absurd value" on a macro input. Fix the model first.
+
+Sprint 16 did NOT cross that boundary. The RFR in a Sharpe ratio and the rate
+in a scoring constant are different objects: the first is an input to a
+portfolio statistic recomputed daily from scratch, the second is a frozen
+parameter the whole archive was scored against. Making the second live would
+re-score ~4,500 stocks on a 4bp G-Sec move, require a SCHEMA_VERSION bump, and
+break archive comparability — for noise. deep_metrics.INDIA_10Y_BOND_RATE stays
+frozen and dated; macro_read.rate_monitor() carries the live value alongside it
+for monitoring, with a pre-registered 100bp re-examination trigger.
 """
 
 import hashlib
@@ -51,9 +65,14 @@ import json
 import os
 import sys
 from datetime import datetime, timezone
-from statistics import median
 
 import requests
+
+# The READ side. SERIES_PATH, SCHEMA_VERSION and operative_value live there so
+# the writer's falsification report and every production consumer share ONE
+# definition rather than two copies free to drift apart. macro_read imports
+# nothing beyond the standard library, so this costs the reader nothing.
+from macro_read import SCHEMA_VERSION, SERIES_PATH, operative_value
 
 try:
     from google import genai
@@ -61,9 +80,6 @@ except ImportError:
     print("FATAL: google-genai not installed", file=sys.stderr)
     sys.exit(1)
 
-
-SERIES_PATH = "macro_series.json"
-SCHEMA_VERSION = 1
 
 TAVILY_URL = "https://api.tavily.com/search"
 
@@ -300,41 +316,9 @@ def load_series() -> dict:
     return data
 
 
-def operative_value(readings: list, field_name: str, window: int = 5,
-                    max_span_days: int = 10):
-    """Rolling median of the last `window` OK readings, within max_span_days.
-
-    BUILT, NOT WIRED -- no production caller. Here so the 10-weekday
-    falsification report uses the same definition the eventual consumer would,
-    rather than a second copy that drifts.
-
-    Median, not mean: the failure mode is one wild parse, not drift. RBI's
-    projection is a step function with ~6 steps a year, so a 5-reading median
-    lags a genuine step by 2-3 days and rejects everything else.
-
-    Re-runs on the same date collapse to the LAST reading for that date, so a
-    manual re-trigger does not double-weight a day.
-    """
-    by_date = {}
-    for r in readings:
-        if r.get("field") == field_name and r.get("status") == "ok" \
-                and r.get("value") is not None:
-            by_date[r["date"]] = r["value"]
-
-    if not by_date:
-        return None, "INSUFFICIENT"
-
-    dates = sorted(by_date)[-window:]
-    newest = datetime.strptime(dates[-1], "%Y-%m-%d").date()
-    oldest = datetime.strptime(dates[0], "%Y-%m-%d").date()
-    if (newest - oldest).days > max_span_days:
-        dates = [d for d in dates
-                 if (newest - datetime.strptime(d, "%Y-%m-%d").date()).days
-                 <= max_span_days]
-
-    if len(dates) < 3:
-        return None, "INSUFFICIENT"
-    return median(by_date[d] for d in dates), "ok"
+# operative_value now lives in macro_read.py — see the import at the top of this
+# file. It was defined here and marked "BUILT, NOT WIRED"; it is now wired, and
+# a wired definition belongs on the read side where its consumers are.
 
 
 # ── Main ──────────────────────────────────────────────────────────────────

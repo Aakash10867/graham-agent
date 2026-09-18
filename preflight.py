@@ -19,6 +19,7 @@ COVERAGE
   E. cross-cutting invariants
   F. drift constants
   G. ledger integrity (economics model + consumer wiring + live DB)
+  H. transaction costs + the risk-free rate wiring
 """
 
 import argparse
@@ -32,6 +33,9 @@ import pandas as pd
 
 import selector
 import economics
+import costs
+import macro_read
+import deep_metrics
 
 FAILS = []
 
@@ -272,11 +276,14 @@ def f_drift():
           f"unmeasured={became['unmeasured']}")
 
 # ── G. ledger integrity ───────────────────────────────────────────────────
-def _txn(i, d, tk, sh, px, tt, bpx=100.0, amt=None):
+def _txn(i, d, tk, sh, px, tt, bpx=100.0, amt=None, cost=None):
+    """cost=None means the row carries NO cost_inr — a row written before cost
+    tracking existed. That is the legacy shape, and the checks below use it to
+    pin that legacy ledgers still replay to exactly their old numbers."""
     return {"id": str(i), "created_at": "2026-01-01T00:00:%02d" % i,
             "transaction_date": d, "ticker": tk, "shares": sh, "price": px,
             "amount_inr": round(sh * px, 2) if amt is None else amt,
-            "transaction_type": tt, "nifty_price": bpx}
+            "transaction_type": tt, "nifty_price": bpx, "cost_inr": cost}
 
 
 def g1_model():
@@ -331,12 +338,70 @@ def g1_model():
           eo["cash_balance"] >= 0 and eo["unreconciled_withdrawal"] == 5000.0,
           f"cash={eo['cash_balance']} unrec={eo['unreconciled_withdrawal']}")
 
-    # The decomposition identity, on every case above.
-    for nm, ec in (("doubling", e), ("loss", el), ("rotation", er),
-                   ("hold", eh), ("over", eo)):
-        check(f"identity holds ({nm}): unrealized + realized == total",
-              abs(ec["unrealized_pnl"] + ec["realized_pnl"] - ec["total_pnl"]) < 0.02,
-              f"{ec['unrealized_pnl']} + {ec['realized_pnl']} vs {ec['total_pnl']}")
+    # ── Sprint 16: the same ledgers, COSTED ──────────────────────────────
+    # A cost is money that left, so it must reduce cash and raise external
+    # capital on a buy that cash cannot cover. If costs were a display-time
+    # adjustment instead, every one of these would still pass with costs
+    # silently absent from the money — which is the failure being pinned.
+    c_buy = costs.buy_cost(10000)
+    c_sell = costs.sell_cost(10000)
+    cdbl = [_txn(1, "2026-01-01", "A.NS", 100, 100, "buy", cost=c_buy),
+            _txn(2, "2026-03-01", "A.NS", 50, 200, "sell", cost=c_sell),
+            _txn(3, "2026-03-02", "CASH", 0, 0, "withdrawal", amt=10000.0, cost=0.0)]
+    ec = economics.portfolio_economics(cdbl, 10000)
+    check("costs raise external capital on an uncovered buy",
+          abs(ec["external_capital"] - (10000.0 + c_buy)) < 0.02,
+          f"ext={ec['external_capital']} vs 10000+{c_buy}")
+    check("total_costs_paid is the sum of the row costs",
+          abs(ec["total_costs_paid"] - (c_buy + c_sell)) < 0.02,
+          f"{ec['total_costs_paid']} vs {c_buy + c_sell}")
+    check("costs lower return, never raise it",
+          ec["return_pct"] < e["return_pct"],
+          f"costed {ec['return_pct']}% vs gross {e['return_pct']}%")
+
+    # NULL cost is UNKNOWN, not zero. `False` carrying two meanings is the bug
+    # score_history.applicable exists to prevent; this is the same shape.
+    mixed = [_txn(1, "2026-01-01", "A.NS", 100, 100, "buy"),
+             _txn(2, "2026-02-01", "B.NS", 100, 100, "buy", cost=c_buy)]
+    em = economics.portfolio_economics(mixed, 20000)
+    check("a row with no cost_inr is COUNTED, not silently zero",
+          em["cost_rows_missing"] == 1, f"{em['cost_rows_missing']} missing")
+
+    # A legacy ledger must replay to EXACTLY its pre-Sprint-16 numbers. If this
+    # fails, the cost change rewrote history rather than extending it.
+    check("legacy (uncosted) ledger is unchanged by the cost term",
+          e["external_capital"] == 10000.0 and e["return_pct"] == 100.0
+          and e["total_costs_paid"] == 0.0,
+          f"ext={e['external_capital']} ret={e['return_pct']} "
+          f"costs={e['total_costs_paid']}")
+
+    # The shadow buys SECURITIES, not friction. A rotation draws a little
+    # external capital purely to cover its own costs; crediting the benchmark
+    # with units for that money makes the benchmark grow with churn.
+    crot = [_txn(1, "2026-01-01", "A.NS", 100, 100, "buy", bpx=250.0, cost=c_buy),
+            _txn(2, "2026-03-01", "A.NS", 100, 100, "sell", bpx=300.0, cost=c_sell),
+            _txn(3, "2026-03-01", "B.NS", 50, 200, "buy", bpx=300.0, cost=c_buy)]
+    ecr = economics.portfolio_economics(crot, 10000, 300.0)
+    check("a costed rotation still adds NO shadow units",
+          abs(ecr["shadow_units"] - 40.0) < 1e-6, f"{ecr['shadow_units']:.6f}")
+    check("a costed rotation draws external capital only for its costs",
+          abs(ecr["external_capital"] - (10000.0 + 2 * c_buy + c_sell)) < 0.02,
+          f"{ecr['external_capital']}")
+
+    # The decomposition identity, on every case above. THREE terms since
+    # Sprint 16 — realized and unrealized both stay GROSS and costs are their
+    # own line, so unrealized keeps meaning market_value minus surviving cost
+    # basis and stays checkable against holdings.price_at_entry.
+    for nm, ecc in (("doubling", e), ("loss", el), ("rotation", er),
+                    ("hold", eh), ("over", eo), ("costed", ec),
+                    ("costed rotation", ecr), ("mixed", em)):
+        check(f"identity holds ({nm}): realized + unrealized - costs == total",
+              abs(ecc["unrealized_pnl"] + ecc["realized_pnl"]
+                  - ecc["total_costs_paid"] - ecc["total_pnl"]) < 0.02,
+              f"{ecc['realized_pnl']} + {ecc['unrealized_pnl']} - "
+              f"{ecc['total_costs_paid']} vs {ecc['total_pnl']}")
+        check(f"cash never goes negative ({nm})", ecc["cash_balance"] >= 0,
+              f"{ecc['cash_balance']}")
 
     # No capital, no percentage. A wrong number is worse than no number.
     check("return_pct is None with no external capital",
@@ -393,6 +458,36 @@ def g2_wiring():
     pargs = _fn_args(a, "portfolio_money")
     check("portfolio_money accepts a benchmark ticker",
           pargs is not None and "benchmark_ticker" in pargs, str(pargs))
+
+    # Sprint 16. The ledger is the only place a cost can be recorded, so BOTH
+    # halves have to be wired: load_txns must select the column, and
+    # record_transaction must write it. Either one missing and costs silently
+    # read as zero everywhere — which is indistinguishable from the state this
+    # sprint replaced.
+    check("app.py imports costs", "costs" in {
+        (n.names[0].name if isinstance(n, ast.Import) else n.module)
+        for n in ast.walk(a) if isinstance(n, (ast.Import, ast.ImportFrom))})
+    lt = next((n for n in ast.walk(a)
+               if isinstance(n, ast.FunctionDef) and n.name == "load_txns"), None)
+    check("load_txns selects cost_inr",
+          lt is not None and "cost_inr" in ast.unparse(lt))
+    rt = next((n for n in ast.walk(a)
+               if isinstance(n, ast.FunctionDef) and n.name == "record_transaction"), None)
+    rt_src = ast.unparse(rt) if rt is not None else ""
+    check("record_transaction writes cost_inr", "cost_inr" in rt_src)
+    check("record_transaction prices the sell side separately",
+          "sell_cost" in rt_src and "buy_cost" in rt_src)
+    rw = next((n for n in ast.walk(a)
+               if isinstance(n, ast.FunctionDef) and n.name == "record_withdrawal"), None)
+    check("record_withdrawal writes a KNOWN zero cost, not NULL",
+          rw is not None and "cost_inr" in ast.unparse(rw))
+
+    # The tracker must store which rate it used. rfr_used and its PDF stamp
+    # both already existed and nothing ever wrote the value, so the stamp had
+    # never rendered once — a live rate makes that provenance mandatory.
+    tsrc = open("portfolio_tracker.py", encoding="utf-8").read()
+    check("tracker stores rfr_used and rfr_status",
+          '"rfr_used", "rfr_status"' in tsrc)
 
     # The dead denominator. Any of these forms is the Sprint-14 bug returning.
     # Plus the Sprint-15 asymmetry: crediting the portfolio's CASH to the
@@ -481,6 +576,157 @@ def g3_db(required=False):
           f"shadow understates for portfolios {incomplete}" if incomplete else "")
 
 
+# ── H. transaction costs + risk-free rate wiring ──────────────────────────
+def h_costs_and_rates():
+    """The Sprint 16 foundation. Costs must be computable and RIGHT, and there
+    must be exactly ONE risk-free rate for portfolio metrics."""
+    section("H1. transaction cost model")
+
+    # Purity. costs.py is the single source of truth for rates and is imported
+    # by economics consumers, the backtest and the UI; an import here is how it
+    # acquires a network or pandas dependency by accident.
+    tree = ast.parse(open("costs.py", encoding="utf-8").read())
+    imports = [n for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom))]
+    check("costs.py imports nothing at all", not imports,
+          str([getattr(n, "module", None) or n.names[0].name for n in imports]))
+
+    # The two anchors from the sprint brief, recomputed rather than restated.
+    # If Zerodha moves a rate and RATES is updated, these MOVE — and they
+    # should, because a check pinned to a stale number is a check that lies.
+    rt333 = costs.round_trip_pct(333) * 100
+    rt50k = costs.round_trip_pct(50000) * 100
+    check("round_trip_pct(333) is ~4.83%", abs(rt333 - 4.83) < 0.02, f"{rt333:.3f}%")
+    check("round_trip_pct(50000) is ~0.25%", abs(rt50k - 0.25) < 0.02, f"{rt50k:.3f}%")
+
+    # The flat DP charge is the whole story at retail sizes. This is the
+    # property every exit rule in Sprint 20 will be designed against.
+    dp = costs.RATES["dp_per_scrip_sell"]
+    share = dp / costs.round_trip_cost(333)
+    check("the flat DP charge dominates a small position", share > 0.9,
+          f"{share:.0%} of a Rs 333 round trip")
+    check("selling costs far more than buying at retail size",
+          costs.sell_cost(333) > 20 * costs.buy_cost(333),
+          f"sell {costs.sell_cost(333)} vs buy {costs.buy_cost(333)}")
+
+    # Break-evens must invert the cost function exactly, not approximately.
+    for target in (0.010, 0.0075, 0.005):
+        v = costs.min_position_for_cost_pct(target)
+        check(f"break-even inverts cleanly at {target*100:.2f}%",
+              v is not None and abs(costs.round_trip_pct(v) - target) < 1e-6,
+              f"Rs {v:,.2f}" if v else "None")
+    check("an unreachable cost target returns None, not a number",
+          costs.min_position_for_cost_pct(0.001) is None)
+
+    # BSE transaction charge is 22% higher, and the universe carries both.
+    check("exchange is derived from the ticker suffix",
+          costs.exchange_for("X.BO") == "BSE" and costs.exchange_for("X.NS") == "NSE"
+          and costs.exchange_for(None) == "NSE")
+    check("BSE costs more than NSE",
+          costs.round_trip_cost(5000, "BSE") > costs.round_trip_cost(5000, "NSE"),
+          f"{costs.round_trip_cost(5000,'BSE')} vs {costs.round_trip_cost(5000,'NSE')}")
+
+    # A bad input must not become a free trade.
+    check("non-positive or unparseable values yield no cost and no percentage",
+          costs.buy_cost(0) == 0.0 and costs.buy_cost(None) == 0.0
+          and costs.round_trip_pct(0) is None
+          and costs.net_return(None, 0.1) is None)
+
+    # Costs must make a flat round trip a LOSS. If this ever passes at zero,
+    # the model has been disconnected.
+    nr = costs.net_return(500, 0.0)
+    check("a flat round trip on a Rs 500 position is a loss",
+          nr is not None and nr < -0.03, f"{nr*100:.2f}%")
+
+    print(f"\n  note: rates verified {costs.RATES_VERIFIED}. Zerodha changes "
+          f"these — re-verify at https://zerodha.com/charges/ if that date is old.")
+    print(f"        Rs 5,000 position round trip: "
+          f"{costs.round_trip_pct(5000)*100:.2f}%; Rs 500: "
+          f"{costs.round_trip_pct(500)*100:.2f}%")
+
+    section("H2. risk-free rate — one rate, one place")
+
+    import portfolio_tracker as pt
+
+    # The live path must actually be reached. A constant returned directly is
+    # the regression this catches: the function keeps its name and its
+    # signature, and quietly stops reading the series.
+    src = inspect.getsource(pt.get_india_rfr_status)
+    check("get_india_rfr_status reads macro_read", "macro_read" in src)
+    check("get_india_rfr delegates rather than returning a constant",
+          "get_india_rfr_status" in inspect.getsource(pt.get_india_rfr))
+
+    # EXACTLY ONE fallback constant. A second 0.07 in the tracker would be the
+    # original duplication bug restored: one rate in two files, invisible in
+    # both, free to drift apart.
+    tsrc_rfr = open("portfolio_tracker.py", encoding="utf-8").read()
+    check("the tracker defines no rate constant of its own",
+          "INDIA_RFR_FALLBACK = " not in tsrc_rfr and "INDIA_RFR = " not in tsrc_rfr)
+
+    rate, status = pt.get_india_rfr_status()
+    check("the rate is a plausible decimal, not a percentage",
+          isinstance(rate, float) and 0.0 < rate < 0.20, f"{rate}")
+    if status == "ok":
+        check("the live series answered", True, f"{rate*100:.3f}%")
+    else:
+        # NOT a pass and NOT a silent fallback. The rate still works; the fact
+        # that it came from the fallback is what has to stay visible.
+        skip("live risk-free rate", f"status={status}, using macro_read "
+                                    f"fallback {macro_read.FALLBACK_INDIA_RFR*100:.2f}%")
+
+    # macro_series.json must have a real consumer. That was the whole point:
+    # seven weeks of daily Tavily credits with nothing reading the output.
+    check("macro_series.json is readable and non-empty",
+          len(macro_read.read_series()) > 0, f"{len(macro_read.read_series())} readings")
+
+    # ONE definition of operative_value, shared by writer and reader.
+    import macro_fetch
+    check("macro_fetch shares the reader's operative_value",
+          macro_fetch.operative_value is macro_read.operative_value)
+
+    # A non-ok status must never hand back a number.
+    for bogus in ("nonexistent_field",):
+        v, st = macro_read.operative(bogus)
+        check(f"an unknown field yields no value ({st})", v is None, str(v))
+
+    section("H3. scoring constant is FROZEN, and monitored")
+
+    # The scorer must NOT be on the live rate. A stock's Graham score moving
+    # because the G-Sec moved 4bp is noise entering a stored score, and it
+    # breaks comparability with every archived snapshot.
+    # STRUCTURAL, via AST — not a text grep. deep_metrics DOCUMENTS the live
+    # reader in the comment block above the constant, and a grep for the name
+    # matches that documentation and fails on it. Section F hit the same class
+    # of false positive; a check that cannot tell "imported" from "mentioned"
+    # is a false-positive generator, and the fix is to read imports, not text.
+    dm_tree = ast.parse(open("deep_metrics.py", encoding="utf-8").read())
+    dm_imports = set()
+    for n in ast.walk(dm_tree):
+        if isinstance(n, ast.Import):
+            dm_imports |= {a.name.split(".")[0] for a in n.names}
+        elif isinstance(n, ast.ImportFrom) and n.module:
+            dm_imports.add(n.module.split(".")[0])
+    check("deep_metrics does not import the live rate reader",
+          not ({"macro_read", "macro_fetch"} & dm_imports),
+          str(sorted({"macro_read", "macro_fetch"} & dm_imports)))
+    check("the scoring constant is dated",
+          isinstance(getattr(deep_metrics, "INDIA_10Y_BOND_RATE_AS_OF", None), str),
+          str(getattr(deep_metrics, "INDIA_10Y_BOND_RATE_AS_OF", None)))
+
+    mon = macro_read.rate_monitor(deep_metrics.INDIA_10Y_BOND_RATE)
+    if mon["status"] != "ok":
+        skip("scoring-constant drift", f"live rate unavailable ({mon['status']})")
+    else:
+        # FAILS past the pre-registered band. A drift this large means the
+        # frozen constant no longer describes the rate environment the Graham
+        # spread assumes, and somebody has to DECIDE — re-score with a
+        # SCHEMA_VERSION bump, or move the constant and its as-of date. A red
+        # build is the mechanism that forces the decision; this control runs
+        # after the universe commit, so failing it costs no data.
+        check(f"frozen {mon['frozen_pct']}% is within "
+              f"{macro_read.REEXAMINE_BP:.0f}bp of live {mon['live_pct']}%",
+              not mon["exceeds"], f"drift {mon['drift_bp']:+.1f}bp")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv", default="universe_scored.csv")
@@ -498,6 +744,7 @@ def main():
     g1_model()
     g2_wiring()
     g3_db(required=args.db)
+    h_costs_and_rates()
     print("\n" + ("ALL CHECKS PASSED" if not FAILS
                   else f"{len(FAILS)} FAILED: " + "; ".join(FAILS)))
     sys.exit(1 if FAILS else 0)

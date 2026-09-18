@@ -14,36 +14,73 @@ from collections import Counter
 import requests as _requests
 import verdict_engine
 import economics
+# Sprint 16: the READ side of the macro series. Stdlib-only, no network — see
+# the risk-free rate block below for why this is a hard import.
+import macro_read
 # Pure: no Streamlit, no network, no LLM. That purity is what makes the W1
 # drift classification cheap enough to run inside the daily alert loop.
 import selector
 
 
 # ══════════════════════════════════════════════
-# RISK-FREE RATE — one constant, one place
+# RISK-FREE RATE — one rate, one place, LIVE since Sprint 16
 # ══════════════════════════════════════════════
 # India 10Y G-Sec yield, as a decimal. Feeds Sharpe/Treynor/Jensen/Sortino/CAPM.
 #
-# Deliberately a constant, not a live fetch. Two reasons:
-#   1. RFR is the SMALLEST term in every ratio it enters — a 30bp error moves
-#      Sharpe in the third decimal and never changes a decision.
-#   2. No free, unauthenticated, stable India-10Y JSON feed exists (verified
-#      2026-07). Every source needs a key or a paid plan. A live dependency for
-#      a number this insensitive is a bad trade: it adds a daily failure mode to
-#      the tracker to chase precision that does not matter.
+# WHAT CHANGED AND WHY THE OLD REASONING NO LONGER HOLDS. This was a hardcoded
+# constant on two grounds recorded in 2026-07: that RFR is the smallest term in
+# every ratio it enters, and that no free, unauthenticated, stable India-10Y
+# feed existed. The first is still true and is why nothing here is urgent. The
+# second stopped being true on 2026-07-27, when macro_fetch.py began writing a
+# dated India-10Y series every weekday — and then nothing read it for seven
+# weeks. This is not an unauthenticated third-party feed with a daily failure
+# mode; it is a local JSON file we already own, medianed over five readings,
+# freshness-checked and band-checked by macro_read, with a documented fallback.
 #
-# The bug this REPLACES was not staleness — it was DUPLICATION. RFR was
-# hardcoded here AND in the Graham scorer, invisible in both, free to drift
-# apart. This is now the single source of truth. deep_metrics should import it.
+# The original bug this replaced was DUPLICATION, not staleness: the rate was
+# hardcoded here AND in the Graham scorer, invisible in both. That fix stands.
+# deep_metrics still does NOT import this — see the block at deep_metrics.py:22.
+# A live RFR in a daily-recomputed portfolio statistic is correct; a live rate
+# in a frozen scoring constant would re-score the universe on G-Sec noise and
+# break archive comparability. Different objects, different rules.
 #
-# MAINTENANCE: bump this when RBI policy moves the 10Y materially (a few times a
-# year, not daily). Current India 10Y ~6.7-6.8% as of 2026-07.
-INDIA_RFR = 0.07
+# THE FALLBACK LIVES IN macro_read, NOT HERE. A second 0.07 in this file would
+# recreate exactly the bug the original note described: one rate hardcoded in
+# two places, invisible in both, free to drift apart. macro_read owns the
+# number, the plausibility band and the freshness rule; this module owns nothing
+# but the question.
+#
+# macro_read is imported HARD at the top of this file, like archetype in
+# deep_metrics. It is a stdlib-only module sitting in this repo, so its absence
+# is a broken deployment rather than a runtime condition to degrade around —
+# and degrading around it would mean inventing a rate here, which is the
+# duplication all over again. Fail at import, not at portfolio three.
+_RFR_CACHE = None
+
+
+def get_india_rfr_status():
+    """(rate_as_decimal, status). Cached per process — the tracker loops over
+    portfolios and must not re-read the series for each one.
+
+    status is macro_read's: "ok" for a live operative value, or UNAVAILABLE /
+    INSUFFICIENT / STALE / OUT_OF_BAND alongside macro_read's fallback rate.
+    Callers that display or store the rate MUST carry the status with it:
+    "7.0% because the G-Sec is 7.0%" and "7.0% because the macro job has been
+    down for a week" are not the same number and must not render alike.
+    """
+    global _RFR_CACHE
+    if _RFR_CACHE is None:
+        _RFR_CACHE = macro_read.india_rfr()
+    return _RFR_CACHE
 
 
 def get_india_rfr():
-    """India 10Y G-Sec yield as a decimal (0.07 == 7%). Single source of truth."""
-    return INDIA_RFR
+    """India 10Y G-Sec yield as a decimal (0.07 == 7%). Single source of truth.
+
+    Returns the number only. Anything that SHOWS the rate should call
+    get_india_rfr_status() instead and carry the status with it.
+    """
+    return get_india_rfr_status()[0]
 
 
 # ══════════════════════════════════════════════
@@ -427,8 +464,8 @@ def compute_portfolio_risk_metrics(holdings, universe_df=None, nifty_history=Non
     if not holdings or len(holdings) == 0:
         return {}
 
-    RFR = get_india_rfr()  # single source of truth (module constant INDIA_RFR)
-    result = {}
+    RFR, RFR_STATUS = get_india_rfr_status()  # single source of truth
+    result = {"rfr_used": round(RFR, 6), "rfr_status": RFR_STATUS}
 
     total_value = sum(h.get("current_value", 0) or h.get("sip_amount_inr", 0) or 0 for h in holdings)
     if total_value <= 0:
@@ -952,11 +989,21 @@ def run_daily_tracker():
                            "capm_expected_return", "semi_deviation", "annual_return", "annual_std",
                            # Sprint 12: honest ranges (band, not point) + history depth
                            "sharpe_low", "sharpe_high", "sortino_low", "sortino_high",
-                           "treynor_low", "treynor_high", "metrics_history_days"]:
+                           "treynor_low", "treynor_high", "metrics_history_days",
+                           # Sprint 16: WHICH risk-free rate produced these, and
+                           # whether it was a live reading or the fallback. The
+                           # rfr_used column and the PDF stamp that renders it
+                           # both already existed; nothing ever wrote the value,
+                           # so the stamp had never once appeared. A live rate
+                           # makes stamping it mandatory rather than merely nice.
+                           "rfr_used", "rfr_status"]:
                     if k in _risk:
                         _risk_update[k] = _risk[k]
                 if _risk_update:
                     supabase.table("portfolios").update(_json_safe(_risk_update)).eq("id", port_id).execute()
+                _rfr_str = (f"  RFR: {_risk.get('rfr_used', 0)*100:.3f}% "
+                            f"[{_risk.get('rfr_status', '?')}]")
+                print(_rfr_str)
                 _beta_str = f" | β={_risk.get('portfolio_beta', '?')}"
                 _sharpe_str = f" | Sharpe={_risk.get('sharpe_ratio', '?')}"
                 _alpha_str = f" | α={_risk.get('jensen_alpha', '?')}"

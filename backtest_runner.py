@@ -52,6 +52,8 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 
+import costs
+
 # ─── Config ───
 ARCHIVE_FILE = "universe_scored.csv"          # the git-versioned snapshot
 MANIFEST_FILE = "archive_manifest.json"       # the clock (clean-snapshot record)
@@ -65,6 +67,26 @@ MIN_CLEAN_SCHEMA = 1                            # snapshot schema_version floor
 PRICE_CACHE_FILE = "backtest_price_cache.csv"  # immutable historical closes
 FETCH_CHUNK = 40                               # tickers per yfinance batch
 SAMPLE_SEED = 20260713                          # reproducible control sampling
+
+# ─── Cost assumptions (Sprint 16) ───
+# PRE-REGISTERED 2026-09-18, before any netted number was computed.
+#
+# The backtest prices buy-and-hold forward returns. Those returns were GROSS of
+# every rupee of friction until now, which measured a strategy nobody can
+# execute: a Rs 500 position costs 3.29% to round-trip, and the ladder's whole
+# high-minus-low spread could be smaller than that.
+#
+# Base case Rs 5,000 per position (0.53% round trip). Sensitivity Rs 500
+# (3.29%), because Rs 500 is what a minimum-SIP user across the 10-name ruin
+# floor actually gets — the base case is the aspiration, the sensitivity is the
+# product as shipped.
+COST_POSITION_BASE = 5000.0
+COST_POSITION_SENSITIVITY = 500.0
+# The benchmark is ONE ETF position, not fifteen, so it carries one flat DP
+# charge rather than fifteen. Netting it per-position would hand the strategy
+# free alpha worth ~14 depository charges. Sized at base position x a typical
+# 15-name portfolio.
+COST_POSITION_BENCHMARK = COST_POSITION_BASE * 15
 
 # Allow a forced research run even when the archive can't be read (e.g. a
 # shallow checkout locally). Never wire this into a committing workflow.
@@ -305,6 +327,8 @@ def cohort_returns(cohort, calendar, prices):
     if not b_in or not b_out or b_in <= 0:
         return []                                 # can't benchmark this cohort
     bench_ret = b_out / b_in - 1.0
+    # Netted at ONE ETF position, not per-stock. See COST_POSITION_BENCHMARK.
+    bench_ret_net = costs.net_return(COST_POSITION_BENCHMARK, bench_ret)
 
     rng = random.Random(f"{SAMPLE_SEED}-{d.isoformat()}")
     buckets = bucket_tickers(cohort["scores"], rng)
@@ -320,15 +344,30 @@ def cohort_returns(cohort, calendar, prices):
             else:
                 missing += 1                       # delisted / no price — counted
         n = len(rets)
+        # Cost is applied PER STOCK before averaging, not to the bucket mean.
+        # The two differ because net_return is not linear in the gross return
+        # (the sell leg is charged on the exit value), and averaging first would
+        # quietly price every holding at the bucket's average outcome.
+        net_base = [costs.net_return(COST_POSITION_BASE, r) for r in rets]
+        net_sens = [costs.net_return(COST_POSITION_SENSITIVITY, r) for r in rets]
         rows.append({
             "cohort_date": d.isoformat(),
             "exit_date": xdate.isoformat(),
             "score_bucket": b,
             "n_priced": n,
             "n_missing": missing,
+            # GROSS — the raw measurement, untouched. Costs are an assumption
+            # layered on top; deleting the gross figures would make the
+            # assumption unfalsifiable.
             "fwd_return": round(float(np.mean(rets)), 4) if n else None,
             "bench_return": round(bench_ret, 4),
             "alpha": round(float(np.mean(rets)) - bench_ret, 4) if n else None,
+            # NET — at the two pre-registered position sizes.
+            "fwd_return_net": round(float(np.mean(net_base)), 4) if n else None,
+            "fwd_return_net_small": round(float(np.mean(net_sens)), 4) if n else None,
+            "bench_return_net": round(bench_ret_net, 4),
+            "alpha_net": (round(float(np.mean(net_base)) - bench_ret_net, 4)
+                          if n else None),
             "sampled": b in CONTROL_BUCKETS,
         })
     return rows
@@ -410,7 +449,32 @@ def aggregate(all_rows, cohorts, matured_cohorts):
             "n_missing; this biases surviving-bucket returns UPWARD.",
             "Point-in-time snapshot => no current-list survivorship bias; residual "
             "is delisting only.",
+            f"COSTS: *_net figures are net of modelled Zerodha equity-delivery "
+            f"costs at Rs {COST_POSITION_BASE:,.0f} per position "
+            f"({costs.round_trip_pct(COST_POSITION_BASE)*100:.2f}% round trip); "
+            f"*_net_small at Rs {COST_POSITION_SENSITIVITY:,.0f} "
+            f"({costs.round_trip_pct(COST_POSITION_SENSITIVITY)*100:.2f}%), which "
+            f"is what a minimum-SIP user across the 10-name ruin floor gets. The "
+            f"benchmark is netted as ONE Rs {COST_POSITION_BENCHMARK:,.0f} ETF "
+            f"position, carrying one flat depository charge rather than fifteen. "
+            f"Position sizes pre-registered 2026-09-18 before any netted number "
+            f"was computed. Slippage and market impact are NOT modelled and are "
+            f"not zero, so every net figure here still flatters the strategy.",
+            "Gross figures are the raw measurement and are reported unchanged "
+            "alongside the net ones; costs are an assumption layered on top.",
         ],
+        "cost_assumption": {
+            "rates_verified": costs.RATES_VERIFIED,
+            "position_base_inr": COST_POSITION_BASE,
+            "position_base_round_trip_pct":
+                round(costs.round_trip_pct(COST_POSITION_BASE) * 100, 3),
+            "position_sensitivity_inr": COST_POSITION_SENSITIVITY,
+            "position_sensitivity_round_trip_pct":
+                round(costs.round_trip_pct(COST_POSITION_SENSITIVITY) * 100, 3),
+            "benchmark_position_inr": COST_POSITION_BENCHMARK,
+            "slippage_modelled": False,
+            "pre_registered": "2026-09-18",
+        },
         "ladder": {},
     }
 
@@ -422,6 +486,10 @@ def aggregate(all_rows, cohorts, matured_cohorts):
         summary["independent_quarters"] = 0
         summary["spread_high_minus_low"] = {
             "definition": "mean(buckets 4,5) - mean(buckets 0,1) forward return",
+            "point": None, "ci95": None, "n_cohorts": 0, "independent_quarters": 0}
+        summary["spread_high_minus_low_net"] = {
+            "definition": f"same spread, net of costs at Rs {COST_POSITION_BASE:,.0f}"
+                          f" per position",
             "point": None, "ci95": None, "n_cohorts": 0, "independent_quarters": 0}
         if status == "INSUFFICIENT_DATA":
             summary["first_reading_date"] = project_first_reading(cohorts)
@@ -437,6 +505,9 @@ def aggregate(all_rows, cohorts, matured_cohorts):
             summary["ladder"][str(b)] = {
                 "cohorts": int(sub["cohort_date"].nunique()),
                 "mean_fwd_return": m,
+                "mean_fwd_return_net": round(float(sub["fwd_return_net"].mean()), 4),
+                "mean_fwd_return_net_small":
+                    round(float(sub["fwd_return_net_small"].mean()), 4),
                 "total_missing": int(sub["n_missing"].sum()),
                 "sampled": bool(b in CONTROL_BUCKETS),
             }
@@ -444,9 +515,12 @@ def aggregate(all_rows, cohorts, matured_cohorts):
 
     # ── per-cohort high-minus-low spread → overlap-adjusted band ──
     spread_by_cohort = {}
+    spread_by_cohort_net = {}
     for cd, g in priced.groupby("cohort_date"):
         bmeans = {int(r["score_bucket"]): r["fwd_return"] for _, r in g.iterrows()}
         spread_by_cohort[cd] = _high_minus_low(bmeans)
+        bnet = {int(r["score_bucket"]): r["fwd_return_net"] for _, r in g.iterrows()}
+        spread_by_cohort_net[cd] = _high_minus_low(bnet)
     dates = sorted(pd.to_datetime(list(spread_by_cohort.keys())))
     span_days = (dates[-1] - dates[0]).days if len(dates) > 1 else 0
     point, lo, hi, n, m_eff = overlap_adjusted_ci(
@@ -457,6 +531,20 @@ def aggregate(all_rows, cohorts, matured_cohorts):
         "point": point,
         "ci95": [lo, hi] if lo is not None else None,
         "n_cohorts": n,
+        "independent_quarters": m_eff,
+    }
+    # The spread is a DIFFERENCE of two buckets bought and sold the same way, so
+    # the proportional costs largely cancel and the flat DP charge cancels
+    # exactly. It should move very little. Reporting it is how that claim stays
+    # falsifiable instead of assumed.
+    npoint, nlo, nhi, nn, _ = overlap_adjusted_ci(
+        list(spread_by_cohort_net.values()), span_days, horizon_cal)
+    summary["spread_high_minus_low_net"] = {
+        "definition": f"same spread, net of costs at Rs {COST_POSITION_BASE:,.0f}"
+                      f" per position",
+        "point": npoint,
+        "ci95": [nlo, nhi] if nlo is not None else None,
+        "n_cohorts": nn,
         "independent_quarters": m_eff,
     }
     if status == "INSUFFICIENT_DATA":
@@ -537,7 +625,11 @@ def main():
             v = summary["ladder"].get(b)
             if v:
                 tag = " (sampled)" if v["sampled"] else ""
-                print(f"  {b}/5: {v['mean_fwd_return']:+.2%}  ({v['cohorts']} cohorts){tag}")
+                print(f"  {b}/5: gross {v['mean_fwd_return']:+.2%} | "
+                      f"net {v['mean_fwd_return_net']:+.2%} | "
+                      f"net@Rs{COST_POSITION_SENSITIVITY:,.0f} "
+                      f"{v['mean_fwd_return_net_small']:+.2%}  "
+                      f"({v['cohorts']} cohorts){tag}")
         print(f"  Ladder monotonic (5>=...>=0): {summary['ladder_monotonic']}")
         sp = summary["spread_high_minus_low"]
         if sp["point"] is not None:

@@ -19,7 +19,35 @@ from datetime import datetime, timezone
 from archetype import assign_archetype, lynch_category_from
 
 # ─── Constants ───
-INDIA_10Y_BOND_RATE = 7.0        # Hardcoded, stable
+# INDIA_10Y_BOND_RATE — a FROZEN SCORING CONSTANT. Not a stale number waiting to
+# be made live; a parameter the entire score archive was computed against.
+#
+# Frozen at 7.0, as-of 2026-07-01. Sprint 16 deliberately left it frozen while
+# making the PORTFOLIO risk-free rate live (portfolio_tracker.get_india_rfr).
+# The two are different objects and the distinction is the whole point:
+#
+#   - A Sharpe ratio is recomputed from scratch every day. Feeding it today's
+#     G-Sec is simply correct, and changes nothing that was stored yesterday.
+#   - This constant feeds graham_earnings_yield_spread (M1, below), which feeds
+#     the Graham framework, which feeds `score`, which is written to the daily
+#     archive and to score_history. Making it live means a stock's Graham score
+#     moves because the G-Sec moved 4bp. That is noise entering a stored score,
+#     it breaks comparability with every archived snapshot, and it would require
+#     a SCHEMA_VERSION bump and a reconcile run to do honestly.
+#
+# It also sits in the BM1 Gordon-growth denominator (r - g) further down, where
+# r approaching g makes intrinsic value explode. macro_fetch.py's docstring has
+# carried that boundary since 2026-07-28; it still stands.
+#
+# MONITORING, not maintenance: macro_read.rate_monitor(INDIA_10Y_BOND_RATE)
+# reports the live operative 10Y against this constant and flags drift past
+# macro_read.REEXAMINE_BP (100bp, pre-registered 2026-09-18 with the then-current
+# 5.5bp drift already visible and stated). Exceeding it is not a failure and
+# must not auto-update anything — it is the trigger to re-examine scoring
+# sensitivity as its own decision, which is a sprint, not a config change.
+# preflight Section H reports the drift on every run.
+INDIA_10Y_BOND_RATE = 7.0
+INDIA_10Y_BOND_RATE_AS_OF = "2026-07-01"
 ADEQUATE_SIZE_INR = 2_000_000_000  # ₹200Cr (PPP-adjusted from Graham's $100M)
 # COST_OF_CAPITAL_PROXY — SPECIFICATION OF THIS PROJECT, not a book number.
 # Set 2026-07-29. Value UNCHANGED at 12.0; this edit only records why.
