@@ -67,3 +67,26 @@ jobs:
       # every module closes that gap for the cost of two seconds.
       - name: every module compiles
         run: python -m compileall -q .
+
+      # UNDEFINED NAMES ONLY. Added 2026-09-19 after `_plotly_to_png` and
+      # `_pdf_cur_val` — two functions/variables called but never defined —
+      # sat in the PDF path and took report generation down with a NameError.
+      # `ast.parse` passes on both. `compileall` passes on both. Nothing can
+      # import app.py to find out, because Streamlit runs on import. A name
+      # that does not exist is the one defect class a static pass can prove
+      # without running anything, and it is exactly the class that reaches
+      # production here.
+      #
+      # DELIBERATELY NOT the full pyflakes report. The repo carries ~50 unused
+      # locals, unused imports and placeholder-free f-strings; failing on those
+      # would make this gate the first thing anyone learns to ignore, and a
+      # control that is routinely overridden is worse than no control. Undefined
+      # names are ALWAYS a runtime bug. Nothing else here is.
+      - name: no undefined names
+        run: |
+          pip install -q pyflakes
+          if python -m pyflakes *.py | grep "undefined name"; then
+            echo "::error::A name is used that is never defined — this is a NameError waiting for the code path to run."
+            exit 1
+          fi
+          echo "No undefined names."

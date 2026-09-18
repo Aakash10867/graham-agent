@@ -25,6 +25,24 @@ pyarrow==18.1.0
 streamlit
 reportlab
 matplotlib
-plotly
 pyxirr
-kaleido
+
+# plotly/kaleido PINNED 2026-09-19, and the pin is load-bearing.
+#
+# Static image export needs a browser engine. kaleido 0.2.x BUNDLED its own
+# Chromium and needed nothing from the host. kaleido 1.x dropped the bundle and
+# raises "Kaleido requires Google Chrome to be installed" on any host without
+# Chrome -- which is every Streamlit Cloud container. Left unpinned, a rebuild
+# resolves to plotly 7 + kaleido 1.x and EVERY PDF chart silently disappears:
+# the growth chart falls back to matplotlib, and the goal projection chart,
+# which has no fallback, is simply absent from the report with nothing in the
+# UI to say so.
+#
+# plotly 7.0 removed support for kaleido < 1.0 outright, so 6.x is the newest
+# release that can still drive the self-contained renderer. Verified on this
+# exact pair 2026-09-19: renders an 800x280 PNG with no system Chrome present.
+#
+# THE EXIT FROM THIS PIN is kaleido >= 1 plus a Streamlit `packages.txt`
+# installing chromium, not a version bump on its own. Do not unpin without it.
+plotly>=6,<7
+kaleido==0.2.1
