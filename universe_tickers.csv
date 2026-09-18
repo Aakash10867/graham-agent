@@ -36,7 +36,6 @@ ticker,name,exchange
 500322.BO,Panyam Cements & Mineral Inds. Ltd.,BSE
 500346.BO,Punjab Communications Limited,BSE
 500357.BO,Rama Paper Mills Limited,BSE
-500358.BO,Rama Petrochemicals Ltd,BSE
 500360.BO,Rapicut Carbides Ltd.,BSE
 500370.BO,Salora International Limited,BSE
 500371.BO,Samtel (India) Ltd.,BSE
@@ -511,7 +510,6 @@ ticker,name,exchange
 514414.BO,Oxford Industries ltd.,BSE
 514440.BO,Blue Pearl Agriventures Limited,BSE
 514454.BO,Southern Latex Ltd.,BSE
-514460.BO,Oswal Yarns Ltd.,BSE
 514470.BO,Winsome Textile Industries Ltd,BSE
 515008.BO,Modern Insulators Ltd.,BSE
 515059.BO,Madhusudan Industries Ltd.,BSE
@@ -1217,7 +1215,6 @@ ticker,name,exchange
 531779.BO,Padmanabh Alloys & Polymers Ltd.,BSE
 531780.BO,Kaiser Corporation Limited,BSE
 531784.BO,KCL Infra Projects Limited,BSE
-531794.BO,Seshachal Technologies Ltd,BSE
 531797.BO,Scan Projects Ltd,BSE
 531802.BO,Prerna Infrabuild Limited,BSE
 531810.BO,Metal Coatings (India) Ltd.,BSE
@@ -2548,6 +2545,13 @@ ticker,name,exchange
 544905.BO,Farm Peace Limited,BSE
 544907.BO,Seksaria Finance Limited,BSE
 544910.BO,Apana Logistics Limited,BSE
+544919.BO,INFRAX RENEWABLE LIMITED,BSE
+544920.BO,Amtech Esters Limited,BSE
+544922.BO,OM GALAXY LIMITED,BSE
+544924.BO,Raksan Transformers Limited,BSE
+544925.BO,MAHARAJA & SPEEDEX INDIA LIMITED,BSE
+544926.BO,Panchatv Bharat Limited,BSE
+544927.BO,UTI Mutual Fund,BSE
 555555.BO,ICICI Prudential Mutual Fund,BSE
 590103.BO,Reliance Mutual Fund-Permitted,BSE
 590104.BO,Reliance Mutual Fund-Permitted,BSE
@@ -2756,6 +2760,7 @@ APTUS.NS,Aptus Value Housing Finance India Limited,NSE
 AQYLON.NS,Aqylon Nexus Limited,NSE
 ARCHIDPLY.NS,Archidply Industries Limited,NSE
 ARCHIES.NS,Archies Limited,NSE
+ARCIL.NS,Asset Reconstruction Company (India) Limited,NSE
 ARCL.NS,ARCL Organics Limited,NSE
 ARDEE.NS,Ardee Industries Limited,NSE
 ARE&M.NS,Amara Raja Energy & Mobility Limited,NSE
@@ -3767,6 +3772,7 @@ KANORICHEM.NS,Kanoria Chemicals & Industries Limited,NSE
 KANPRPLA.NS,Kanpur Plastipack Limited,NSE
 KANSAINER.NS,Kansai Nerolac Paints Limited,NSE
 KAPSTON.NS,Kapston Services Limited,NSE
+KARAMTARA.NS,Karamtara Engineering Limited,NSE
 KARMAENG.NS,Karma Energy Limited,NSE
 KARURVYSYA.NS,Karur Vysya Bank Limited,NSE
 KAUSHALYA.NS,Kaushalya Infrastructure Development Corporation Limited,NSE
@@ -3879,6 +3885,7 @@ LAXMICOT.NS,Laxmi Cotspin Limited,NSE
 LAXMIDENTL.NS,Laxmi Dental Limited,NSE
 LAXMIINDIA.NS,Laxmi India Finance Limited,NSE
 LCCINFOTEC.NS,LCC Infotech Limited,NSE
+LCCPROJECT.NS,LCC Projects Limited,NSE
 LCL.NS,Lohia Corp Limited,NSE
 LEAPIND.NS,LEAP India Limited,NSE
 LEENEE.NS,Lee & Nee Softwares Exports Limited,NSE
@@ -4066,6 +4073,7 @@ MOTISONS.NS,Motisons Jewellers Limited,NSE
 MOTOGENFIN.NS,The Motor & General Finance Limited,NSE
 MPDL.NS,MPDL Limited,NSE
 MPHASIS.NS,MphasiS Limited,NSE
+MPIMANIPAL.NS,Manipal Payment and Identity Solutions Limited,NSE
 MPSLTD.NS,MPS Limited,NSE
 MRF.NS,MRF Limited,NSE
 MRPL.NS,Mangalore Refinery and Petrochemicals Limited,NSE
@@ -4310,7 +4318,7 @@ PML.NS,Paul Merchants Limited,NSE
 PNB.NS,Punjab National Bank,NSE
 PNBGILTS.NS,PNB Gilts Limited,NSE
 PNBHOUSING.NS,PNB Housing Finance Limited,NSE
-PNC.NS,Pritish Nandy Communications Limited,NSE
+PNC.NS,PNC Media and Entertainment Limited,NSE
 PNCINFRA.NS,PNC Infratech Limited,NSE
 PNGJL.NS,P N Gadgil Jewellers Limited,NSE
 PNGSREVA.NS,PNGS Reva Diamond Jewellery Limited,NSE
@@ -4439,6 +4447,7 @@ RELIGARE.NS,Religare Enterprises Limited,NSE
 RELINFRA.NS,Reliance Infrastructure Limited,NSE
 RELTD.NS,Ravindra Energy Limited,NSE
 REMSONSIND.NS,Remsons Industries Limited,NSE
+RENTOMOJO.NS,Rentomojo Limited,NSE
 RENUKA.NS,Shree Renuka Sugars Limited,NSE
 REPCOHOME.NS,Repco Home Finance Limited,NSE
 REPL.NS,Rudrabhishek Enterprises Limited,NSE
@@ -4739,6 +4748,7 @@ STARHEALTH.NS,Star Health and Allied Insurance Company Limited,NSE
 STARPAPER.NS,Star Paper Mills Limited,NSE
 STARTECK.NS,Starteck Finance Limited,NSE
 STCINDIA.NS,The State Trading Corporation of India Limited,NSE
+STEAMHOUSE.NS,Steamhouse India Limited,NSE
 STEELCAS.NS,Steelcast Limited,NSE
 STEELCITY.NS,Steel City Securities Limited,NSE
 STEELXIND.NS,STEEL EXCHANGE INDIA LIMITED,NSE
@@ -5016,6 +5026,7 @@ VEDAVAAG.NS,VEDAVAAG Systems Limited,NSE
 VEDL.NS,Vedanta Limited,NSE
 VEDPOWER.NS,Vedanta Power Limited,NSE
 VEEDOL.NS,Veedol Corporation Limited,NSE
+VEEGALAND.NS,Veegaland Developers Limited,NSE
 VELJAN.NS,Veljan Denison Limited,NSE
 VENKEYS.NS,Venky's (India) Limited,NSE
 VENTIVE.NS,Ventive Hospitality Limited,NSE
