@@ -39,6 +39,12 @@ import deep_metrics
 
 FAILS = []
 
+# Zerodha's charges are typed constants in costs.py, not a feed. This is the
+# ceiling on how stale that hand-verification may get. 180 days forces a
+# re-check about twice a year and cannot straddle a Union Budget (1 February),
+# which is when STT and stamp duty actually move.
+RATES_MAX_AGE_DAYS = 180
+
 
 def skip(name, why):
     """Explicitly NOT a pass. A skipped check must never read as a green one."""
@@ -355,6 +361,22 @@ def g1_model():
     check("total_costs_paid is the sum of the row costs",
           abs(ec["total_costs_paid"] - (c_buy + c_sell)) < 0.02,
           f"{ec['total_costs_paid']} vs {c_buy + c_sell}")
+    # The split is what the UI shows. Buying is ~0.12% at any size; selling
+    # carries the flat DP charge. A blended total hides the asymmetry that
+    # every exit rule has to be designed around.
+    check("buy and sell charges split and still sum to the total",
+          abs(ec["buy_costs_paid"] - c_buy) < 0.02
+          and abs(ec["sell_costs_paid"] - c_sell) < 0.02
+          and abs(ec["buy_costs_paid"] + ec["sell_costs_paid"]
+                  - ec["total_costs_paid"]) < 0.02,
+          f"buy={ec['buy_costs_paid']} sell={ec['sell_costs_paid']}")
+    # Gross must be EXACT, not a counterfactual: gross - charges == net.
+    check("gross P&L minus charges equals net P&L",
+          abs(ec["gross_pnl"] - ec["total_costs_paid"] - ec["total_pnl"]) < 0.02,
+          f"{ec['gross_pnl']} - {ec['total_costs_paid']} vs {ec['total_pnl']}")
+    check("gross return is never below net return",
+          ec["gross_return_pct"] >= ec["return_pct"],
+          f"gross {ec['gross_return_pct']}% vs net {ec['return_pct']}%")
     check("costs lower return, never raise it",
           ec["return_pct"] < e["return_pct"],
           f"costed {ec['return_pct']}% vs gross {e['return_pct']}%")
@@ -637,8 +659,32 @@ def h_costs_and_rates():
     check("a flat round trip on a Rs 500 position is a loss",
           nr is not None and nr < -0.03, f"{nr*100:.2f}%")
 
-    print(f"\n  note: rates verified {costs.RATES_VERIFIED}. Zerodha changes "
-          f"these — re-verify at https://zerodha.com/charges/ if that date is old.")
+    # THE RATES ARE NOT FETCHED. They are typed constants with a verification
+    # date, because no broker publishes them as a feed and they move on a
+    # Budget, not a ticker. That is the right design — and it has exactly one
+    # failure mode: nobody re-checks them, and the whole cost model silently
+    # describes last year's India.
+    #
+    # STT moved in a Union Budget before and will again. The Budget is 1
+    # February, so a 180-day ceiling forces a re-check roughly twice a year and
+    # cannot skip a Budget. This FAILS rather than warns: a control that only
+    # prints is the control this sprint was written to replace.
+    import datetime as _dt
+    try:
+        _verified = _dt.date.fromisoformat(costs.RATES_VERIFIED)
+        _age = (_dt.date.today() - _verified).days
+    except (ValueError, TypeError):
+        _verified, _age = None, None
+    check("the cost rates carry a parseable verification date", _verified is not None,
+          str(costs.RATES_VERIFIED))
+    if _age is not None:
+        check(f"cost rates re-verified within {RATES_MAX_AGE_DAYS} days",
+              _age <= RATES_MAX_AGE_DAYS,
+              f"verified {costs.RATES_VERIFIED}, {_age} days ago — re-check "
+              f"https://zerodha.com/charges/ and update RATES_VERIFIED in costs.py")
+
+    print(f"\n  note: rates are typed constants verified {costs.RATES_VERIFIED}, "
+          f"not a live feed. No broker publishes them as one.")
     print(f"        Rs 5,000 position round trip: "
           f"{costs.round_trip_pct(5000)*100:.2f}%; Rs 500: "
           f"{costs.round_trip_pct(500)*100:.2f}%")

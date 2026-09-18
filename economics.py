@@ -145,6 +145,8 @@ def replay_ledger(txns):
     total_buys = 0.0
     total_sells = 0.0
     total_costs = 0.0
+    buy_costs = 0.0
+    sell_costs = 0.0
     cost_rows_missing = 0
     cost_debt = 0.0   # costs incurred but not yet paid for out of external draw
     shadow_units = 0.0
@@ -187,6 +189,7 @@ def replay_ledger(txns):
         if ttype == BUY:
             total_buys += amt
             total_costs += cost
+            buy_costs += cost
             cost_debt += cost
             # The cost is part of the outflow, so a buy that cash cannot cover
             # draws external capital for the cost too. It genuinely did.
@@ -238,6 +241,7 @@ def replay_ledger(txns):
         else:  # sell
             total_sells += amt
             total_costs += cost
+            sell_costs += cost
             cost_debt += cost
             # Proceeds arrive NET. At retail position sizes this is the whole
             # story: the flat DP charge is ~95% of the cost of exiting a Rs 333
@@ -261,6 +265,11 @@ def replay_ledger(txns):
         "total_buys": total_buys,
         "total_sells": total_sells,
         "total_costs": total_costs,
+        # Split because the two behave completely differently. Buying is ~0.12%
+        # of value at any size; selling carries the flat DP charge and is the
+        # side worth designing against. A single blended total hides that.
+        "buy_costs": buy_costs,
+        "sell_costs": sell_costs,
         "cost_rows_missing": cost_rows_missing,
         "external_flows": external_flows,
         "shadow_units": max(0.0, shadow_units),
@@ -315,7 +324,22 @@ def portfolio_economics(txns, market_value, benchmark_price=None):
         "realized_pnl": round(realized, 2),
         "unrealized_pnl": round(unrealized, 2),
         "total_costs_paid": round(costs, 2),
+        "buy_costs_paid": round(led["buy_costs"], 2),
+        "sell_costs_paid": round(led["sell_costs"], 2),
         "cost_rows_missing": led["cost_rows_missing"],
+        # P&L BEFORE charges. Exact, not a counterfactual: it is
+        # market_value + sells - buys, the same number the system reported
+        # before costs existed. gross_pnl - total_costs_paid == total_pnl.
+        "gross_pnl": round(total_pnl + costs, 2),
+        # Return before charges, on the SAME denominator as return_pct — the
+        # capital actually paid in. It answers "of the money I put in, how much
+        # did the market hand me before charges took their cut", which is a real
+        # question with a real denominator. It is NOT "what I would have earned
+        # in a world with no charges": in that world less capital would have
+        # been needed, so the denominator would differ too. Reporting the
+        # honest question rather than the flattering counterfactual.
+        "gross_return_pct": (round((total_pnl + costs) / ext * 100, 2)
+                             if ext > 0 else None),
         "total_pnl": round(total_pnl, 2),
         "return_pct": round(total_pnl / ext * 100, 2) if ext > 0 else None,
         "external_flows": led["external_flows"],

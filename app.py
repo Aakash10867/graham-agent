@@ -1244,55 +1244,6 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
     return buffer.getvalue()
  
  
-def _plotly_to_png(fig, width=None, height=None, scale=2):
-    """Render a Plotly figure to a PNG buffer for ReportLab. None on failure.
- 
-    Called but NEVER DEFINED until now — both call sites raised NameError, which
-    killed PDF generation outright rather than degrading. The contract the call
-    sites assume, and which this honours:
- 
-      - returns a seekable BytesIO, or None
-      - NEVER raises. generate_portfolio_chart treats None as "fall through to
-        matplotlib"; the goal chart treats None as "omit the chart". Neither can
-        do its job if this propagates an exception, and an exception here is
-        expected — see below.
- 
-    WHY FAILURE IS THE NORMAL CASE, NOT THE EDGE CASE. Rendering a Plotly figure
-    to a static image needs a browser engine. kaleido 0.2.x bundled its own
-    Chromium and needed nothing from the host; kaleido 1.x dropped the bundle
-    and requires Google Chrome to be installed, which Streamlit Cloud does not
-    have. requirements.txt leaves both plotly and kaleido unpinned, so a rebuild
-    resolves to plotly 7 + kaleido 1.x and every call here raises
-    "Kaleido requires Google Chrome to be installed". Verified 2026-09-19.
-    See the pin in requirements.txt. Until that pin lands, this function
-    returns None on every call and the PDF quietly uses the matplotlib path.
- 
-    scale=2 renders at twice the logical size so the image stays sharp when
-    ReportLab scales it into the page box; the layout's own width/height still
-    define the aspect ratio.
-    """
-    try:
-        import io   # app.py imports io per-function, not at module level
-        kwargs = {"format": "png", "scale": scale}
-        if width:
-            kwargs["width"] = width
-        if height:
-            kwargs["height"] = height
-        data = fig.to_image(**kwargs)
-        if not data:
-            return None
-        buf = io.BytesIO(data)
-        buf.seek(0)
-        return buf
-    except Exception as e:
-        # Printed, not swallowed silently. A chart that vanishes from a report
-        # with no trace in the log is indistinguishable from one that was never
-        # requested — which is how this stayed unnoticed.
-        print(f"  Plotly PNG render unavailable, using fallback "
-              f"({type(e).__name__}: {str(e).strip().splitlines()[0] if str(e).strip() else ''})")
-        return None
- 
- 
 def generate_portfolio_chart(history_data):
     """Render stacked absolute chart (Invested + Portfolio + Nifty Shadow) as PNG bytes."""
     if not history_data or len(history_data) < 2:
@@ -8900,33 +8851,71 @@ elif st.session_state.sb_view_mode == "portfolios":
                                         f"shown here are understated until it is added."
                                     )
  
-                            # Sprint 16. Costs get their OWN line rather than being
-                            # folded into P&L, because the number a user needs is
-                            # not "you lost a bit" — it is "exiting these 15 names
-                            # costs Rs 230 in depository charges alone". The exit
-                            # estimate is the decision-relevant half and the ledger
-                            # cannot know it yet, so it is computed live from the
-                            # holdings on screen.
-                            if _costs_paid > 0 or display_holdings:
-                                _n_scrips = len({h.get("ticker") for h in (display_holdings or [])
-                                                 if h.get("ticker")})
-                                _mv = _econ["market_value"]
-                                _dp_total = _n_scrips * costs.RATES["dp_per_scrip_sell"]
-                                _exit_cost = (_dp_total + _mv * costs.sell_rate()) if _n_scrips else 0.0
-                                _bits = [f"Transaction costs paid to date: {fmt_inr(_costs_paid)}"]
-                                if _econ.get("cost_rows_missing"):
-                                    # A total that understates must say so.
-                                    _bits.append(
-                                        f"{_econ['cost_rows_missing']} older "
-                                        f"transaction(s) predate cost tracking, so this "
-                                        f"understates")
-                                if _n_scrips and _mv > 0:
-                                    _bits.append(
-                                        f"selling all {_n_scrips} holdings today would cost "
-                                        f"about {fmt_inr(_exit_cost)} "
-                                        f"({_exit_cost / _mv * 100:.2f}% of value), of which "
-                                        f"{fmt_inr(_dp_total)} is the flat depository charge")
-                                st.caption(" · ".join(_bits) + ".")
+                            # ── Charges: gross to net, and the cost of leaving ──
+                            # Three things a user cannot get anywhere else, in one
+                            # place: what the market gave them, what the broker and
+                            # the government took, and what it would cost to walk
+                            # away today. The headline P&L above stays NET, because
+                            # net is what they actually have; gross belongs here,
+                            # beside the charge that explains the difference.
+                            #
+                            # Behind an expander whose LABEL carries the numbers, so
+                            # the figures are visible without a click and the
+                            # arithmetic is one click away. The exit estimate is the
+                            # decision-relevant half and the ledger cannot know it —
+                            # it is computed fresh on every render from the holdings
+                            # and prices on screen.
+                            _n_scrips = len({h.get("ticker") for h in (display_holdings or [])
+                                             if h.get("ticker")})
+                            _mv_now = _econ["market_value"]
+                            _dp_total = _n_scrips * costs.RATES["dp_per_scrip_sell"]
+                            _exit_cost = (_dp_total + _mv_now * costs.sell_rate()) if _n_scrips else 0.0
+                            _gross_pnl = _econ.get("gross_pnl")
+                            _gross_ret = _econ.get("gross_return_pct")
+ 
+                            if _costs_paid > 0 or _exit_cost > 0:
+                                _lbl = f"Charges — {fmt_inr(_costs_paid, 2)} paid so far"
+                                if _exit_cost > 0 and _mv_now > 0:
+                                    _lbl += (f", about {fmt_inr(_exit_cost, 2)} to exit everything "
+                                             f"today ({_exit_cost / _mv_now * 100:.2f}%)")
+                                with st.expander(_lbl):
+                                    _rows = []
+                                    if _gross_pnl is not None:
+                                        _rows.append(("Gain/loss before charges", fmt_inr(_gross_pnl),
+                                                      f"{_gross_ret:+.2f}%" if _gross_ret is not None else "—"))
+                                    _rows.append(("Buying charges paid",
+                                                  "\u2212" + fmt_inr(_econ.get("buy_costs_paid") or 0, 2), ""))
+                                    _rows.append(("Selling charges paid",
+                                                  "\u2212" + fmt_inr(_econ.get("sell_costs_paid") or 0, 2), ""))
+                                    _rows.append(("**Gain/loss after charges**", f"**{fmt_inr(profit)}**",
+                                                  f"**{simple_ret:+.2f}%**"))
+                                    st.table(pd.DataFrame(
+                                        _rows, columns=["", "Amount", "On capital paid in"]
+                                    ).set_index(""))
+ 
+                                    if _econ.get("cost_rows_missing"):
+                                        # A total that understates must say so.
+                                        st.caption(
+                                            f"{_econ['cost_rows_missing']} older transaction(s) "
+                                            f"were recorded before charges were tracked, so the "
+                                            f"charges above are understated.")
+ 
+                                    if _n_scrips and _mv_now > 0:
+                                        st.caption(
+                                            f"**Not yet paid:** selling all {_n_scrips} holdings "
+                                            f"today would cost about {fmt_inr(_exit_cost, 2)} — "
+                                            f"{_exit_cost / _mv_now * 100:.2f}% of what they are "
+                                            f"worth. {fmt_inr(_dp_total, 2)} of that is the flat "
+                                            f"depository charge of "
+                                            f"{fmt_inr(costs.RATES['dp_per_scrip_sell'], 2)} per "
+                                            f"stock, which does not shrink with position size — "
+                                            f"it is the reason small positions are expensive to "
+                                            f"leave.")
+                                    st.caption(
+                                        f"Charges are modelled on Zerodha equity delivery rates "
+                                        f"as verified on {costs.RATES_VERIFIED}, not read from a "
+                                        f"contract note. Your broker's actual bill may differ. "
+                                        f"Market impact and slippage are not included.")
  
                             m4, m5 = st.columns(2)
                             if port_xirr is not None:
@@ -9235,17 +9224,6 @@ elif st.session_state.sb_view_mode == "portfolios":
                                                             port.get("benchmark_ticker"))
                                 _pdf_nifty_sh = hist_for_pdf[-1].get("nifty_shadow_value") if hist_for_pdf else None
                                 xirr_data = compute_portfolio_xirr(_pdf_econ, _pdf_nifty_sh)
-                                # Used but never assigned — the second NameError
-                                # in this path, and the one that would have fired
-                                # the moment _plotly_to_png was fixed. A Sprint 15
-                                # leftover: portfolio_money replaced whatever set
-                                # this, and its two consumers below were not
-                                # updated. total_assets is the right value and the
-                                # one the PDF already uses everywhere else
-                                # (market value plus uninvested cash), taken from
-                                # portfolio_money so the goal projection cannot
-                                # disagree with the P&L printed beside it.
-                                _pdf_cur_val = _pdf_econ["total_assets"]
  
                                 # Goal projection + chart
                                 goal_data = None
