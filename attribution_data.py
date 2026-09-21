@@ -62,6 +62,7 @@ IIMA_FILE = os.path.join(OUT, "iima_daily.csv")
 LOG_FILE = os.path.join(OUT, "data_log.txt")
 
 PRICE_START = date(2021, 1, 1)
+RETRY_START = date(2026, 6, 1)      # short window: covers every snapshot
 PRICE_MCAP_FLOOR = 100e7            # Rs 100 Cr — the broad-market floor
 FETCH_CHUNK = 40
 SAVE_EVERY_CHUNKS = 10
@@ -221,7 +222,15 @@ def fetch_batch(batch, start, end):
     return got
 
 
-def run_fetch(prices, tickers, start, end, label, chunk=FETCH_CHUNK):
+class YahooBlocked(Exception):
+    pass
+
+
+def run_fetch(prices, tickers, start, end, label, chunk=FETCH_CHUNK, block_check=True):
+    """block_check only makes sense on MIXED batches. A retry pass is made
+    entirely of tickers that already failed, so empty batches there are the
+    expected result, not a block — the 2026-09-21 Actions run stopped itself on
+    exactly that misreading."""
     if not tickers:
         return prices, []
     log(f"[PRICES] {label}: {len(tickers)} tickers from {start}")
@@ -234,17 +243,17 @@ def run_fetch(prices, tickers, start, end, label, chunk=FETCH_CHUNK):
         got = fetch_batch(batch, start, end)
         failed += [t for t in batch if t not in got]
         pending.update(got)
-        if len(batch) >= 5 and not got:
+        if block_check and len(batch) >= 5 and not got:
             dead_run += 1
             if dead_run >= BLOCK_STOP_AFTER:
                 if pending:
                     new = pd.DataFrame(pending)
                     prices = new.combine_first(prices) if not prices.empty else new
                     save_prices(prices)
-                log(f"[PRICES] STOPPED: {dead_run} whole batches in a row returned "
-                    f"nothing. That is Yahoo blocking this machine. Progress is "
-                    f"saved; wait ~30 minutes and run again — it resumes.")
-                sys.exit(2)
+                raise YahooBlocked(
+                    f"{dead_run} mixed batches in a row returned nothing. That is "
+                    f"Yahoo blocking this machine. Progress is saved; wait ~30 "
+                    f"minutes and run again — it resumes.")
             print(f"    whole batch empty ({dead_run}/{BLOCK_STOP_AFTER}) — "
                   f"pausing {BLOCK_PAUSE_S} s")
             time.sleep(BLOCK_PAUSE_S)
@@ -295,15 +304,49 @@ def build_prices(panel):
             start = min(last[t].date() for t in stale) - timedelta(days=7)
             prices, _ = run_fetch(prices, stale, start, end, "top-up")
 
-    # One retry for failures, in batches of 5 so a single bad batch cannot
-    # sink forty good tickers twice. yfinance rate-limits in bursts, hence the pause.
+    # ── Failures. Measured 2026-09-21 on Actions: ~22% of every batch fails
+    # steadily (not in bursts), so these are specific tickers, not a block.
+    # Two fallbacks, in order, and every series records where it came from:
+    #   (1) Yahoo again, SHORT window from RETRY_START, batches of 5
+    #   (2) backtest_price_cache.csv — the same Yahoo closes, fetched by the
+    #       backtest from 2026-07-06; enough for in-window returns, NOT for the
+    #       12-month momentum or volatility lookback.
+    source = {t: "yahoo_full" for t in prices.columns}
     if failed:
-        log(f"[PRICES] retrying {len(failed)} failed tickers once, after a 30 s pause")
+        log(f"[PRICES] {len(failed)} failed the full-history fetch: "
+            f"{sum(t.endswith('.BO') for t in failed)} .BO, "
+            f"{sum(t.endswith('.NS') for t in failed)} .NS, "
+            f"{sum(not t.endswith(('.BO', '.NS')) for t in failed)} other")
         time.sleep(30)
-        prices, failed = run_fetch(prices, failed, PRICE_START, end, "retry", chunk=5)
+        prices, failed = run_fetch(prices, failed, RETRY_START, end,
+                                   "retry, short window", chunk=5, block_check=False)
+        for t in prices.columns:
+            source.setdefault(t, "yahoo_short")
+
+    if failed and os.path.exists("backtest_price_cache.csv"):
+        c = pd.read_csv("backtest_price_cache.csv", parse_dates=["date"])
+        c = c[c["ticker"].isin(failed)]
+        if len(c):
+            w = c.pivot_table(index="date", columns="ticker", values="close", aggfunc="last")
+            w.index = pd.to_datetime(w.index).normalize()
+            prices = w.combine_first(prices)
+            for t in w.columns:
+                source[t] = "backtest_cache"
+            save_prices(prices)
+        log(f"[PRICES] filled {c['ticker'].nunique() if len(c) else 0} from backtest_price_cache.csv")
+        failed = [t for t in failed if t not in prices.columns]
 
     with open(os.path.join(OUT, "price_failures.txt"), "w", encoding="utf-8") as f:
         f.write("\n".join(failed))
+    prov = pd.DataFrame({
+        "ticker": list(prices.columns),
+        "source": [source.get(t, "yahoo_full") for t in prices.columns],
+        "first_date": [prices[t].first_valid_index() for t in prices.columns],
+        "n_days": [int(prices[t].count()) for t in prices.columns],
+    })
+    prov.to_csv(os.path.join(OUT, "price_sources.csv"), index=False)
+    log("[PRICES] sources: " + ", ".join(f"{k}={v}" for k, v in
+                                         prov["source"].value_counts().items()))
 
     log(f"[PRICES] on disk: {prices.shape[1]} tickers x {prices.shape[0]} days "
         f"({prices.index.min().date()} -> {prices.index.max().date()})")
@@ -358,18 +401,30 @@ def coverage(panel, prices):
 
 def main():
     log(f"attribution_data.py run {datetime.now():%Y-%m-%d %H:%M}")
+    code = 0
     try:
-        panel = build_panel()
-    except RuntimeError as e:
-        log(f"[HALT] {e}\nRun this from the git repo folder "
-            f"(GitHub Desktop -> Repository -> Open in Command Prompt).")
-        sys.exit(1)
-    prices = build_prices(panel)
-    fetch_iima()
-    coverage(panel, prices)
-    with open(LOG_FILE, "w", encoding="utf-8") as f:
-        f.write("\n".join(_log_lines))
-    log(f"\nDone. Paste {LOG_FILE} back.")
+        try:
+            panel = build_panel()
+        except RuntimeError as e:
+            log(f"[HALT] {e}\nRun this from the git repo folder "
+                f"(GitHub Desktop -> Repository -> Open in Command Prompt).")
+            code = 1
+            return
+        fetch_iima()                    # cheap, and independent of Yahoo
+        try:
+            prices = build_prices(panel)
+        except YahooBlocked as e:
+            log(f"[PRICES] STOPPED: {e}")
+            code = 2
+            prices = load_prices()
+        coverage(panel, prices)
+    finally:
+        # Always written — the first Actions run exited before this line and
+        # left no record of what had failed.
+        with open(LOG_FILE, "w", encoding="utf-8") as f:
+            f.write("\n".join(_log_lines))
+        print(f"\nLog written to {LOG_FILE}.")
+    sys.exit(code)
 
 
 if __name__ == "__main__":
