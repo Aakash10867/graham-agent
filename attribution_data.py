@@ -48,6 +48,12 @@ import yfinance as yf
 
 import selector
 
+# yfinance prints one "possibly delisted" line per missing ticker. A few
+# thousand of those bury the progress lines; failures are counted and written
+# to price_failures.txt instead.
+import logging
+logging.getLogger("yfinance").setLevel(logging.CRITICAL)
+
 OUT = "attribution_out"
 ARCHIVE = "universe_scored.csv"
 PANEL_FILE = os.path.join(OUT, "panel.csv.gz")
@@ -59,6 +65,11 @@ PRICE_START = date(2021, 1, 1)
 PRICE_MCAP_FLOOR = 100e7            # Rs 100 Cr — the broad-market floor
 FETCH_CHUNK = 40
 SAVE_EVERY_CHUNKS = 10
+# A batch where EVERY ticker fails is the signature of Yahoo blocking this
+# machine, not of forty delisted stocks. Back off, and stop after a run of
+# them — pushing on through a block only lengthens it.
+BLOCK_PAUSE_S = 60
+BLOCK_STOP_AFTER = 4
 
 BENCHMARK_TICKERS = [
     "^NSEI",            # Nifty 50 index (price)
@@ -217,11 +228,28 @@ def run_fetch(prices, tickers, start, end, label, chunk=FETCH_CHUNK):
     pending = {}
     n_chunks = (len(tickers) + chunk - 1) // chunk
     failed = []
+    dead_run = 0
     for i in range(0, len(tickers), chunk):
         batch = tickers[i:i + chunk]
         got = fetch_batch(batch, start, end)
         failed += [t for t in batch if t not in got]
         pending.update(got)
+        if len(batch) >= 5 and not got:
+            dead_run += 1
+            if dead_run >= BLOCK_STOP_AFTER:
+                if pending:
+                    new = pd.DataFrame(pending)
+                    prices = new.combine_first(prices) if not prices.empty else new
+                    save_prices(prices)
+                log(f"[PRICES] STOPPED: {dead_run} whole batches in a row returned "
+                    f"nothing. That is Yahoo blocking this machine. Progress is "
+                    f"saved; wait ~30 minutes and run again — it resumes.")
+                sys.exit(2)
+            print(f"    whole batch empty ({dead_run}/{BLOCK_STOP_AFTER}) — "
+                  f"pausing {BLOCK_PAUSE_S} s")
+            time.sleep(BLOCK_PAUSE_S)
+        else:
+            dead_run = 0
         k = i // chunk + 1
         if k % SAVE_EVERY_CHUNKS == 0 or k == n_chunks:
             if pending:
@@ -250,6 +278,11 @@ def build_prices(panel):
 
     # Fresh tickers: full history.
     fresh = [t for t in wanted if t not in have]
+    # Shuffled, reproducibly. Sorted order clumps old BSE codes (507xxx-512xxx)
+    # into the same batches, and a batch of forty genuinely unlisted codes would
+    # look exactly like a block. Mixed batches make "all empty" mean "blocked".
+    import random
+    random.Random(20260921).shuffle(fresh)
     prices, failed = run_fetch(prices, fresh, PRICE_START, end, "full history")
 
     # Top-up: tickers on disk whose series ends more than 3 days ago.
