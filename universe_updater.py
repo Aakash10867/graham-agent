@@ -378,6 +378,10 @@ def fetch_bse_tickers():
             group = str(item.get("GROUP") or "").strip()
             industry = str(item.get("INDUSTRY") or "").strip()
             isin = str(item.get("ISIN_NUMBER") or "").strip()
+            # The alphanumeric BSE symbol (RELIANCE, NAGREEKCAP). Since
+            # ~2026-09-20 Yahoo answers ONLY to this form — see _bse_yahoo_symbol.
+            symbol = str(item.get("scrip_id") or item.get("Scrip_Id")
+                         or item.get("SCRIP_ID") or "").strip()
 
             if scrip_code and scrip_code not in ("", "nan", "None"):
                 tickers.append({
@@ -387,12 +391,21 @@ def fetch_bse_tickers():
                     "group": group,
                     "industry": industry,
                     "isin": isin,
+                    "symbol": symbol,
                 })
+
+        # The API is WAF-blocked from Actions today, so the scrip_id field name
+        # above is unverified against a live response. If it carries no symbols
+        # at all, the mapping would silently fail every BSE row — take the
+        # mirror instead, whose `symbol` column was verified 2026-09-24.
+        if tickers and not any(t.get("symbol") for t in tickers):
+            raise RuntimeError("API response carries no alphanumeric symbol field")
 
         print(f"[BSE] API method: got {len(tickers)} tickers")
         return tickers
 
     except Exception as e:
+        tickers.clear()      # never mix a partial API list with the mirror's
         print(f"[BSE] API method blocked by WAF ({e}).")
         print("[BSE] Falling back to CI-safe GitHub mirror...")
         
@@ -410,6 +423,9 @@ def fetch_bse_tickers():
             ind_col = next((c for c in df.columns if 'industry' in c), None)
             isin_col = next((c for c in df.columns if 'isin' in c), None)
             status_col = next((c for c in df.columns if 'status' in c), None)
+            # Mirror schema (2026-09-24): security_code, isin, symbol,
+            # security_group, security_name. `symbol` is what Yahoo now needs.
+            sym_col = next((c for c in df.columns if c in ('symbol', 'scrip_id')), None)
 
             if status_col:
                 df = df[df[status_col].astype(str).str.contains('Active', case=False, na=False)]
@@ -426,6 +442,7 @@ def fetch_bse_tickers():
                         "group": str(row.get(grp_col, "")).strip() if grp_col else "",
                         "industry": str(row.get(ind_col, "")).strip() if ind_col else "",
                         "isin": str(row.get(isin_col, "")).strip() if isin_col else "",
+                        "symbol": str(row.get(sym_col, "")).strip() if sym_col else "",
                     })
             print(f"[BSE] Mirror fallback: got {len(tickers)} tickers")
         except Exception as mirror_err:
@@ -437,6 +454,31 @@ def fetch_bse_tickers():
 # ──────────────────────────────────────────────
 # COMBINER & DEDUPLICATOR
 # ──────────────────────────────────────────────
+def _bse_yahoo_symbol(symbol):
+    """The Yahoo symbol for a BSE-only listing, or None.
+
+    WHY THIS EXISTS. Around 2026-09-20 Yahoo stopped recognising NUMERIC BSE
+    codes: 511066.BO, and even 500325.BO (Reliance) and 532540.BO (TCS), now
+    return quoteType NONE — no name, no price, no history. The same companies
+    still answer under their ALPHANUMERIC BSE symbol (NAGREEKCAP.BO,
+    RELIANCE.BO). Measured by yf_bse_map_probe.py on 2026-09-24: 54 of 59
+    sampled mappings returned prices, median 1,416 days of history, and every
+    hit's Yahoo name matched the BSE list's name.
+
+    IDENTITY IS UNCHANGED. `ticker` stays the numeric code — the archive, the
+    backtest cohorts and score_history are all keyed on it. `yf_symbol` is used
+    ONLY for talking to Yahoo, and is written to the CSV so every other consumer
+    reads this one decision rather than re-deriving it.
+
+    Normalisation, from the probe: spaces are removed (JK AGRI -> JKAGRI,
+    ALAN SCOTT -> ALANSCOTT); hyphenated forms are kept (BOMOXY-B1, MMRUBBR-B).
+    """
+    s = str(symbol or "").strip().upper()
+    if not s or s in ("NAN", "NONE"):
+        return None
+    return s.replace(" ", "") + ".BO"
+
+
 def combine_and_deduplicate(nse_tickers, bse_tickers):
     """Combine NSE + BSE, dedup on ISIN, fallback to name."""
     combined = []
@@ -445,7 +487,8 @@ def combine_and_deduplicate(nse_tickers, bse_tickers):
 
     for t in nse_tickers:
         yf_ticker = f"{t['symbol']}.NS"
-        combined.append({"ticker": yf_ticker, "name": t["name"], "exchange": "NSE"})
+        combined.append({"ticker": yf_ticker, "name": t["name"], "exchange": "NSE",
+                         "yf_symbol": yf_ticker})
 
         isin = t.get("isin", "").strip()
         if isin:
@@ -483,7 +526,8 @@ def combine_and_deduplicate(nse_tickers, bse_tickers):
             continue
 
         yf_ticker = f"{t['scrip_code']}.BO"
-        combined.append({"ticker": yf_ticker, "name": t["name"], "exchange": "BSE"})
+        combined.append({"ticker": yf_ticker, "name": t["name"], "exchange": "BSE",
+                         "yf_symbol": _bse_yahoo_symbol(t.get("symbol"))})
         bse_only_count += 1
 
     print(f"[DEDUP] Matched by ISIN: {skipped_isin} | Matched by name: {skipped_name}")
@@ -501,12 +545,23 @@ def combine_and_deduplicate(nse_tickers, bse_tickers):
 FAILURES = []   # (ticker, reason)
 
 
-def fetch_fundamentals(ticker, retries=3):
-    """Fetch all metrics needed for the 4 frameworks. Returns dict or None. Includes backoff."""
+def fetch_fundamentals(ticker, retries=3, yf_symbol=None):
+    """Fetch all metrics needed for the 4 frameworks. Returns dict or None. Includes backoff.
+
+    `ticker` is the identity every row is keyed on; `yf_symbol` is what Yahoo is
+    asked for. They differ only for BSE-only listings (see _bse_yahoo_symbol).
+    """
+    if ticker.endswith(".BO") and not yf_symbol:
+        # No alphanumeric symbol in the BSE list, and Yahoo no longer answers to
+        # the numeric code. A distinct, deterministic reason — not a throttle,
+        # so it is never carried forward and never counted as transient.
+        FAILURES.append((ticker, "no_bse_symbol"))
+        return None, None
+    _yf = yf_symbol or ticker
     for attempt in range(retries):
         try:
             # 1. CRITICAL: Let modern yfinance handle the session and crumb natively
-            stock = yf.Ticker(ticker)
+            stock = yf.Ticker(_yf)
             info = stock.info
             
             if not info or not info.get("regularMarketPrice"):
@@ -535,6 +590,7 @@ def fetch_fundamentals(ticker, retries=3):
 
             data = {
                 "ticker": ticker,
+                "yf_symbol": _yf,
                 "years_listed": calc_years_listed,
                 "name": info.get("longName") or info.get("shortName", ticker),
                 "sector": info.get("sector", ""),
@@ -866,9 +922,12 @@ def process_universe(ticker_list, max_workers=2):
     print(f"\n[SCAN] Processing {total} tickers with {max_workers} workers...")
     print(f"[SCAN] Estimated time: {total // max_workers * 2 // 60} - {total // max_workers * 3 // 60} minutes\n")
 
+    _yf_of = {t["ticker"]: t.get("yf_symbol") for t in ticker_list}
+
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
-            executor.submit(fetch_fundamentals, t["ticker"]): t
+            executor.submit(fetch_fundamentals, t["ticker"],
+                            yf_symbol=t.get("yf_symbol")): t
             for t in ticker_list
         }
 
@@ -912,7 +971,7 @@ def process_universe(ticker_list, max_workers=2):
         FAILURES[:] = [(t, r) for t, r in FAILURES if r != "rate_limited"]
         _recovered = 0
         for _t in _throttled:
-            _data, _stock = fetch_fundamentals(_t, retries=5)
+            _data, _stock = fetch_fundamentals(_t, retries=5, yf_symbol=_yf_of.get(_t))
             if _data:
                 try:
                     deep_metrics.compute_all_deep_metrics(_data, _stock)
@@ -1263,7 +1322,7 @@ def main():
 
     # ── Existing columns ──
     base_columns = [
-        "ticker", "name", "sector", "industry",
+        "ticker", "yf_symbol", "name", "sector", "industry",
         "is_unevaluable", "unevaluable_reason",
         "price", "market_cap", "years_listed",
         "pe", "pb", "roe", "roe_pct", "de", "eps",
@@ -1422,8 +1481,26 @@ def main():
     output_file = "universe_scored.csv"
     if os.path.exists(output_file):
         try:
-            _prev = len(pd.read_csv(output_file))
-            _delta = (len(df) - _prev) / _prev
+            # NSE ONLY. BSE-only listings are never investable (no sector, so
+            # selector._tier1 drops every one), and their data source has already
+            # broken once without warning (Yahoo dropped numeric BSE codes,
+            # 2026-09-24: 2,208 of ~2,236 failed and the guard froze the WHOLE
+            # universe for a stratum the product never buys). A BSE collapse is
+            # logged loudly below; it is not allowed to block the NSE universe.
+            # An NSE collapse is still a systemic break and still fatal.
+            _prev_t = pd.read_csv(output_file, usecols=["ticker"])["ticker"].astype(str)
+            _is_ns_prev = _prev_t.str.endswith(".NS")
+            _is_ns_now = df["ticker"].astype(str).str.endswith(".NS")
+            _prev = int(_is_ns_prev.sum())
+            _prev_bo, _now_bo = int((~_is_ns_prev).sum()), int((~_is_ns_now).sum())
+            _delta = (int(_is_ns_now.sum()) - _prev) / _prev
+            _delta_bo = (_now_bo - _prev_bo) / _prev_bo if _prev_bo else 0.0
+            print(f"\n[GUARD] BSE-only rows: {_prev_bo} -> {_now_bo} ({_delta_bo:+.1%}) "
+                  f"— informational, never fatal")
+            if _delta_bo < -0.15:
+                print(f"[GUARD] WARN: BSE-only stratum shrank {_delta_bo:+.1%}. Check "
+                      f"universe_failures.csv for no_bse_symbol / 404 — the Yahoo "
+                      f"BSE symbology may have moved again.")
             # Reason-based, not a raw % floor. The universe breathes daily (real
             # delistings, new listings) so a fixed threshold blocks legitimate
             # delisting days and forces a manual rerun. What we must NOT do is
@@ -1433,10 +1510,12 @@ def main():
             # no price) are genuine and should overwrite. A catastrophic drop is
             # blocked regardless — that is a systemic break, not a normal day.
             _transient = sum(1 for _t, r in FAILURES
-                             if r == "rate_limited" or r.startswith("error:"))
-            _best = len(df) + _transient          # if every transient had succeeded
+                             if str(_t).endswith(".NS")
+                             and (r == "rate_limited" or r.startswith("error:")))
+            _now = int(_is_ns_now.sum())
+            _best = _now + _transient             # if every transient had succeeded
             _delta_best = (_best - _prev) / _prev
-            print(f"\n[GUARD] universe size: {_prev} -> {len(df)} ({_delta:+.1%}); "
+            print(f"[GUARD] NSE universe size: {_prev} -> {_now} ({_delta:+.1%}); "
                   f"transient failures {_transient} -> best-case {_best} "
                   f"({_delta_best:+.1%})")
             _CATASTROPHIC = -0.15    # systemic break — block whatever the labels say

@@ -221,6 +221,23 @@ def _save_price_cache(series):
         pd.DataFrame(rows).to_csv(PRICE_CACHE_FILE, index=False)
 
 
+def _yahoo_symbol_map():
+    """ticker -> the symbol Yahoo answers to, from the universe CSV.
+
+    universe_updater decides this ONCE (_bse_yahoo_symbol) and writes it as
+    `yf_symbol`. Numeric BSE codes stopped resolving at Yahoo around 2026-09-20;
+    without this map every sampled BSE control name silently stops getting
+    forward prices, n_missing climbs, and the control buckets drift toward NSE.
+    Empty map (older CSV without the column) = today's behaviour, unchanged.
+    """
+    try:
+        u = pd.read_csv(ARCHIVE_FILE, usecols=["ticker", "yf_symbol"])
+        u = u.dropna()
+        return {str(t): str(s) for t, s in zip(u["ticker"], u["yf_symbol"])}
+    except Exception:
+        return {}
+
+
 def fetch_prices(tickers, start, end):
     """Return {ticker: close Series} over [start, end], using and extending the
     on-disk cache. Historical closes are immutable, so a ticker already cached
@@ -231,8 +248,13 @@ def fetch_prices(tickers, start, end):
     print(f"[PRICES] {len(tickers)} needed | {len(tickers) - len(need)} cached | "
           f"{len(need)} to fetch")
 
+    ymap = _yahoo_symbol_map()
     for i in range(0, len(need), FETCH_CHUNK):
         batch = need[i:i + FETCH_CHUNK]
+        # Ask Yahoo by yf_symbol, store by ticker. The cache stays keyed on the
+        # identity every cohort uses.
+        back = {ymap.get(t, t): t for t in batch}
+        batch = list(back.keys())
         try:
             # threads=False on purpose — curl_cffi's threaded path is the one that
             # differs on Linux (see the §1 tracker note); single-threaded is stable.
@@ -251,7 +273,7 @@ def fetch_prices(tickers, start, end):
             s = close[t].dropna()
             if len(s):
                 s.index = pd.to_datetime(s.index)
-                series[t] = s
+                series[back.get(str(t), str(t))] = s
         time.sleep(0.5)                          # be gentle with the rate limiter
 
     _save_price_cache(series)
