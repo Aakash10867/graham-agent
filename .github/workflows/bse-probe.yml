@@ -19,4 +19,4 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install yfinance==1.5.1 curl_cffi==0.15.0 pandas==2.3.3
-      - run: python yf_bse_probe.py
+      - run: python yf_bse_map_probe.py
