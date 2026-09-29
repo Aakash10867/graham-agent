@@ -64,6 +64,11 @@ PRE-REGISTERED PREDICTIONS vs RESULT — picks portfolio, v8 window, 5-factor
 ==============================================================================
 2. IN-HOUSE BETA — picks portfolio vs each benchmark (replaces yfinance beta)
 ==============================================================================
+  benchmark data check — a stale benchmark breaks every portfolio that uses it:
+    NIFTYBEES.NS   last price 2026-09-29 | priced 42/43 days in the window
+    MID150BEES.NS  last price 2026-09-29 | priced 5/43 days in the window
+    SMALLCAP.NS    last price 2026-09-29 | priced 42/43 days in the window
+    ^CRSLDX        last price 2026-09-29 | priced 42/43 days in the window
   NIFTYBEES.NS   beta 0.85 [0.53, 1.17] | corr 0.64 | tracking error 7.5%/yr | 41 days
   MID150BEES.NS  only 3 overlapping days
   SMALLCAP.NS    beta 0.60 [0.49, 0.72] | corr 0.76 | tracking error 7.9%/yr | 41 days
@@ -72,35 +77,39 @@ PRE-REGISTERED PREDICTIONS vs RESULT — picks portfolio, v8 window, 5-factor
   the fixed +/-0.15 BETA_UNCERTAINTY on an unexplained yfinance beta lacked.
 
 ==============================================================================
-3. EVENT STUDY — market-adjusted CAR, -20..+20 trading days, v8 snapshots, market cap >= Rs 500 Cr
+3. EVENT STUDY — size-matched CAR, -20..+20 trading days, v8 snapshots, market cap >= Rs 500 Cr
 ==============================================================================
   events: 1519 score changes | with a complete window: 921
 
   BUSINESS down n= 387
-    CAR -20..-1   +0.82%  [ -0.25%,  +1.90%]
-    AR  day 0     +0.99%  [ +0.69%,  +1.30%]
-    CAR +1..+20   +1.70%  [ +0.60%,  +2.80%]
+    CAR -20..-1   +0.55%  [ -0.53%,  +1.62%]
+    AR  day 0     +0.91%  [ +0.61%,  +1.21%]
+    CAR +1..+20   -0.68%  [ -1.79%,  +0.42%]
 
   BUSINESS up   n= 360
-    CAR -20..-1   +0.19%  [ -0.87%,  +1.24%]
-    AR  day 0     -0.62%  [ -0.87%,  -0.36%]
-    CAR +1..+20   +2.13%  [ +0.88%,  +3.38%]
+    CAR -20..-1   -0.23%  [ -1.28%,  +0.82%]
+    AR  day 0     -0.69%  [ -0.95%,  -0.44%]
+    CAR +1..+20   -0.26%  [ -1.51%,  +0.99%]
 
   PRICE    down n=  91
-    CAR -20..-1   +0.40%  [ -1.97%,  +2.76%]
-    AR  day 0     +1.94%  [ +1.03%,  +2.85%]
-    CAR +1..+20   +4.50%  [ +1.83%,  +7.18%]
+    CAR -20..-1   +0.57%  [ -1.76%,  +2.90%]
+    AR  day 0     +1.81%  [ +0.90%,  +2.71%]
+    CAR +1..+20   +1.64%  [ -1.04%,  +4.33%]
 
   PRICE    up   n=  83
-    CAR -20..-1   +0.53%  [ -2.00%,  +3.05%]
-    AR  day 0     -1.10%  [ -1.69%,  -0.52%]
-    CAR +1..+20   +4.29%  [ +1.66%,  +6.93%]
+    CAR -20..-1   +0.52%  [ -2.01%,  +3.05%]
+    AR  day 0     -1.16%  [ -1.75%,  -0.57%]
+    CAR +1..+20   +1.35%  [ -1.27%,  +3.97%]
 
   Reading it (prediction 6 is about BUSINESS rows only):
     PRICE rows are the control. A price-driven upgrade happens BECAUSE the
-    price fell, so negative pre-event CAR there is built in, not a finding.
+    price fell (and a downgrade because it rose), so a negative day-0 return
+    on price upgrades and a positive one on price downgrades are built in.
+    Seeing them confirms the business/price split works; they are not findings.
     BUSINESS upgrade with positive pre-CAR = the market moved first; Kordent
     read the news late. Flat pre-CAR then a jump or drift after = Kordent early.
+    Day 0 of a BUSINESS row can still carry a same-day price move (results day),
+    so read prediction 6 from the PRE-event CAR, which day 0 cannot contaminate.
     Bands assume independent events; events share dates, so bands are too narrow.
 
 ==============================================================================
