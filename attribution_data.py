@@ -84,7 +84,7 @@ IIMA_URL = ("https://faculty.iima.ac.in/iffm/Indian-Fama-French-Momentum/DATA/"
             "2025-12_FourFactors_and_Market_Returns_Daily_SurvivorshipBiasAdjusted.csv")
 
 PANEL_COLS = [
-    "ticker", "name", "sector", "industry", "score", "score_continuous",
+    "ticker", "yf_symbol", "name", "sector", "industry", "score", "score_continuous",
     "schema_version", "market_cap", "pb", "pe", "price", "beta",
     "quality_pass", "is_stale", "data_as_of", "years_of_data",
     "quality_axis", "growth_axis", "price_axis", "safety_axis",
@@ -199,8 +199,32 @@ def save_prices(p):
     p.to_csv(PRICE_FILE, float_format="%.8g")
 
 
+_YMAP = None
+
+
+def yahoo_map():
+    """ticker -> yf_symbol, read from the universe CSV that universe_updater
+    writes. Numeric BSE codes stopped resolving at Yahoo around 2026-09-20; the
+    alphanumeric symbol still carries full history (yf_bse_map_probe.py). One
+    decision, made in universe_updater, read here — never re-derived."""
+    global _YMAP
+    if _YMAP is None:
+        try:
+            u = pd.read_csv(ARCHIVE, usecols=["ticker", "yf_symbol"]).dropna()
+            _YMAP = dict(zip(u["ticker"].astype(str), u["yf_symbol"].astype(str)))
+        except Exception:
+            _YMAP = {}
+        log(f"[PRICES] yf_symbol map: {sum(k != v for k, v in _YMAP.items())} "
+            f"tickers asked for under a different Yahoo symbol")
+    return _YMAP
+
+
 def fetch_batch(batch, start, end):
-    """{ticker: Series} of adjusted closes. Empty dict on failure."""
+    """{ticker: Series} of adjusted closes, keyed by TICKER even when Yahoo was
+    asked under yf_symbol. Empty dict on failure."""
+    ymap = yahoo_map()
+    back = {ymap.get(t, t): t for t in batch}
+    batch = list(back.keys())
     try:
         hist = yf.download(batch, start=start.isoformat(), end=end.isoformat(),
                            progress=False, auto_adjust=True, group_by="column",
@@ -218,7 +242,7 @@ def fetch_batch(batch, start, end):
         s = close[t].dropna()
         if len(s):
             s.index = pd.to_datetime(s.index).tz_localize(None).normalize()
-            got[str(t)] = s[~s.index.duplicated(keep="last")]
+            got[back.get(str(t), str(t))] = s[~s.index.duplicated(keep="last")]
     return got
 
 
