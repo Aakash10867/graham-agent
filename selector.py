@@ -279,6 +279,22 @@ def _tier1(df: pd.DataFrame, sip_amount: float, rejects: dict) -> pd.DataFrame:
     # adding information. Revisit only if BSE fundamental coverage improves.
     cut(df["sector"].notna(), "no_sector")
 
+    # BSE-ONLY, DECLARED (2026-09-29). Until 2026-09-24 the no_sector cut above
+    # removed every BSE-only listing, because Yahoo never classified numeric
+    # .BO codes. The Yahoo symbol fix (universe_updater._bse_yahoo_symbol) made
+    # 1,639 of them arrive WITH a sector, and 20 became investable overnight —
+    # a selection change nobody decided. This cut restores the product as it
+    # was, on purpose instead of by accident, for two reasons:
+    #   1. app.py builds Kite orders as tradingsymbol = the numeric code
+    #      ("531205"); Kite's BSE tradingsymbol is the alphanumeric one. A
+    #      BSE-only pick would produce a basket that fails at the broker.
+    #   2. Yahoo's BSE coverage broke without warning once already; a stratum
+    #      whose data source is that fragile should not receive new capital
+    #      until it has a record of staying up.
+    # Lifting this is a decision, not a cleanup: fix the Kite symbol first.
+    _bo = df["ticker"].astype(str).str.endswith(".BO")
+    cut(~_bo, "bse_only_declared")
+
     # A row whose `name` is blank or a comma-mangled fragment is a corrupt CSV
     # record, not a company. The universe has held `505685.BO,0P0000CFCT,0` and
     # a broken TRANSRAILL row. Never render one to a user.

@@ -484,9 +484,20 @@ def combine_and_deduplicate(nse_tickers, bse_tickers):
     combined = []
     nse_isins = set()
     nse_names_clean = set()
+    # Third key, added 2026-09-29. The BSE list now comes from the GitHub mirror,
+    # whose ISINs miss ~450 dual-listed companies (2,003 ISIN matches vs 2,451
+    # from BSE's own API) and whose names are TRUNCATED at ~30 characters
+    # ("Amara Raja Energy & Mobility L"), so name matching misses them too.
+    # Those companies used to fall out harmlessly — their numeric .BO codes
+    # returned no data. Once _bse_yahoo_symbol made them resolve, CAMS and
+    # KIRLPNU entered the universe TWICE (as .NS and as a "BSE-only" .BO) and
+    # became pickable twice. A dual listing uses the same symbol on both
+    # exchanges, so the symbol is the key that actually holds.
+    nse_symbols = set()
 
     for t in nse_tickers:
         yf_ticker = f"{t['symbol']}.NS"
+        nse_symbols.add(str(t["symbol"]).strip().upper().replace(" ", ""))
         combined.append({"ticker": yf_ticker, "name": t["name"], "exchange": "NSE",
                          "yf_symbol": yf_ticker})
 
@@ -507,11 +518,17 @@ def combine_and_deduplicate(nse_tickers, bse_tickers):
     bse_only_count = 0
     skipped_isin = 0
     skipped_name = 0
+    skipped_symbol = 0
 
     for t in bse_tickers:
         isin = t.get("isin", "").strip()
         if isin and isin in nse_isins:
             skipped_isin += 1
+            continue
+
+        _sym = str(t.get("symbol") or "").strip().upper().replace(" ", "")
+        if _sym and _sym in nse_symbols:
+            skipped_symbol += 1
             continue
 
         clean_name = (
@@ -530,7 +547,8 @@ def combine_and_deduplicate(nse_tickers, bse_tickers):
                          "yf_symbol": _bse_yahoo_symbol(t.get("symbol"))})
         bse_only_count += 1
 
-    print(f"[DEDUP] Matched by ISIN: {skipped_isin} | Matched by name: {skipped_name}")
+    print(f"[DEDUP] Matched by ISIN: {skipped_isin} | by symbol: {skipped_symbol} "
+          f"| by name: {skipped_name}")
     print(f"[COMBINED] NSE: {len(nse_tickers)} | BSE-only: {bse_only_count} | Total: {len(combined)}")
     return combined
 
