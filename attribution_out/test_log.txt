@@ -1,0 +1,112 @@
+attribution_tests.py — run 2026-09-30 — PROVISIONAL, not for users
+
+==============================================================================
+1. FACTOR REGRESSIONS — Newey-West(5), 95% bands, alpha annualised
+==============================================================================
+
+[v8 | 4F | high] 42 days 2026-07-31..2026-09-29 | R2 0.80
+  alpha     -1.3% /yr   [  -21.3%,   +18.8%]  t=-0.13
+  MKT      +0.926        [  +0.769,   +1.083]  t=+11.97
+  SMB      +0.388        [  +0.030,   +0.745]  t=+2.19
+  HML      +0.235        [  -0.018,   +0.488]  t=+1.88
+  WML      -0.004        [  -0.177,   +0.169]  t=-0.04
+
+[v8 | 5F | high] 42 days 2026-07-31..2026-09-29 | R2 0.81
+  alpha     -1.6% /yr   [  -21.6%,   +18.5%]  t=-0.16
+  MKT      +0.897        [  +0.707,   +1.086]  t=+9.60
+  SMB      +0.284        [  -0.169,   +0.737]  t=+1.27
+  HML      +0.232        [  -0.013,   +0.477]  t=+1.92
+  WML      -0.037        [  -0.236,   +0.163]  t=-0.37
+  LMH      -0.113        [  -0.396,   +0.171]  t=-0.81
+
+[v8 | 5F | low] 42 days 2026-07-31..2026-09-29 | R2 0.95
+  alpha     +7.9% /yr   [   -1.1%,   +17.0%]  t=+1.79
+  MKT      +1.058        [  +0.978,   +1.139]  t=+26.61
+  SMB      +0.690        [  +0.489,   +0.890]  t=+6.98
+  HML      +0.371        [  +0.206,   +0.536]  t=+4.56
+  WML      +0.096        [  -0.024,   +0.216]  t=+1.63
+  LMH      -0.041        [  -0.145,   +0.064]  t=-0.79
+
+[v8 | 5F | spread] 42 days 2026-07-31..2026-09-29 | R2 0.24
+  alpha     -9.5% /yr   [  -29.9%,   +10.9%]  t=-0.94
+  MKT      -0.162        [  -0.390,   +0.066]  t=-1.44
+  SMB      -0.406        [  -0.937,   +0.126]  t=-1.55
+  HML      -0.139        [  -0.417,   +0.139]  t=-1.01
+  WML      -0.133        [  -0.362,   +0.096]  t=-1.18
+  LMH      -0.072        [  -0.303,   +0.159]  t=-0.63
+
+[v1plus | 4F | high] 55 days 2026-07-14..2026-09-29 | R2 0.82
+  alpha     +4.1% /yr   [  -11.0%,   +19.1%]  t=+0.54
+  MKT      +0.969        [  +0.851,   +1.088]  t=+16.43
+  SMB      +0.458        [  +0.219,   +0.697]  t=+3.85
+  HML      +0.234        [  +0.009,   +0.460]  t=+2.08
+  WML      -0.036        [  -0.176,   +0.103]  t=-0.52
+
+[v1plus | 5F | high] 55 days 2026-07-14..2026-09-29 | R2 0.83
+  alpha     +4.4% /yr   [  -11.0%,   +19.9%]  t=+0.57
+  MKT      +0.941        [  +0.785,   +1.097]  t=+12.12
+  SMB      +0.383        [  +0.059,   +0.707]  t=+2.37
+  HML      +0.232        [  +0.009,   +0.454]  t=+2.09
+  WML      -0.058        [  -0.207,   +0.091]  t=-0.78
+  LMH      -0.086        [  -0.322,   +0.151]  t=-0.73
+
+==============================================================================
+PRE-REGISTERED PREDICTIONS vs RESULT — picks portfolio, v8 window, 5-factor
+==============================================================================
+  SMB   predicted positive and large                            got +0.284 [-0.169, +0.737]  -> UNDETERMINED
+  HML   predicted positive, smaller than a raw value screen     got +0.232 [-0.013, +0.477]  -> UNDETERMINED
+  WML   predicted negative                                      got -0.037 [-0.236, +0.163]  -> UNDETERMINED
+  LMH   predicted positive                                      got -0.113 [-0.396, +0.171]  -> UNDETERMINED
+  alpha predicted indistinguishable from zero                   got -1.6% [-21.6%, +18.5%]  -> CONSISTENT
+
+  DISPLAY GATE: days 42 >= 250? False | alpha half-width 20.0% < 5%? False -> PROVISIONAL — do not show users
+
+==============================================================================
+2. IN-HOUSE BETA — picks portfolio vs each benchmark (replaces yfinance beta)
+==============================================================================
+  NIFTYBEES.NS   beta 0.85 [0.53, 1.17] | corr 0.64 | tracking error 7.5%/yr | 41 days
+  MID150BEES.NS  only 3 overlapping days
+  SMALLCAP.NS    beta 0.60 [0.49, 0.72] | corr 0.76 | tracking error 7.9%/yr | 41 days
+  ^CRSLDX        beta 0.85 [0.68, 1.02] | corr 0.77 | tracking error 5.6%/yr | 40 days
+  This band comes from the data and narrows as days accrue — the property
+  the fixed +/-0.15 BETA_UNCERTAINTY on an unexplained yfinance beta lacked.
+
+==============================================================================
+3. EVENT STUDY — market-adjusted CAR, -20..+20 trading days, v8 snapshots, market cap >= Rs 500 Cr
+==============================================================================
+  events: 1519 score changes | with a complete window: 921
+
+  BUSINESS down n= 387
+    CAR -20..-1   +0.82%  [ -0.25%,  +1.90%]
+    AR  day 0     +0.99%  [ +0.69%,  +1.30%]
+    CAR +1..+20   +1.70%  [ +0.60%,  +2.80%]
+
+  BUSINESS up   n= 360
+    CAR -20..-1   +0.19%  [ -0.87%,  +1.24%]
+    AR  day 0     -0.62%  [ -0.87%,  -0.36%]
+    CAR +1..+20   +2.13%  [ +0.88%,  +3.38%]
+
+  PRICE    down n=  91
+    CAR -20..-1   +0.40%  [ -1.97%,  +2.76%]
+    AR  day 0     +1.94%  [ +1.03%,  +2.85%]
+    CAR +1..+20   +4.50%  [ +1.83%,  +7.18%]
+
+  PRICE    up   n=  83
+    CAR -20..-1   +0.53%  [ -2.00%,  +3.05%]
+    AR  day 0     -1.10%  [ -1.69%,  -0.52%]
+    CAR +1..+20   +4.29%  [ +1.66%,  +6.93%]
+
+  Reading it (prediction 6 is about BUSINESS rows only):
+    PRICE rows are the control. A price-driven upgrade happens BECAUSE the
+    price fell, so negative pre-event CAR there is built in, not a finding.
+    BUSINESS upgrade with positive pre-CAR = the market moved first; Kordent
+    read the news late. Flat pre-CAR then a jump or drift after = Kordent early.
+    Bands assume independent events; events share dates, so bands are too narrow.
+
+==============================================================================
+4. HOLDINGS-BASED STYLE — picks' average percentile vs the broad market (>= Rs 100 Cr), per snapshot
+==============================================================================
+  v8      35 snapshots | size pct 0.69 (range 0.67-0.71) | cheapness pct 0.44 (range 0.41-0.47) | median mcap Rs 5,576 Cr
+  v1plus  50 snapshots | size pct 0.70 (range 0.67-0.73) | cheapness pct 0.43 (range 0.41-0.47) | median mcap Rs 6,003 Cr
+  0.50 = the broad-market middle. Above 0.5 on size = bigger than typical;
+  above 0.5 on cheapness = cheaper than typical. Written to style_drift.csv.
