@@ -1,0 +1,46 @@
+  search 'Nifty Midcap 150': NIFTYMIDCAP150.NS    INDEX    NIFTY MIDCAP 150
+  search 'Nifty Midcap 150': MID150BEES.NS        EQUITY   NIP IND ETF MIDCAP 150
+  search 'Nifty Midcap 150': HDFCMID150.NS        EQUITY   HDFCAMC - HDFCMID150
+  search 'Nifty Midcap 150': MID150CASE.NS        EQUITY   ZERODHAAMC - MID150CASE
+  search 'Nifty Midcap 150': MIDQ50ADD.NS         EQUITY   DSPAMC - DSPQ50ETF
+  search 'Nifty Midcap 150': SBIMIDMOM.NS         EQUITY   SBIAMC - SBIMIDMOM
+  search 'Midcap 150 ETF': HDFCMID150.NS        EQUITY   HDFCAMC - HDFCMID150
+  search 'Midcap 150 ETF': MID150CASE.NS        EQUITY   ZERODHAAMC - MID150CASE
+  search 'Midcap 150 ETF': SBINMID150.NS        EQUITY   SBIAMC - SBINMID150
+  search 'Midcap 150 ETF': MID150.NS            EQUITY   KOTAKMAMC - MID150
+  search 'Midcap 150 ETF': GROWWMC150.NS        EQUITY   GROWWAMC - GROWWMC150
+  search 'Nifty Smallcap 250': HDFCSML250.NS        EQUITY   HDFCAMC - HDFCSML250
+  search 'Nifty Smallcap 250': SMALLCAP.NS          EQUITY   MIRAEAMC - SMALLCAP
+  search 'Nifty Smallcap 250': MOSMALL250.NS        EQUITY   MOTILALAMC - MOSMALL250
+  search 'Nifty Smallcap 250': SMALL250.NS          EQUITY   MIRAEAMC - SMALL250
+  search 'Smallcap 250 ETF': HDFCSML250.NS        EQUITY   HDFCAMC - HDFCSML250
+  search 'Smallcap 250 ETF': MOSMALL250.NS        EQUITY   MOTILALAMC - MOSMALL250
+  search 'Smallcap 250 ETF': SMALL250.NS          EQUITY   MIRAEAMC - SMALL250
+  search 'Smallcap 250 ETF': SMALLIETF.NS         EQUITY   ICICIPRAMC - SMALLIETF
+  search 'Smallcap 250 ETF': SBISMLETF.NS         EQUITY   SBIAMC - SBISMLETF
+  search 'Smallcap 250 ETF': GROWWSC250.NS        EQUITY   GROWWAMC - GROWWSC250
+
+reference NIFTYBEES.NS: 128 trading days in 6 months
+
+symbol                days  of ref  last 43  last date   first date
+MID150BEES.NS            4      3%     4/43  2026-09-25  2026-09-22
+SMALLCAP.NS            127     99%    42/43  2026-09-25  2026-03-30
+NIFTYBEES.NS           127     99%    42/43  2026-09-25  2026-03-30
+^CRSLDX                124     96%    41/43  2026-09-28  2026-03-30
+^NSEI                  124     96%    41/43  2026-09-28  2026-03-30
+NIFTYMIDCAP150.NS      124     96%    41/43  2026-09-28  2026-03-30
+HDFCMID150.NS          127     99%    42/43  2026-09-25  2026-03-30
+MID150CASE.NS          127     99%    42/43  2026-09-25  2026-03-30
+MIDQ50ADD.NS           127     99%    42/43  2026-09-25  2026-03-30
+SBIMIDMOM.NS            29     23%    29/43  2026-09-25  2026-08-17
+SBINMID150.NS          121     95%    42/43  2026-09-25  2026-04-06
+MID150.NS               41     32%    41/43  2026-09-25  2026-07-31
+GROWWMC150.NS          127     99%    42/43  2026-09-25  2026-03-30
+HDFCSML250.NS          127     99%    42/43  2026-09-25  2026-03-30
+MOSMALL250.NS          127     99%    42/43  2026-09-25  2026-03-30
+SMALL250.NS             41     32%    41/43  2026-09-25  2026-07-31
+SMALLIETF.NS            70     55%    42/43  2026-09-25  2026-06-22
+SBISMLETF.NS            88     69%    42/43  2026-09-25  2026-05-25
+GROWWSC250.NS          127     99%    42/43  2026-09-25  2026-03-30
+
+Done.
