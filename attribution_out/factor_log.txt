@@ -1,0 +1,29 @@
+attribution_factors.py — built 2026-09-29
+[DATA] dropped 86 dual-listed .BO duplicates across 7 snapshots
+[DATA] price sources: yahoo_full=2852, backtest_cache=144
+[DATA] panel (295232, 36), prices (1424, 2996), calendar 1422 days to 2026-09-29
+[FACTORS] formations: ['2026-06-21', '2026-07-01', '2026-08-03', '2026-09-01']
+  2026-06-21 -> 2026-06-22..2026-07-01  size/value universe 2370 (legs 175)  price-factor universe 990 (mom legs 96, vol legs 54)
+  2026-07-01 -> 2026-07-02..2026-08-03  size/value universe 2315 (legs 170)  price-factor universe 970 (mom legs 103, vol legs 51)
+  2026-08-03 -> 2026-08-04..2026-09-01  size/value universe 2367 (legs 172)  price-factor universe 1009 (mom legs 100, vol legs 57)
+  2026-09-01 -> 2026-09-02..2026-09-29  size/value universe 2394 (legs 180)  price-factor universe 1003 (mom legs 84, vol legs 54)
+[RF] macro_read supplied 72/72 days; rest fell back
+
+[FACTORS] wrote factors_daily.csv: 72 days (2026-06-22 -> 2026-09-29)
+          MKT_RF        SMB        HML        WML        LMH
+count  72.000000  72.000000  72.000000  72.000000  72.000000
+mean   -0.000688   0.000928  -0.000159   0.001422  -0.000406
+std     0.006421   0.003610   0.002972   0.006051   0.005432
+[KORDENT] v8 high (score 4-5): 42 days, 34 cohorts at peak, 82 names per cohort
+[KORDENT] v8 low (score 0-1): 42 days, 34 cohorts at peak, 337 names per cohort
+[KORDENT] v1plus high (score 4-5): 55 days, 49 cohorts at peak, 93 names per cohort
+[KORDENT] v1plus low (score 0-1): 55 days, 49 cohorts at peak, 325 names per cohort
+
+[KORDENT] wrote kordent_daily.csv | v8 window: 42 days (2026-07-31 -> 2026-09-29)
+
+[IIMA] correlation of our price-only factors with IIM-A, daily, 2021-07 to 2025-12 (today's survivors only — survivorship-biased):
+  MKT  vs IIM-A MF  : corr +0.986 on 1030 days | ours 15.1% vol, theirs 14.8% vol
+  SMB  vs IIM-A SMB : corr +0.767 on 1030 days | ours 12.0% vol, theirs 11.2% vol
+  WML  vs IIM-A WML : corr +0.785 on 967 days | ours 9.0% vol, theirs 11.1% vol
+  LMH has no IIM-A counterpart — the library publishes no volatility factor.
+  SMB here sorts on size alone (no book-to-market), so a weaker correlation than MKT/WML is expected, not a defect.
