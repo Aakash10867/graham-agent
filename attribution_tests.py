@@ -198,6 +198,13 @@ def inhouse_beta(kor, prices):
     log("=" * 78)
     out = {}
     k = kor[kor["window"] == "v8"]["high"].dropna()
+    log("  benchmark data check — a stale benchmark breaks every portfolio that uses it:")
+    for b in BENCHMARKS:
+        if b in prices.columns:
+            s_ = prices[b]
+            recent = s_.loc[s_.index >= k.index.min()]
+            log(f"    {b:14s} last price {s_.last_valid_index().date()} | "
+                f"priced {int(recent.notna().sum())}/{len(recent)} days in the window")
     for b in BENCHMARKS:
         if b not in prices.columns:
             log(f"  {b:14s} not in price file")
@@ -253,7 +260,7 @@ def build_events(panel, prices):
 
 def event_study(panel, prices, fac):
     log("\n" + "=" * 78)
-    log(f"3. EVENT STUDY — market-adjusted CAR, -{EVENT_WIN}..+{EVENT_WIN} trading days, "
+    log(f"3. EVENT STUDY — size-matched CAR, -{EVENT_WIN}..+{EVENT_WIN} trading days, "
         f"v8 snapshots, market cap >= Rs {EVENT_MCAP_FLOOR/1e7:.0f} Cr")
     log("=" * 78)
     ev = build_events(panel, prices)
@@ -261,13 +268,23 @@ def event_study(panel, prices, fac):
         log("  no events")
         return {}, pd.DataFrame()
     rets = prices.pct_change(fill_method=None)
-    mkt = fac["MKT"].reindex(rets.index)
-    # The live-window MKT only exists from 2026-06-22; before that, use the
-    # Nifty 500 index so the pre-event window of early events is covered.
-    idx = prices["^CRSLDX"].pct_change(fill_method=None) if "^CRSLDX" in prices else None
-    if idx is not None:
-        mkt = mkt.fillna(idx)
     cal = rets.index
+    # SIZE-MATCHED benchmark (fixed 2026-09-30). The first run adjusted by the
+    # value-weighted market, which is large-cap dominated. Over this window
+    # small and mid caps beat large caps by ~0.09%/day (the SMB mean), so every
+    # event group — upgrades AND downgrades — showed the same +2% post-event
+    # drift. That was size, not the score. Each event is now measured against
+    # the equal-weighted return of stocks in its own size tercile (>= Rs 500 Cr
+    # universe, terciles fixed on the event's own snapshot).
+    v8 = panel[(panel["schema_version"] >= 8)
+               & (pd.to_numeric(panel["market_cap"], errors="coerce") >= EVENT_MCAP_FLOOR)]
+    bench = {}
+    for d, g in v8.groupby("snap_date"):
+        g = g[g["ticker"].isin(rets.columns)].drop_duplicates("ticker")
+        terc = pd.qcut(g["market_cap"].rank(method="first"), 3, labels=False)
+        for q in range(3):
+            members = g.loc[terc == q, "ticker"].tolist()
+            bench[(pd.Timestamp(d), q)] = (rets[members].mean(axis=1, skipna=True), set(members))
     paths = {}
     kept = []
     for _, e in ev.iterrows():
@@ -275,7 +292,11 @@ def event_study(panel, prices, fac):
         if pos - EVENT_WIN < 0 or pos + EVENT_WIN >= len(cal):
             continue
         win = cal[pos - EVENT_WIN: pos + EVENT_WIN + 1]
-        ar = (rets.loc[win, e["ticker"]] - mkt.loc[win]).to_numpy()
+        bq = next(((ser, m) for (d, q), (ser, m) in bench.items()
+                   if d == e["date"] and e["ticker"] in m), None)
+        if bq is None:
+            continue
+        ar = (rets.loc[win, e["ticker"]] - bq[0].loc[win]).to_numpy()
         if np.isnan(ar).mean() > 0.2:
             continue
         paths[len(kept)] = np.nan_to_num(ar)
@@ -308,9 +329,13 @@ def event_study(panel, prices, fac):
                                 "rel_days": rel.tolist()}
     log("\n  Reading it (prediction 6 is about BUSINESS rows only):")
     log("    PRICE rows are the control. A price-driven upgrade happens BECAUSE the")
-    log("    price fell, so negative pre-event CAR there is built in, not a finding.")
+    log("    price fell (and a downgrade because it rose), so a negative day-0 return")
+    log("    on price upgrades and a positive one on price downgrades are built in.")
+    log("    Seeing them confirms the business/price split works; they are not findings.")
     log("    BUSINESS upgrade with positive pre-CAR = the market moved first; Kordent")
     log("    read the news late. Flat pre-CAR then a jump or drift after = Kordent early.")
+    log("    Day 0 of a BUSINESS row can still carry a same-day price move (results day),")
+    log("    so read prediction 6 from the PRE-event CAR, which day 0 cannot contaminate.")
     log("    Bands assume independent events; events share dates, so bands are too narrow.")
     return out, kept
 
