@@ -1,0 +1,105 @@
+attribution_data.py run 2026-09-29 16:58
+[PANEL] 66 snapshot dates (2026-06-21 -> 2026-09-29)
+  2026-06-21  investable=UNKNOWN (KeyError: 'quality_pass')
+  2026-06-21  schema=None  rows=4445  investable=None  investable&score>=4=None
+  2026-06-22  investable=UNKNOWN (KeyError: 'avg_daily_volume')
+  2026-06-22  schema=None  rows=4598  investable=None  investable&score>=4=None
+  2026-06-23  investable=UNKNOWN (KeyError: 'avg_daily_volume')
+  2026-06-23  schema=None  rows=4430  investable=None  investable&score>=4=None
+  2026-06-24  investable=UNKNOWN (KeyError: 'avg_daily_volume')
+  2026-06-24  schema=None  rows=4423  investable=None  investable&score>=4=None
+  2026-06-25  investable=UNKNOWN (KeyError: 'avg_daily_volume')
+  2026-06-25  schema=None  rows=4406  investable=None  investable&score>=4=None
+  2026-06-26  investable=UNKNOWN (KeyError: 'avg_daily_volume')
+  2026-06-26  schema=None  rows=4454  investable=None  investable&score>=4=None
+  2026-06-30  investable=UNKNOWN (KeyError: 'avg_daily_volume')
+  2026-06-30  schema=None  rows=4380  investable=None  investable&score>=4=None
+  2026-07-01  investable=UNKNOWN (KeyError: 'avg_daily_volume')
+  2026-07-01  schema=None  rows=4381  investable=None  investable&score>=4=None
+  2026-07-02  investable=UNKNOWN (KeyError: 'avg_daily_volume')
+  2026-07-02  schema=None  rows=4378  investable=None  investable&score>=4=None
+  2026-07-03  schema=None  rows=4359  investable=726  investable&score>=4=128
+  2026-07-06  schema=None  rows=4545  investable=733  investable&score>=4=129
+  2026-07-07  schema=None  rows=4463  investable=742  investable&score>=4=129
+  2026-07-08  schema=None  rows=4374  investable=728  investable&score>=4=128
+  2026-07-09  schema=None  rows=4438  investable=698  investable&score>=4=100
+  2026-07-10  schema=None  rows=4464  investable=693  investable&score>=4=100
+  2026-07-11  schema=None  rows=4415  investable=688  investable&score>=4=101
+  2026-07-13  schema=1  rows=4618  investable=699  investable&score>=4=101
+  2026-07-14  schema=1  rows=4488  investable=702  investable&score>=4=102
+  2026-07-15  schema=1  rows=4487  investable=702  investable&score>=4=101
+  2026-07-16  schema=1  rows=4483  investable=703  investable&score>=4=104
+  2026-07-17  schema=1  rows=4240  investable=704  investable&score>=4=106
+  2026-07-18  schema=1  rows=4240  investable=703  investable&score>=4=107
+  2026-07-19  schema=2  rows=4482  investable=697  investable&score>=4=99
+  2026-07-20  schema=3  rows=4259  investable=698  investable&score>=4=103
+  2026-07-21  schema=3  rows=4338  investable=693  investable&score>=4=98
+  2026-07-22  schema=3  rows=4480  investable=704  investable&score>=4=103
+  2026-07-23  schema=3  rows=4480  investable=694  investable&score>=4=101
+  2026-07-24  schema=3  rows=4477  investable=697  investable&score>=4=105
+  2026-07-27  schema=4  rows=4626  investable=702  investable&score>=4=86
+  2026-07-28  schema=5  rows=4476  investable=702  investable&score>=4=84
+  2026-07-29  schema=7  rows=4475  investable=701  investable&score>=4=88
+  2026-07-30  schema=8  rows=4476  investable=699  investable&score>=4=84
+  2026-07-31  schema=8  rows=4473  investable=699  investable&score>=4=82
+  2026-08-03  schema=8  rows=4631  investable=706  investable&score>=4=86
+  2026-08-04  schema=8  rows=4482  investable=698  investable&score>=4=82
+  2026-08-05  schema=8  rows=4482  investable=701  investable&score>=4=81
+  2026-08-06  schema=8  rows=4484  investable=711  investable&score>=4=81
+  2026-08-07  schema=8  rows=4483  investable=707  investable&score>=4=80
+  2026-08-10  schema=8  rows=4631  investable=712  investable&score>=4=84
+  2026-08-11  schema=8  rows=4506  investable=713  investable&score>=4=83
+  2026-08-12  schema=8  rows=4502  investable=710  investable&score>=4=84
+  2026-08-13  schema=8  rows=4499  investable=714  investable&score>=4=83
+  2026-08-14  schema=8  rows=4504  investable=728  investable&score>=4=82
+  2026-08-17  schema=8  rows=4607  investable=723  investable&score>=4=79
+  2026-08-19  schema=8  rows=4506  investable=722  investable&score>=4=78
+  2026-08-20  schema=8  rows=4506  investable=729  investable&score>=4=79
+  2026-08-21  schema=8  rows=4505  investable=726  investable&score>=4=78
+  2026-08-24  schema=8  rows=4645  investable=723  investable&score>=4=79
+  2026-08-25  schema=8  rows=4505  investable=729  investable&score>=4=80
+  2026-08-26  schema=8  rows=4506  investable=728  investable&score>=4=77
+  2026-08-27  schema=8  rows=4507  investable=737  investable&score>=4=80
+  2026-08-28  schema=8  rows=4505  investable=728  investable&score>=4=78
+  2026-09-01  schema=8  rows=4502  investable=725  investable&score>=4=82
+  2026-09-02  schema=8  rows=4514  investable=725  investable&score>=4=80
+  2026-09-03  schema=8  rows=4309  investable=729  investable&score>=4=83
+  2026-09-07  schema=8  rows=4631  investable=721  investable&score>=4=82
+  2026-09-10  schema=8  rows=4521  investable=728  investable&score>=4=84
+  2026-09-15  schema=8  rows=4662  investable=726  investable&score>=4=85
+  2026-09-16  schema=8  rows=4538  investable=724  investable&score>=4=87
+  2026-09-18  schema=8  rows=4542  investable=732  investable&score>=4=84
+  2026-09-21  schema=8  rows=4671  investable=717  investable&score>=4=83
+  2026-09-22  schema=8  rows=4381  investable=721  investable&score>=4=84
+  2026-09-24  schema=8  rows=4380  investable=726  investable&score>=4=85
+  2026-09-25  schema=8  rows=4377  investable=727  investable&score>=4=82
+  2026-09-28  schema=8  rows=4387  investable=720  investable&score>=4=84
+  2026-09-29  schema=8  rows=4356  investable=729  investable&score>=4=87
+[PANEL] wrote attribution_out/panel.csv.gz: 295,318 rows x 36 cols
+[IIMA] attribution_out/iima_daily.csv: 8004 rows | columns ['Date', 'SMB', 'HML', 'WML', 'MF', 'RF']
+[IIMA] first and last rows:
+      Date      SMB      HML       WML        MF       RF
+1993-10-01 1.386558 1.394539 -0.518599       NaN      NaN
+1993-10-04 0.457111 0.359427 -0.652693 -0.938504 0.022014
+      Date       SMB      HML       WML        MF       RF
+2025-12-30 -0.426847 0.478476  0.563845 -0.121944 0.014031
+2025-12-31 -0.565043 1.084380 -0.273274  0.885302 0.014031
+[PRICES] universe to price: 3040 tickers (ever >= Rs 100 Cr, or ever investable, plus benchmarks)
+[PRICES] full history: 3040 tickers from 2021-01-01
+[PRICES] yf_symbol map: 1769 tickers asked for under a different Yahoo symbol
+[PRICES] top-up: 7 tickers from 2026-03-26
+[PRICES] 188 failed the full-history fetch: 187 .BO, 1 .NS, 0 other
+[PRICES] retry, short window: 188 tickers from 2026-06-01
+[PRICES] filled 144 from backtest_price_cache.csv
+[PRICES] sources: yahoo_full=2852, backtest_cache=144
+[PRICES] on disk: 2996 tickers x 1424 days (2021-01-01 -> 2026-09-29)
+[PRICES] never priced: 44 (listed in attribution_out/price_failures.txt)
+  benchmark ^NSEI          1419 days from 2021-01-01
+  benchmark ^CRSLDX        1412 days from 2021-01-04
+  benchmark NIFTYBEES.NS   1422 days from 2021-01-01
+  benchmark MID150BEES.NS  5 days from 2026-09-22
+  benchmark SMALLCAP.NS    627 days from 2024-03-18
+
+[COVERAGE] Kordent picks (investable & score>=4) with usable price history
+  distinct picks ever: 189 | priced: 189 | with >= 1 year: 181
+  broad market (ever >= Rs 100 Cr): 3035 | priced: 2991
