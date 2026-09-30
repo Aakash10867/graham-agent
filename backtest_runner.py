@@ -53,6 +53,10 @@ import numpy as np
 import yfinance as yf
 
 import costs
+# The mandate statistics series are decided once, in selector.BENCHMARKS.
+# selector is pure (no Streamlit, no network) — the same property that lets
+# this file call select_portfolio().
+import selector
 
 # ─── Config ───
 ARCHIVE_FILE = "universe_scored.csv"          # the git-versioned snapshot
@@ -352,6 +356,16 @@ def cohort_returns(cohort, calendar, prices):
     # Netted at ONE ETF position, not per-stock. See COST_POSITION_BENCHMARK.
     bench_ret_net = costs.net_return(COST_POSITION_BENCHMARK, bench_ret)
 
+    # Sprint 17: the backtest scores the engine across ALL mandates, so no one
+    # index is its yardstick. NIFTYBEES stays the calendar spine and the
+    # continuity column; each bucket is ALSO measured against the three
+    # mandate statistics series (selector.BENCHMARKS[*]["stats"]).
+    mandate_ret = {}
+    for _k, _v in selector.BENCHMARKS.items():
+        _s = prices.get(_v["stats"])
+        _i, _o = price_asof(_s, d), price_asof(_s, xdate)
+        mandate_ret[_k] = (_o / _i - 1.0) if (_i and _o and _i > 0) else None
+
     rng = random.Random(f"{SAMPLE_SEED}-{d.isoformat()}")
     buckets = bucket_tickers(cohort["scores"], rng)
 
@@ -391,6 +405,8 @@ def cohort_returns(cohort, calendar, prices):
             "alpha_net": (round(float(np.mean(net_base)) - bench_ret_net, 4)
                           if n else None),
             "sampled": b in CONTROL_BUCKETS,
+            **{f"bench_{_k}": (round(_r, 4) if _r is not None else None)
+               for _k, _r in mandate_ret.items()},
         })
     return rows
 
@@ -484,6 +500,12 @@ def aggregate(all_rows, cohorts, matured_cohorts):
             f"not zero, so every net figure here still flatters the strategy.",
             "Gross figures are the raw measurement and are reported unchanged "
             "alongside the net ones; costs are an assumption layered on top.",
+            "BENCHMARKS (Sprint 17): the engine is scored across all mandates, so "
+            "each bucket's mean_excess_vs reports excess over all three mandate "
+            "series (Nifty 50 ETF, Nifty Midcap 150 index, Nifty Smallcap 250 "
+            "ETF). The Midcap 150 series is a price index and omits dividends, so "
+            "excess over it is flattered by roughly the index yield. NIFTYBEES "
+            "remains the calendar spine and the bench_return column for continuity.",
         ],
         "cost_assumption": {
             "rates_verified": costs.RATES_VERIFIED,
@@ -532,6 +554,12 @@ def aggregate(all_rows, cohorts, matured_cohorts):
                     round(float(sub["fwd_return_net_small"].mean()), 4),
                 "total_missing": int(sub["n_missing"].sum()),
                 "sampled": bool(b in CONTROL_BUCKETS),
+                # Sprint 17: gross excess over each mandate's statistics series.
+                "mean_excess_vs": {
+                    _k: (round(float((sub["fwd_return"] - sub[f"bench_{_k}"]).mean()), 4)
+                         if f"bench_{_k}" in sub and sub[f"bench_{_k}"].notna().any()
+                         else None)
+                    for _k in selector.BENCHMARKS},
             }
     summary["ladder_monotonic"] = _is_monotonic(ladder_means)
 
@@ -599,7 +627,7 @@ def main():
             return
 
     print("\n--- STEP 2: Fetch prices (cached, immutable historical closes) ---")
-    all_tickers = set([BENCHMARK])
+    all_tickers = set([BENCHMARK]) | {v["stats"] for v in selector.BENCHMARKS.values()}
     _rng = random.Random(SAMPLE_SEED)
     for c in cohorts:
         for b, tks in bucket_tickers(c["scores"],

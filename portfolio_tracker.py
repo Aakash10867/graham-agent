@@ -90,11 +90,13 @@ def get_india_rfr():
 #   - series ratios (Sharpe, Sortino, IR, semi-dev): bootstrap the daily returns,
 #     then FLOOR the width by 1/sqrt(n) so a calm short sample cannot fake
 #     precision. Narrows continuously as history accrues — no step function.
-#   - beta ratios (Treynor, Jensen, CAPM): no return series behind them (beta is
-#     read from the universe CSV), so propagate a fixed beta band. Does NOT
-#     shrink with age — honest that the uncertainty is in a stale external beta.
+#   - beta ratios (Treynor, Jensen, CAPM): beta is ESTIMATED in-house (Sprint
+#     17) by regressing the portfolio's daily returns on the market, and its
+#     Newey-West 95% band is propagated through each formula. The band narrows
+#     as history accrues. It replaced a fixed ±0.15 on a yfinance beta of
+#     unknown window and reference index.
 MIN_DAYS_SERIES = 20          # below this a series ratio is withheld entirely
-BETA_UNCERTAINTY = 0.15       # absolute noise band on yfinance beta
+NW_LAGS = 5                   # Newey-West lags for the beta band
 _TD = 252
 
 
@@ -134,13 +136,52 @@ def _series_ratio_range(daily_returns, ratio_fn, n_boot=400, block=5,
     return (round(float(mid - half), 3), round(float(mid + half), 3), int(n))
 
 
-def _beta_ratio_range(point_fn, beta, band=BETA_UNCERTAINTY):
-    """Range for a beta-dependent ratio by propagating +-band through the
-    formula. Does not shrink with portfolio age. Returns (low, high) or None."""
-    if beta is None or not math.isfinite(beta):
+def _regression_beta(port_returns, market_returns, lags=NW_LAGS):
+    """In-house beta: OLS slope of portfolio on market daily returns, with a
+    Newey-West 95% band. Returns (beta, low, high, n_days) or None below
+    MIN_DAYS_SERIES aligned days.
+
+    Newey-West, not plain OLS errors: daily portfolio returns are mildly
+    autocorrelated, and plain errors would print a band narrower than the data
+    supports — the same false precision the old fixed ±0.15 was meant to avoid.
+    """
+    import numpy as np
+    j = pd.concat([port_returns.rename("p"), market_returns.rename("m")],
+                  axis=1, join="inner").dropna()
+    n = len(j)
+    if n < MIN_DAYS_SERIES:
+        return None
+    X = np.column_stack([np.ones(n), j["m"].to_numpy()])
+    y = j["p"].to_numpy()
+    XtX_inv = np.linalg.pinv(X.T @ X)
+    b = XtX_inv @ X.T @ y
+    e = y - X @ b
+    S = (X * e[:, None]).T @ (X * e[:, None])
+    for l in range(1, min(lags, n - 1) + 1):
+        G = (X[l:] * e[l:, None]).T @ (X[:-l] * e[:-l, None])
+        S += (1 - l / (lags + 1)) * (G + G.T)
+    se = float(np.sqrt(max((XtX_inv @ S @ XtX_inv)[1, 1], 0.0)))
+    beta = float(b[1])
+    if not math.isfinite(beta):
+        return None
+    return beta, beta - 1.96 * se, beta + 1.96 * se, n
+
+
+def _beta_ratio_range(point_fn, beta_low, beta_high, divides_by_beta=False):
+    """Range for a beta-dependent ratio: evaluate the formula at both ends of
+    the ESTIMATED beta band. Returns (low, high) or None.
+
+    divides_by_beta: for Treynor, a band that contains zero makes the ratio
+    unbounded, and a min/max of the two ends would print a finite range that
+    is false. Return None then."""
+    if beta_low is None or beta_high is None:
+        return None
+    if not (math.isfinite(beta_low) and math.isfinite(beta_high)):
+        return None
+    if divides_by_beta and beta_low <= 0 <= beta_high:
         return None
     vals = []
-    for b in (beta - band, beta + band):
+    for b in (beta_low, beta_high):
         try:
             v = point_fn(b)
         except Exception:
@@ -471,31 +512,10 @@ def compute_portfolio_risk_metrics(holdings, universe_df=None, nifty_history=Non
     if total_value <= 0:
         return {}
 
-    # ── 1. Portfolio Beta = Σ wi × βi (Ch 7) ──
-    weighted_beta = 0.0
-    beta_available = 0
-    for h in holdings:
-        ticker = h.get("ticker", "")
-        weight = (h.get("current_value", 0) or h.get("sip_amount_inr", 0) or 0) / total_value
-        beta = None
-        # Try universe CSV first (faster)
-        if universe_df is not None and not universe_df.empty:
-            row = universe_df[universe_df["ticker"] == ticker]
-            if not row.empty and "beta" in row.columns:
-                beta = row.iloc[0].get("beta")
-        # Fallback to yfinance
-        if beta is None or (hasattr(beta, '__float__') and str(beta) == 'nan'):
-            try:
-                info = yf.Ticker(ticker).info
-                beta = info.get("beta")
-            except Exception:
-                pass
-        if beta is not None and str(beta) != 'nan':
-            weighted_beta += weight * float(beta)
-            beta_available += 1
-
-    if beta_available > 0:
-        result["portfolio_beta"] = round(weighted_beta, 3)
+    # ── 1. Portfolio Beta ──
+    # Estimated in section 4-5 from the return series below (Sprint 17). The
+    # Σ wᵢβᵢ over yfinance betas that lived here is gone, and with it one
+    # yf.Ticker().info network call per holding.
 
     # ── 2. Portfolio returns from price history (1 year) ──
     try:
@@ -544,6 +564,13 @@ def compute_portfolio_risk_metrics(holdings, universe_df=None, nifty_history=Non
         port_annual_return = port_returns.mean() * trading_days
         port_annual_std = port_returns.std() * (trading_days ** 0.5)
 
+        # Coefficient of variation: risk per unit of return. Only meaningful
+        # while the return is positive — a CV on a negative mean is a sign flip
+        # dressed as a ratio, so it is withheld.
+        if (math.isfinite(port_annual_return) and math.isfinite(port_annual_std)
+                and port_annual_return > 0):
+            result["coefficient_of_variation"] = round(port_annual_std / port_annual_return, 3)
+
         # Written unconditionally before; round(nan, 4) is nan.
         if math.isfinite(port_annual_return):
             result["annual_return"] = round(port_annual_return, 4)
@@ -554,84 +581,98 @@ def compute_portfolio_risk_metrics(holdings, universe_df=None, nifty_history=Non
         if port_annual_std > 0:
             result["sharpe_ratio"] = round((port_annual_return - RFR) / port_annual_std, 3)
 
-        # ── 4. Treynor Ratio = (Rp - RFR) / βp (Ch 18) ──
-        # `nan != 0` is True. Without isfinite(), a NaN beta propagates straight
-        # into treynor and jensen_alpha. The other three ratios are already
-        # guarded by `> 0` comparisons, which are False for NaN.
-        _beta = result.get("portfolio_beta")
-        if _beta is not None and math.isfinite(_beta) and _beta != 0:
-            result["treynor_ratio"] = round((port_annual_return - RFR) / result["portfolio_beta"], 4)
-            # Range from BETA uncertainty, not history. Does not shrink with
-            # portfolio age — the uncertainty is in a stale external beta.
-            _tr_rng = _beta_ratio_range(
-                lambda b: (port_annual_return - RFR) / b if b else None, _beta)
-            if _tr_rng:
-                result["treynor_low"], result["treynor_high"] = _tr_rng
-
-        # ── 5. Jensen's Alpha = Rp - RFR - β(Rm - RFR) (Ch 18) ──
-        # Need market return (Nifty 50)
+        # ── 4-5. Market model: in-house beta, Treynor, Jensen (Ch 7, 18) ──
+        # SPRINT 17: beta is ESTIMATED here, from the same daily return series
+        # every other ratio uses, against the same market Jensen and CAPM use
+        # (^NSEI). It replaced Σ wᵢβᵢ over yfinance betas of unknown window and
+        # reference index, which were missing for half the universe
+        # (2,317 of 4,542 on 2026-09-18) and carried a fixed ±0.15 band that
+        # never narrowed. The band now comes from the regression's own
+        # Newey-West standard error and shrinks as days accrue.
         try:
             nifty = yf.download("^NSEI", start=start_date.strftime("%Y-%m-%d"),
                                 end=end_date.strftime("%Y-%m-%d"), progress=False,
                                 auto_adjust=True, group_by="column")
             if not nifty.empty:
-                # yfinance 1.x: nifty["Close"] is a DataFrame. `.mean()` on it
-                # returns a SERIES indexed by Ticker, so market_annual_return,
-                # and therefore jensen_alpha, became Series. The 2026-07-09 log
-                # printed:  alpha=Ticker / ^NSEI -0.087 / dtype: float64
-                # And `nifty_returns.to_frame()` below raised AttributeError on
-                # a DataFrame, which the bare `except: pass` swallowed — so
-                # information_ratio has NEVER been written. Coerce to Series.
+                # yfinance 1.x: nifty["Close"] is a DataFrame (2026-07-09 bug:
+                # Series-valued alpha). Coerce to a Series.
                 _nc = nifty["Close"]
                 if hasattr(_nc, "columns"):
                     _nc = _nc.iloc[:, 0]
-
                 nifty_returns = _nc.pct_change(fill_method=None).dropna()
                 market_annual_return = float(nifty_returns.mean() * trading_days)
                 if math.isfinite(market_annual_return):
                     result["market_return"] = round(market_annual_return, 4)
 
-                _beta = result.get("portfolio_beta")
-                if _beta is not None and math.isfinite(_beta):
+                _fit = _regression_beta(port_returns, nifty_returns)
+                if _fit:
+                    _beta, _blo, _bhi, _bn = _fit
+                    result["portfolio_beta"] = round(_beta, 3)
+                    result["beta_low"], result["beta_high"] = round(_blo, 3), round(_bhi, 3)
+                    result["beta_days"] = _bn
+
+                    # Treynor = (Rp - RFR) / β. A band that reaches zero makes
+                    # the ratio unbounded, so no range is stored then — a
+                    # range of ±∞ is not a range.
+                    if _beta != 0:
+                        result["treynor_ratio"] = round((port_annual_return - RFR) / _beta, 4)
+                        _tr_rng = _beta_ratio_range(
+                            lambda b: (port_annual_return - RFR) / b if b else None,
+                            _blo, _bhi, divides_by_beta=True)
+                        if _tr_rng:
+                            result["treynor_low"], result["treynor_high"] = _tr_rng
+
+                    # Jensen = Rp - RFR - β(Rm - RFR), same β, same market.
                     alpha = port_annual_return - RFR - _beta * (market_annual_return - RFR)
                     if math.isfinite(alpha):
                         result["jensen_alpha"] = round(float(alpha), 4)
+        except Exception as e:
+            print(f"  Market-model metrics failed (non-blocking): {type(e).__name__}: {e}")
 
-                # ── 6. Information Ratio vs the ASSIGNED benchmark ETF (Ch 18) ──
-                # IR measures skill against the alternative the user would
-                # actually have bought — the assigned ETF, not the market index.
-                # jensen_alpha and market_return above stay on ^NSEI (the market
-                # portfolio, for CAPM); only IR switches to the ETF, consistent
-                # with the shadow, which is also priced in the ETF. Falls back to
-                # ^NSEI if no ETF is assigned or its series can't be fetched.
-                bench_returns = nifty_returns
-                bench_annual_return = market_annual_return
-                if benchmark_ticker and benchmark_ticker != "^NSEI":
-                    try:
-                        _etf = yf.download(benchmark_ticker,
-                                           start=start_date.strftime("%Y-%m-%d"),
-                                           end=end_date.strftime("%Y-%m-%d"),
-                                           progress=False, auto_adjust=True,
-                                           group_by="column")
-                        if not _etf.empty:
-                            _ec = _etf["Close"]
-                            if hasattr(_ec, "columns"):
-                                _ec = _ec.iloc[:, 0]
-                            _er = _ec.pct_change(fill_method=None).dropna()
-                            _ear = float(_er.mean() * trading_days)
-                            if len(_er) and math.isfinite(_ear):
-                                bench_returns = _er
-                                bench_annual_return = _ear
-                    except Exception as _ee:
-                        print(f"  IR benchmark {benchmark_ticker} fetch failed, "
-                              f"falling back to ^NSEI: {type(_ee).__name__}: {_ee}")
-
+        # ── 6. Against the ASSIGNED benchmark: IR, tracking error, CML inputs ──
+        # SPRINT 17: the series used for STATISTICS is decided once, in
+        # selector.benchmark_stats_ticker — not the ETF held in the shadow.
+        # MID150BEES.NS (both live portfolios' ETF) had prices on 5 of 43 days
+        # when this was written; its units stay in the shadow, its history no
+        # longer feeds a ratio. And a series with too many holes now says so
+        # (benchmark_status = INCOMPLETE) instead of computing IR from 4 days,
+        # or quietly swapping in ^NSEI as the old fallback did.
+        try:
+            _stats_t = (selector.benchmark_stats_ticker(benchmark_ticker)
+                        if benchmark_ticker else "^NSEI")
+            result["benchmark_stats_ticker"] = _stats_t
+            _bh = yf.download(_stats_t, start=start_date.strftime("%Y-%m-%d"),
+                              end=end_date.strftime("%Y-%m-%d"), progress=False,
+                              auto_adjust=True, group_by="column")
+            _bc = _bh["Close"] if not _bh.empty else pd.Series(dtype=float)
+            if hasattr(_bc, "columns"):
+                _bc = _bc.iloc[:, 0]
+            bench_returns = _bc.pct_change(fill_method=None).dropna()
+            _cov = (bench_returns.index.normalize().isin(port_returns.index.normalize()).sum()
+                    / max(len(port_returns), 1))
+            result["benchmark_coverage"] = round(float(_cov), 3)
+            if _cov < selector.BENCHMARK_MIN_COVERAGE:
+                result["benchmark_status"] = "INCOMPLETE"
+                print(f"  Benchmark {_stats_t} covers {_cov:.0%} of days "
+                      f"(< {selector.BENCHMARK_MIN_COVERAGE:.0%}) — IR, tracking "
+                      f"error and CML withheld, not computed on a fragment.")
+            else:
+                result["benchmark_status"] = "ok"
+                bench_annual_return = float(bench_returns.mean() * trading_days)
+                bench_annual_std = float(bench_returns.std() * (trading_days ** 0.5))
+                if math.isfinite(bench_annual_return):
+                    result["bench_annual_return"] = round(bench_annual_return, 4)
+                if math.isfinite(bench_annual_std):
+                    result["bench_annual_std"] = round(bench_annual_std, 4)
                 aligned = port_returns.to_frame("port").join(
                     bench_returns.to_frame("bench"), how="inner")
                 if not aligned.empty:
                     tracking_diff = aligned["port"] - aligned["bench"]
                     tracking_error = float(tracking_diff.std() * (trading_days ** 0.5))
+                    # Surfaced (Sprint 17): it used to be computed here, fed to
+                    # IR, and thrown away.
                     if math.isfinite(tracking_error) and tracking_error > 0:
+                        result["tracking_error"] = round(tracking_error, 4)
                         ir = (port_annual_return - bench_annual_return) / tracking_error
                         if math.isfinite(ir):
                             result["information_ratio"] = round(float(ir), 3)
@@ -990,6 +1031,15 @@ def run_daily_tracker():
                            # Sprint 12: honest ranges (band, not point) + history depth
                            "sharpe_low", "sharpe_high", "sortino_low", "sortino_high",
                            "treynor_low", "treynor_high", "metrics_history_days",
+                           # Sprint 17: in-house beta and its band; the benchmark
+                           # series statistics were computed against, whether it
+                           # was complete enough to use; tracking error (computed
+                           # for years, never stored); CML inputs; CV.
+                           "beta_low", "beta_high", "beta_days", "market_return",
+                           "benchmark_stats_ticker", "benchmark_coverage",
+                           "benchmark_status", "tracking_error",
+                           "bench_annual_return", "bench_annual_std",
+                           "coefficient_of_variation",
                            # Sprint 16: WHICH risk-free rate produced these, and
                            # whether it was a live reading or the fallback. The
                            # rfr_used column and the PDF stamp that renders it

@@ -2192,10 +2192,51 @@ def build_watch_trace(universe_row) -> dict:
 # by probe_benchmark.py on 2026-07-13.
 # ══════════════════════════════════════════════════════════════════════════
 BENCHMARKS = {
-    "nifty50":     {"ticker": "NIFTYBEES.NS",  "label": "Nifty 50"},
-    "midcap150":   {"ticker": "MID150BEES.NS", "label": "Nifty Midcap 150"},
-    "smallcap250": {"ticker": "SMALLCAP.NS",   "label": "Nifty Smallcap 250"},
+    "nifty50":     {"ticker": "NIFTYBEES.NS",  "label": "Nifty 50",
+                    "stats": "NIFTYBEES.NS"},
+    "midcap150":   {"ticker": "MID150CASE.NS", "label": "Nifty Midcap 150",
+                    "stats": "NIFTYMIDCAP150.NS"},
+    "smallcap250": {"ticker": "SMALLCAP.NS",   "label": "Nifty Smallcap 250",
+                    "stats": "SMALLCAP.NS"},
 }
+
+# ── Sprint 17: WHAT THE USER WOULD HAVE BOUGHT vs WHAT WE MEASURE AGAINST ──
+# Two different objects, split on 2026-09-30.
+#   `ticker` — the ETF the shadow buys units of. Frozen per portfolio at
+#              registration (sip_transactions hold units of THAT fund).
+#   `stats`  — the series beta, tracking error, IR and the CML are computed
+#              against. Decided HERE, once, per mandate.
+# Why: MID150BEES.NS — the registered ETF of BOTH live portfolios — had prices
+# on 5 of the last 43 trading days on Yahoo (benchmark_probe.py, 2026-09-30),
+# its history reset to 2026-09-22. Its units still value the shadow (only the
+# latest price is needed); its history can no longer feed a ratio. The Midcap
+# stats series is the index itself (41/43 days). It is a PRICE index: it omits
+# dividends, which flatters IR by roughly the index yield (<1%/yr). Stated
+# wherever IR is shown; beta and tracking error on daily data are unaffected.
+# New midcap portfolios buy MID150CASE.NS (Zerodha Nifty Midcap 150 ETF). Chosen
+# by benchmark_verify.py on 2026-09-30 against criteria fixed before measuring
+# (history by 2024-06-30, >=95% of days priced, >=Rs 1 Cr/day traded, >=0.98
+# daily correlation with the index): listed 2024-06-18, 100% coverage, Rs 1.72
+# Cr/day, corr 0.987, tracking error 2.6%/yr. HDFCMID150.NS failed history
+# (2025-03) and tracking (0.963); GROWWMC150.NS failed three of four.
+LEGACY_BENCHMARK_TICKERS = {"MID150BEES.NS": "midcap150"}
+BENCHMARK_MIN_COVERAGE = 0.90      # below this, statistics are withheld, not faked
+
+
+def benchmark_key(ticker: str):
+    """Mandate key for a registered benchmark ETF (current or legacy), or None."""
+    for k, v in BENCHMARKS.items():
+        if v["ticker"] == ticker:
+            return k
+    return LEGACY_BENCHMARK_TICKERS.get(ticker)
+
+
+def benchmark_stats_ticker(ticker: str) -> str:
+    """The series statistics are computed against, for a portfolio whose
+    registered benchmark ETF is `ticker`. Unknown tickers measure against
+    themselves — never silently against something else."""
+    k = benchmark_key(ticker)
+    return BENCHMARKS[k]["stats"] if k else ticker
 
 
 def choose_benchmark(ips_policy: dict) -> dict:
@@ -2238,8 +2279,12 @@ def describe_benchmark(port: dict) -> dict:
     registration" rather than print a cap-tilt claim that contradicts the label.
     """
     ticker = (port or {}).get("benchmark_ticker") or "NIFTYBEES.NS"
-    label = next((v["label"] for v in BENCHMARKS.values() if v["ticker"] == ticker), ticker)
+    _k = benchmark_key(ticker)
+    label = BENCHMARKS[_k]["label"] if _k else ticker
     ips = (port.get("portfolio_profile") or {}).get("ips_policy")
     rec = choose_benchmark(ips)
-    reason = rec["reason"] if rec["ticker"] == ticker else "locked at registration"
+    # Same MANDATE, different ETF (MID150BEES -> MID150CASE on 2026-09-30) is
+    # the same benchmark; only a different mandate is "locked at registration".
+    reason = (rec["reason"] if benchmark_key(rec["ticker"]) == _k
+              else "locked at registration")
     return {"ticker": ticker, "label": label, "reason": reason}

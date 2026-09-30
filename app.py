@@ -8995,7 +8995,15 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 ("Treynor ratio", port.get("treynor_ratio"), "{:.4f}",
                                  "Excess return per unit of market risk. Not directly actionable for a SIP."),
                                 ("Information ratio", port.get("information_ratio"), "{:.2f}",
-                                 "Consistency of out/under-performance vs your assigned benchmark ETF."),
+                                 "Consistency of out/under-performance vs your benchmark index. "
+                                 "Measured against a price index that leaves out dividends, "
+                                 "so it reads slightly flattering (under 1 point a year)."),
+                                ("Tracking error", port.get("tracking_error"), "{:.1%}",
+                                 "How far your returns wander from the benchmark's, per year. "
+                                 "Near zero would mean you own the index at extra cost."),
+                                ("Risk per unit of return", port.get("coefficient_of_variation"), "{:.2f}",
+                                 "Volatility divided by return (coefficient of variation). "
+                                 "Lower is better; shown only while the return is positive."),
                                 ("CAPM expected return", port.get("capm_expected_return"), "{:.1%}",
                                  "What the model says you 'should' earn for your beta."),
                                 ("Semi-deviation", port.get("semi_deviation"), "{:.1%}",
@@ -9008,7 +9016,8 @@ elif st.session_state.sb_view_mode == "portfolios":
                             if any(v is not None for _, v, _f, _n in _adv):
                                 with st.expander("Methodology & advanced metrics"):
                                     _ranges = {"Sortino ratio": ("sortino_low", "sortino_high"),
-                                               "Treynor ratio": ("treynor_low", "treynor_high")}
+                                               "Treynor ratio": ("treynor_low", "treynor_high"),
+                                               "Portfolio beta (β)": ("beta_low", "beta_high")}
                                     for _label, _val, _fmt, _note in _adv:
                                         if _val is not None:
                                             _line = f"**{_label}: {_fmt.format(_val)}** — {_note}"
@@ -9029,6 +9038,59 @@ elif st.session_state.sb_view_mode == "portfolios":
                                         st.caption(" · ".join(_foot))
                                     st.caption("Ratios are shown as single points here; the honest "
                                                "ranges that widen on short history are stored per metric.")
+
+                                    # Sprint 17: a benchmark series with too many
+                                    # gaps is REPORTED, never computed around.
+                                    if port.get("benchmark_status") == "INCOMPLETE":
+                                        st.warning(
+                                            f"Benchmark data incomplete "
+                                            f"({(port.get('benchmark_coverage') or 0):.0%} of days "
+                                            f"priced), so information ratio, tracking error and the "
+                                            f"capital market line are withheld rather than computed "
+                                            f"on a fragment.")
+
+                                    # ── Capital market line (Sprint 17) ──
+                                    # Every input already existed: the risk-free
+                                    # rate, the benchmark's return and volatility,
+                                    # the portfolio's. Below the line = volatility
+                                    # the portfolio was not paid for.
+                                    _rf = port.get("rfr_used")
+                                    _rb, _sb = port.get("bench_annual_return"), port.get("bench_annual_std")
+                                    _rp, _sp = port.get("annual_return"), port.get("annual_std")
+                                    if None not in (_rf, _rb, _sb, _rp, _sp) and _sb > 0:
+                                        _slope = (_rb - _rf) / _sb
+                                        _xmax = max(_sb, _sp) * 1.35
+                                        _cml_at_p = _rf + _slope * _sp
+                                        _gap = _rp - _cml_at_p
+                                        _fig = go.Figure()
+                                        _fig.add_trace(go.Scatter(
+                                            x=[0, _xmax], y=[_rf, _rf + _slope * _xmax],
+                                            mode="lines", name="Capital market line",
+                                            line=dict(color="#94A3B8", dash="dash")))
+                                        _fig.add_trace(go.Scatter(
+                                            x=[_sb], y=[_rb], mode="markers+text",
+                                            name=_bench["label"], text=[_bench["label"]],
+                                            textposition="top center",
+                                            marker=dict(size=11, color="#64748B")))
+                                        _fig.add_trace(go.Scatter(
+                                            x=[_sp], y=[_rp], mode="markers+text",
+                                            name="Your portfolio", text=["You"],
+                                            textposition="top center",
+                                            marker=dict(size=13, color="#16A34A" if _gap >= 0 else "#DC2626")))
+                                        _fig.update_layout(
+                                            height=300, margin=dict(l=10, r=10, t=30, b=10),
+                                            xaxis=dict(title="Volatility (per year)", tickformat=".0%"),
+                                            yaxis=dict(title="Return (per year)", tickformat=".0%"),
+                                            showlegend=False,
+                                            title=dict(text="Paid for the risk taken?", font=dict(size=14)))
+                                        st.plotly_chart(_fig, use_container_width=True)
+                                        _where = "above" if _gap >= 0 else "below"
+                                        st.caption(
+                                            f"Your holdings sit **{abs(_gap)*100:.1f} points {_where}** the "
+                                            f"line — the return an index-plus-cash mix earned for the same "
+                                            f"volatility. {'Above means the extra risk was paid for.' if _gap >= 0 else 'Below means volatility that was not paid for.'} "
+                                            f"Simulated on these holdings' prior year, not this "
+                                            f"portfolio's own track record.")
                         else:
                             st.caption(f"Portfolio: {fmt_inr(last_val)} · {days_tracked} days tracked")
 
