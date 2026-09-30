@@ -898,8 +898,12 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
         _div_hex = "#16A34A" if _div_score and _div_score >= 70 else "#F59E0B" if _div_score and _div_score >= 40 else "#DC2626"
         _sharpe_hex = "#16A34A" if _sharpe and _sharpe > 0 else "#DC2626"
         kpi_row3 = [
-            _kpi("Portfolio Beta (β)", f"{_beta:.2f}" if _beta is not None else "—"),
-            _kpi("Sharpe Ratio", f"{_sharpe:.2f}" if _sharpe is not None else "—", _sharpe_hex if _sharpe is not None else "#0F172A"),
+            # Sprint 17: a withheld ratio says WHEN, not just "—".
+            _kpi("Portfolio Beta (β)", f"{_beta:.2f}" if _beta is not None else
+                 f"in {economics.risk_days_left('portfolio_beta', portfolio.get('metrics_history_days'))} days"),
+            _kpi("Sharpe Ratio", f"{_sharpe:.2f}" if _sharpe is not None else
+                 f"in {economics.risk_days_left('sharpe_ratio', portfolio.get('metrics_history_days'))} days",
+                 _sharpe_hex if _sharpe is not None else "#0F172A"),
             _kpi("Diversification", f"{_div_score}/100" if _div_score is not None else "—", _div_hex if _div_score is not None else "#0F172A"),
         ]
         kpi_data.append(kpi_row3)
@@ -1157,6 +1161,18 @@ def generate_portfolio_pdf(portfolio, holdings, history_data=None, alerts=None,
 
     if any(v is not None for v in [_sortino, _treynor, _jensen, _ir, _drawdown, _capm, _semidev]):
         story.append(Paragraph("Risk & Performance Metrics", s_heading))
+        # Sprint 17: ratios come from this portfolio's own history and are
+        # withheld until it can support them — say how long, in one line.
+        _shape_left = economics.risk_days_left("annual_std", _hist_days)
+        _ret_left = economics.risk_days_left("sharpe_ratio", _hist_days)
+        if _shape_left or _ret_left:
+            story.append(Paragraph(
+                f"Built on this portfolio's own history ({_hist_days or 0} trading days so far). "
+                f"Volatility and beta appear after {economics.RISK_SHAPE_MIN_DAYS} days"
+                f"{f' ({_shape_left} to go)' if _shape_left else ''}; return-based ratios "
+                f"(Sharpe, alpha, information ratio) after {economics.RISK_RETURN_MIN_DAYS}"
+                f"{f' ({_ret_left} to go)' if _ret_left else ''}. Shorter histories give "
+                f"numbers that are mostly noise, so they are not shown.", s_body))
 
         if _jensen is not None:
             _jp = _jensen * 100
@@ -8955,8 +8971,14 @@ elif st.session_state.sb_view_mode == "portfolios":
                             _dd_prov = port.get("max_drawdown_provisional")
                             _sharpe_v = port.get("sharpe_ratio")
 
+                            _own_days = port.get("metrics_history_days")
                             if _sharpe_v is not None or _dd is not None:
                                 r1, r2 = st.columns(2)
+                                if _sharpe_v is None:
+                                    r1.metric("Sharpe (risk-adjusted)",
+                                              f"in {economics.risk_days_left('sharpe_ratio', _own_days)} days",
+                                              help=f"Needs {economics.RISK_RETURN_MIN_DAYS} trading days of "
+                                                   f"this portfolio's own history; before that it is noise.")
                                 if _sharpe_v is not None:
                                     r1.metric("Sharpe (risk-adjusted)", f"{_sharpe_v:.2f}",
                                               help="Return earned per unit of total risk. Above 1 is "
@@ -8975,6 +8997,13 @@ elif st.session_state.sb_view_mode == "portfolios":
                                         r2.metric("Max drawdown", f"{_dd*100:.1f}%",
                                                   help="Deepest peak-to-trough fall over the period.")
 
+                            if _jensen is None and _own_days is not None:
+                                st.caption(
+                                    f"📈 Selection alpha — whether the picks beat what their risk "
+                                    f"level predicts — appears after "
+                                    f"{economics.RISK_RETURN_MIN_DAYS} trading days of this "
+                                    f"portfolio's own history "
+                                    f"({economics.risk_days_left('jensen_alpha', _own_days)} to go).")
                             if _jensen is not None:
                                 _jp = _jensen * 100
                                 _dir = "ahead of" if _jp >= 0 else "behind"
@@ -8989,7 +9018,8 @@ elif st.session_state.sb_view_mode == "portfolios":
 
                             _adv = [
                                 ("Portfolio beta (β)", port.get("portfolio_beta"), "{:.2f}",
-                                 "Sensitivity to the market. 1.0 moves with it; below 1 is calmer."),
+                                 "Sensitivity to your benchmark index (not the Nifty 50 — a midcap "
+                                 "portfolio is measured against midcaps). 1.0 moves with it; below 1 is calmer."),
                                 ("Sortino ratio", port.get("sortino_ratio"), "{:.2f}",
                                  "Like Sharpe, but penalises only downside volatility."),
                                 ("Treynor ratio", port.get("treynor_ratio"), "{:.4f}",
@@ -9009,16 +9039,36 @@ elif st.session_state.sb_view_mode == "portfolios":
                                 ("Semi-deviation", port.get("semi_deviation"), "{:.1%}",
                                  "Volatility of below-average returns only."),
                                 ("Annualised return", port.get("annual_return"), "{:.1%}",
-                                 "Simulated on these holdings' PRIOR year — not this portfolio's own track record yet."),
+                                 "This portfolio's own record, time-weighted: SIP deposits are taken "
+                                 "out, so a new instalment is not counted as a gain."),
                                 ("Annualised volatility", port.get("annual_std"), "{:.1%}",
                                  "Standard deviation of returns, annualised."),
                             ]
-                            if any(v is not None for _, v, _f, _n in _adv):
+                            # Sprint 17: the expander always opens, so a pending
+                            # metric can say when it arrives instead of vanishing.
+                            _adv_key = {"Portfolio beta (β)": "portfolio_beta",
+                                        "Sortino ratio": "sortino_ratio",
+                                        "Treynor ratio": "treynor_ratio",
+                                        "Information ratio": "information_ratio",
+                                        "Tracking error": "tracking_error",
+                                        "Risk per unit of return": "coefficient_of_variation",
+                                        "CAPM expected return": "capm_expected_return",
+                                        "Semi-deviation": "semi_deviation",
+                                        "Annualised return": "annual_return",
+                                        "Annualised volatility": "annual_std"}
+                            if _own_days is not None or any(v is not None for _, v, _f, _n in _adv):
                                 with st.expander("Methodology & advanced metrics"):
                                     _ranges = {"Sortino ratio": ("sortino_low", "sortino_high"),
                                                "Treynor ratio": ("treynor_low", "treynor_high"),
                                                "Portfolio beta (β)": ("beta_low", "beta_high")}
                                     for _label, _val, _fmt, _note in _adv:
+                                        if _val is None:
+                                            _left = economics.risk_days_left(
+                                                _adv_key.get(_label, ""), _own_days)
+                                            if _left:
+                                                st.markdown(f"**{_label}:** _available in {_left} "
+                                                            f"more trading days_ — {_note}")
+                                            continue
                                         if _val is not None:
                                             _line = f"**{_label}: {_fmt.format(_val)}** — {_note}"
                                             _rk = _ranges.get(_label)
@@ -9089,8 +9139,8 @@ elif st.session_state.sb_view_mode == "portfolios":
                                             f"Your holdings sit **{abs(_gap)*100:.1f} points {_where}** the "
                                             f"line — the return an index-plus-cash mix earned for the same "
                                             f"volatility. {'Above means the extra risk was paid for.' if _gap >= 0 else 'Below means volatility that was not paid for.'} "
-                                            f"Simulated on these holdings' prior year, not this "
-                                            f"portfolio's own track record.")
+                                            f"This portfolio's own record since it started, "
+                                            f"time-weighted.")
                         else:
                             st.caption(f"Portfolio: {fmt_inr(last_val)} · {days_tracked} days tracked")
 

@@ -372,3 +372,95 @@ def xirr_flows(econ, as_of=None):
     dates.append(as_of or datetime.date.today())
     amounts.append(float(econ.get("total_assets") or 0.0))
     return dates, amounts
+
+# ══════════════════════════════════════════════════════════════════════════
+# THE PORTFOLIO'S OWN RETURN SERIES, AND WHEN A RATIO MAY BE SHOWN (Sprint 17)
+# ══════════════════════════════════════════════════════════════════════════
+# Until 2026-09-30 every risk ratio was computed on the CURRENT holdings' prices
+# over the PRIOR year — "how would today's basket have done last year". That is
+# hindsight twice over: the basket passed today's screens partly BECAUSE of how
+# the last year went, and it is not this portfolio's record at all. Measured:
+# Jensen's alpha of +25% and +16% on two portfolios that were down 1.7% and
+# 2.4% on their own money. The ratios now come from the portfolio's own daily
+# history, and each is withheld until that history can support it.
+
+# Two tiers, because two kinds of statistic converge at very different speeds.
+#   SHAPE — how bumpy: variances and co-movements. The standard error of a
+#   volatility estimate is roughly sigma/sqrt(2n): about ±9% relative at 60
+#   days. Beta and tracking error behave the same way.
+#   RETURN — was it worth it: anything built on the MEAN return. The standard
+#   error of an annualised mean is sigma*sqrt(252/n): at sigma = 19% that is
+#   ±39 points a year at 60 days and ±19 points at 250. Below a year the number
+#   is noise with a decimal point. Even at 250 the stored ranges stay wide, and
+#   they are shown.
+# Realised facts ("worst fall SO FAR") are not estimates and show from day one.
+RISK_SHAPE_MIN_DAYS = 60
+RISK_RETURN_MIN_DAYS = 250
+RISK_MIN_DAYS = {
+    "annual_std": RISK_SHAPE_MIN_DAYS,
+    "semi_deviation": RISK_SHAPE_MIN_DAYS,
+    "portfolio_beta": RISK_SHAPE_MIN_DAYS,
+    "tracking_error": RISK_SHAPE_MIN_DAYS,
+    "annual_return": RISK_RETURN_MIN_DAYS,
+    "sharpe_ratio": RISK_RETURN_MIN_DAYS,
+    "sortino_ratio": RISK_RETURN_MIN_DAYS,
+    "treynor_ratio": RISK_RETURN_MIN_DAYS,
+    "jensen_alpha": RISK_RETURN_MIN_DAYS,
+    "information_ratio": RISK_RETURN_MIN_DAYS,
+    "capm_expected_return": RISK_RETURN_MIN_DAYS,
+    "coefficient_of_variation": RISK_RETURN_MIN_DAYS,
+    "market_return": RISK_RETURN_MIN_DAYS,
+    "bench_annual_return": RISK_RETURN_MIN_DAYS,
+    "bench_annual_std": RISK_RETURN_MIN_DAYS,
+    "max_drawdown": 1,
+}
+
+
+def risk_days_left(metric, history_days):
+    """Trading days of the portfolio's own history still needed before
+    `metric` may be shown; 0 when it may be shown now."""
+    need = RISK_MIN_DAYS.get(metric, RISK_RETURN_MIN_DAYS)
+    return max(0, need - int(history_days or 0))
+
+
+def daily_twr_returns(history_rows):
+    """Time-weighted daily returns from portfolio_history rows, oldest first.
+
+    [(date_str, r), ...], one per consecutive pair of rows. Each row needs
+    date, total_value, cash_balance, cumulative_invested, withdrawn.
+
+    A SIP instalment is new money, not a return. On 2026-09-16 both live
+    portfolios roughly doubled in value on the second instalment; a naive
+    value ratio reports that as a +108% day. Here the day's external flow is
+    taken out first:
+
+        assets_t = total_value_t + cash_balance_t
+        flow_t   = (cumulative_invested_t - cumulative_invested_{t-1})
+                   - (withdrawn_t - withdrawn_{t-1})
+        r_t      = (assets_t - flow_t) / assets_{t-1} - 1
+
+    That treats the flow as arriving at the day's close — the ledger records
+    buys at the close price, so it did. cumulative_invested is external
+    capital (model (a)), so a sell-and-rebuy is not a flow; a withdrawal is.
+    Rows with non-positive prior assets are skipped rather than divided by.
+    A missing tracker day makes one return span two sessions; it is kept, not
+    split, because inventing the intermediate value would be worse.
+    """
+    def _f(x):
+        try:
+            v = float(x)
+            return v if v == v else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    rows = sorted((r for r in history_rows if r.get("date")), key=lambda r: str(r["date"]))
+    out = []
+    for prev, cur in zip(rows[:-1], rows[1:]):
+        a0 = _f(prev.get("total_value")) + _f(prev.get("cash_balance"))
+        a1 = _f(cur.get("total_value")) + _f(cur.get("cash_balance"))
+        flow = ((_f(cur.get("cumulative_invested")) - _f(prev.get("cumulative_invested")))
+                - (_f(cur.get("withdrawn")) - _f(prev.get("withdrawn"))))
+        if a0 <= 0:
+            continue
+        out.append((str(cur["date"]), (a1 - flow) / a0 - 1.0))
+    return out

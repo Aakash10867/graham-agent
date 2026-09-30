@@ -493,254 +493,169 @@ def _usable_close(hist, label):
         return None
 
 
-def compute_portfolio_risk_metrics(holdings, universe_df=None, nifty_history=None,
-                                   benchmark_ticker=None):
-    """Compute portfolio-level risk and performance metrics from Reilly & Brown.
-    Ch 7: CAPM, Beta, Alpha (Jensen). Ch 18: Sharpe, Treynor, Sortino, IR.
+# Every field compute_own_risk_metrics owns. Written on EVERY run — as None when
+# a metric is withheld — so a value computed by the retired simulated method, or
+# on an earlier day's longer history, can never linger in the row.
+OWN_RISK_KEYS = [
+    "portfolio_beta", "beta_low", "beta_high", "beta_days",
+    "sharpe_ratio", "sharpe_low", "sharpe_high",
+    "sortino_ratio", "sortino_low", "sortino_high",
+    "treynor_ratio", "treynor_low", "treynor_high",
+    "jensen_alpha", "information_ratio", "capm_expected_return",
+    "max_drawdown", "max_drawdown_provisional", "semi_deviation",
+    "annual_return", "annual_std", "coefficient_of_variation",
+    "market_return", "tracking_error",
+    "bench_annual_return", "bench_annual_std",
+    "benchmark_stats_ticker", "benchmark_coverage", "benchmark_status",
+    "metrics_history_days", "rfr_used", "rfr_status",
+]
+DRAWDOWN_PROVISIONAL_DAYS = 126    # ~6 months; the label app.py already renders
 
-    Returns dict with all computed metrics, or empty dict on failure."""
+
+def compute_own_risk_metrics(history_rows, benchmark_ticker=None):
+    """Risk and performance from the portfolio's OWN daily history (Sprint 17).
+
+    Replaces compute_portfolio_risk_metrics, which priced the CURRENT holdings
+    over the PRIOR year — hindsight: today's basket passed today's screens
+    partly because of that year. Every figure here is this portfolio's record,
+    time-weighted net of SIP flows (economics.daily_twr_returns), and each is
+    withheld until the history reaches economics.RISK_MIN_DAYS for it.
+
+    The "market" for beta, Jensen, Treynor and CAPM is the portfolio's own
+    benchmark statistics series (selector.benchmark_stats_ticker). Measuring a
+    midcap portfolio against the Nifty 50 booked a year of midcap-over-largecap
+    as selection skill (+25% "alpha" on 2026-09-30) — the benchmark
+    specification error the Sprint 17 plan names.
+    """
+    import numpy as np
     import yfinance as yf
-    from datetime import datetime, timedelta
 
-    if not holdings or len(holdings) == 0:
-        return {}
+    RFR, RFR_STATUS = get_india_rfr_status()
+    out = {k: None for k in OWN_RISK_KEYS}
+    out["rfr_used"], out["rfr_status"] = round(RFR, 6), RFR_STATUS
 
-    RFR, RFR_STATUS = get_india_rfr_status()  # single source of truth
-    result = {"rfr_used": round(RFR, 6), "rfr_status": RFR_STATUS}
+    twr = economics.daily_twr_returns(history_rows)
+    n = len(twr)
+    out["metrics_history_days"] = n
+    if n == 0:
+        return out
+    r = pd.Series([x for _, x in twr],
+                  index=pd.to_datetime([d for d, _ in twr])).sort_index()
 
-    total_value = sum(h.get("current_value", 0) or h.get("sip_amount_inr", 0) or 0 for h in holdings)
-    if total_value <= 0:
-        return {}
+    def ok(metric):
+        return economics.risk_days_left(metric, n) == 0
 
-    # ── 1. Portfolio Beta ──
-    # Estimated in section 4-5 from the return series below (Sprint 17). The
-    # Σ wᵢβᵢ over yfinance betas that lived here is gone, and with it one
-    # yf.Ticker().info network call per holding.
+    td = 252
+    # ── Realised: worst fall so far (a fact, shown from day one) ──
+    cum = (1 + r).cumprod()
+    dd = float((cum / cum.cummax() - 1).min())
+    if math.isfinite(dd):
+        out["max_drawdown"] = round(min(dd, 0.0), 4)
+        out["max_drawdown_provisional"] = n < DRAWDOWN_PROVISIONAL_DAYS
 
-    # ── 2. Portfolio returns from price history (1 year) ──
+    # ── Benchmark over the SAME intervals ──
+    # Priced at each history date, so a missing tracker day spans the same two
+    # sessions on both sides.
+    b = None
+    stats_t = selector.benchmark_stats_ticker(benchmark_ticker) if benchmark_ticker else "^NSEI"
+    out["benchmark_stats_ticker"] = stats_t
     try:
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=365)
-        tickers = [h["ticker"] for h in holdings]
-        weights = [(h.get("current_value", 0) or h.get("sip_amount_inr", 0) or 0) / total_value for h in holdings]
-
-        # Fetch daily returns
-        # yfinance 1.x returns MultiIndex columns even for ONE ticker, so
-        # hist["Close"] is a one-column DataFrame, not a Series. The old
-        # `.to_frame()` branch below assumed a Series and would raise.
-        hist = yf.download(tickers, start=start_date.strftime("%Y-%m-%d"),
-                           end=end_date.strftime("%Y-%m-%d"), progress=False,
-                           auto_adjust=True, group_by="column")
-        if hist.empty:
-            return result
-
-        daily_prices = hist["Close"]
-        if isinstance(daily_prices, pd.Series):     # older yfinance
-            daily_prices = daily_prices.to_frame(tickers[0])
-
-        # pandas 3.0 changed pct_change()'s fill_method default from 'pad' to
-        # None. Under 2.x a stale price was forward-filled into a ZERO return;
-        # under 3.0 it becomes NaN. Pin the semantics explicitly — 3.0's
-        # behaviour is the correct one, and we want it by choice, not by
-        # accident of which pandas pip resolved this morning.
-        # dropna(how="all") not dropna(): one gappy ticker must not delete
-        # that date for every other ticker.
-        daily_returns = daily_prices.pct_change(fill_method=None).dropna(how="all")
-        if daily_returns.empty:
-            return result
-
-        # Portfolio daily returns (weighted)
-        port_returns = None
-        for i, ticker in enumerate(tickers):
-            if ticker in daily_returns.columns:
-                col = daily_returns[ticker] * weights[i]
-                port_returns = col if port_returns is None else port_returns + col
-
-        if port_returns is None:
-            return result
-
-        # Annualize
-        trading_days = 252
-        port_annual_return = port_returns.mean() * trading_days
-        port_annual_std = port_returns.std() * (trading_days ** 0.5)
-
-        # Coefficient of variation: risk per unit of return. Only meaningful
-        # while the return is positive — a CV on a negative mean is a sign flip
-        # dressed as a ratio, so it is withheld.
-        if (math.isfinite(port_annual_return) and math.isfinite(port_annual_std)
-                and port_annual_return > 0):
-            result["coefficient_of_variation"] = round(port_annual_std / port_annual_return, 3)
-
-        # Written unconditionally before; round(nan, 4) is nan.
-        if math.isfinite(port_annual_return):
-            result["annual_return"] = round(port_annual_return, 4)
-        if math.isfinite(port_annual_std):
-            result["annual_std"] = round(port_annual_std, 4)
-
-        # ── 3. Sharpe Ratio = (Rp - RFR) / σp (Ch 18) ──
-        if port_annual_std > 0:
-            result["sharpe_ratio"] = round((port_annual_return - RFR) / port_annual_std, 3)
-
-        # ── 4-5. Market model: in-house beta, Treynor, Jensen (Ch 7, 18) ──
-        # SPRINT 17: beta is ESTIMATED here, from the same daily return series
-        # every other ratio uses, against the same market Jensen and CAPM use
-        # (^NSEI). It replaced Σ wᵢβᵢ over yfinance betas of unknown window and
-        # reference index, which were missing for half the universe
-        # (2,317 of 4,542 on 2026-09-18) and carried a fixed ±0.15 band that
-        # never narrowed. The band now comes from the regression's own
-        # Newey-West standard error and shrinks as days accrue.
-        try:
-            nifty = yf.download("^NSEI", start=start_date.strftime("%Y-%m-%d"),
-                                end=end_date.strftime("%Y-%m-%d"), progress=False,
-                                auto_adjust=True, group_by="column")
-            if not nifty.empty:
-                # yfinance 1.x: nifty["Close"] is a DataFrame (2026-07-09 bug:
-                # Series-valued alpha). Coerce to a Series.
-                _nc = nifty["Close"]
-                if hasattr(_nc, "columns"):
-                    _nc = _nc.iloc[:, 0]
-                nifty_returns = _nc.pct_change(fill_method=None).dropna()
-                market_annual_return = float(nifty_returns.mean() * trading_days)
-                if math.isfinite(market_annual_return):
-                    result["market_return"] = round(market_annual_return, 4)
-
-                _fit = _regression_beta(port_returns, nifty_returns)
-                if _fit:
-                    _beta, _blo, _bhi, _bn = _fit
-                    result["portfolio_beta"] = round(_beta, 3)
-                    result["beta_low"], result["beta_high"] = round(_blo, 3), round(_bhi, 3)
-                    result["beta_days"] = _bn
-
-                    # Treynor = (Rp - RFR) / β. A band that reaches zero makes
-                    # the ratio unbounded, so no range is stored then — a
-                    # range of ±∞ is not a range.
-                    if _beta != 0:
-                        result["treynor_ratio"] = round((port_annual_return - RFR) / _beta, 4)
-                        _tr_rng = _beta_ratio_range(
-                            lambda b: (port_annual_return - RFR) / b if b else None,
-                            _blo, _bhi, divides_by_beta=True)
-                        if _tr_rng:
-                            result["treynor_low"], result["treynor_high"] = _tr_rng
-
-                    # Jensen = Rp - RFR - β(Rm - RFR), same β, same market.
-                    alpha = port_annual_return - RFR - _beta * (market_annual_return - RFR)
-                    if math.isfinite(alpha):
-                        result["jensen_alpha"] = round(float(alpha), 4)
-        except Exception as e:
-            print(f"  Market-model metrics failed (non-blocking): {type(e).__name__}: {e}")
-
-        # ── 6. Against the ASSIGNED benchmark: IR, tracking error, CML inputs ──
-        # SPRINT 17: the series used for STATISTICS is decided once, in
-        # selector.benchmark_stats_ticker — not the ETF held in the shadow.
-        # MID150BEES.NS (both live portfolios' ETF) had prices on 5 of 43 days
-        # when this was written; its units stay in the shadow, its history no
-        # longer feeds a ratio. And a series with too many holes now says so
-        # (benchmark_status = INCOMPLETE) instead of computing IR from 4 days,
-        # or quietly swapping in ^NSEI as the old fallback did.
-        try:
-            _stats_t = (selector.benchmark_stats_ticker(benchmark_ticker)
-                        if benchmark_ticker else "^NSEI")
-            result["benchmark_stats_ticker"] = _stats_t
-            _bh = yf.download(_stats_t, start=start_date.strftime("%Y-%m-%d"),
-                              end=end_date.strftime("%Y-%m-%d"), progress=False,
-                              auto_adjust=True, group_by="column")
-            _bc = _bh["Close"] if not _bh.empty else pd.Series(dtype=float)
-            if hasattr(_bc, "columns"):
-                _bc = _bc.iloc[:, 0]
-            bench_returns = _bc.pct_change(fill_method=None).dropna()
-            _cov = (bench_returns.index.normalize().isin(port_returns.index.normalize()).sum()
-                    / max(len(port_returns), 1))
-            result["benchmark_coverage"] = round(float(_cov), 3)
-            if _cov < selector.BENCHMARK_MIN_COVERAGE:
-                result["benchmark_status"] = "INCOMPLETE"
-                print(f"  Benchmark {_stats_t} covers {_cov:.0%} of days "
-                      f"(< {selector.BENCHMARK_MIN_COVERAGE:.0%}) — IR, tracking "
-                      f"error and CML withheld, not computed on a fragment.")
-            else:
-                result["benchmark_status"] = "ok"
-                bench_annual_return = float(bench_returns.mean() * trading_days)
-                bench_annual_std = float(bench_returns.std() * (trading_days ** 0.5))
-                if math.isfinite(bench_annual_return):
-                    result["bench_annual_return"] = round(bench_annual_return, 4)
-                if math.isfinite(bench_annual_std):
-                    result["bench_annual_std"] = round(bench_annual_std, 4)
-                aligned = port_returns.to_frame("port").join(
-                    bench_returns.to_frame("bench"), how="inner")
-                if not aligned.empty:
-                    tracking_diff = aligned["port"] - aligned["bench"]
-                    tracking_error = float(tracking_diff.std() * (trading_days ** 0.5))
-                    # Surfaced (Sprint 17): it used to be computed here, fed to
-                    # IR, and thrown away.
-                    if math.isfinite(tracking_error) and tracking_error > 0:
-                        result["tracking_error"] = round(tracking_error, 4)
-                        ir = (port_annual_return - bench_annual_return) / tracking_error
-                        if math.isfinite(ir):
-                            result["information_ratio"] = round(float(ir), 3)
-        except Exception as e:
-            # NEVER `pass` here again. This block hid a broken information_ratio
-            # for the entire life of the feature.
-            print(f"  Benchmark metrics failed (non-blocking): {type(e).__name__}: {e}")
-
-        # ── 7. Sortino Ratio = (Rp - τ) / DRp (Ch 18) ──
-        # τ = target return, use RFR; DR = downside deviation
-        daily_rfr = RFR / trading_days
-        downside = port_returns[port_returns < daily_rfr]
-        if len(downside) > 0:
-            downside_dev = ((downside - daily_rfr) ** 2).mean() ** 0.5 * (trading_days ** 0.5)
-            if downside_dev > 0:
-                result["sortino_ratio"] = round((port_annual_return - RFR) / downside_dev, 3)
-
-        # ── 7b. HONEST RANGES for the series ratios ──────────────────────
-        # A Sharpe/Sortino from N days is an INTERVAL, not a point. Report a
-        # band that narrows continuously as history accrues (no "now we're
-        # confident" step) and is width-floored by 1/sqrt(N) so a calm short
-        # sample cannot fake precision. Stored as *_low/*_high/*_days so the
-        # report renders "0.8-2.1 (34 days)" instead of a false-precise point.
-        try:
-            _pr = port_returns.dropna().to_numpy()
-            _sharpe_fn = lambda r: (
-                (r.mean() * trading_days - RFR)
-                / (r.std() * (trading_days ** 0.5))
-                if r.std() > 0 else float("nan"))
-
-            def _sortino_fn(r):
-                mu = r.mean() * trading_days
-                dn = r[r < daily_rfr]
-                if len(dn) == 0:
-                    return float("nan")
-                dd = ((dn - daily_rfr) ** 2).mean() ** 0.5 * (trading_days ** 0.5)
-                return (mu - RFR) / dd if dd > 0 else float("nan")
-
-            _rng = _series_ratio_range(_pr, _sharpe_fn)
-            if _rng:
-                result["sharpe_low"], result["sharpe_high"], result["metrics_history_days"] = _rng
-            _rng = _series_ratio_range(_pr, _sortino_fn)
-            if _rng:
-                result["sortino_low"], result["sortino_high"], _ = _rng
-        except Exception as _e:
-            print(f"  Range computation failed (non-blocking): {type(_e).__name__}: {_e}")
-
-        # ── 8. Semi-deviation (Ch 6) ──
-        below_mean = port_returns[port_returns < port_returns.mean()]
-        if len(below_mean) > 0:
-            semi_dev = below_mean.std() * (trading_days ** 0.5)
-            result["semi_deviation"] = round(semi_dev, 4)
-
-        # ── 9. Max drawdown ──
-        cumulative = (1 + port_returns).cumprod()
-        peak = cumulative.cummax()
-        drawdown = (cumulative - peak) / peak
-        result["max_drawdown"] = round(drawdown.min(), 4)
-
-        # ── 10. CAPM expected return = RFR + β(Rm - RFR) (Ch 7) ──
-        if "portfolio_beta" in result and "market_return" in result:
-            expected = RFR + result["portfolio_beta"] * (result["market_return"] - RFR)
-            result["capm_expected_return"] = round(expected, 4)
-
+        dates = pd.to_datetime(sorted(str(x["date"]) for x in history_rows if x.get("date")))
+        h = yf.download(stats_t, start=(dates.min() - pd.Timedelta(days=10)).strftime("%Y-%m-%d"),
+                        end=(dates.max() + pd.Timedelta(days=2)).strftime("%Y-%m-%d"),
+                        progress=False, auto_adjust=True, group_by="column")
+        c = h["Close"] if not h.empty else pd.Series(dtype=float)
+        if hasattr(c, "columns"):
+            c = c.iloc[:, 0]
+        c = c.dropna()
+        c.index = pd.to_datetime(c.index).tz_localize(None).normalize()
+        exact = dates.isin(c.index)
+        cov = float(exact.mean()) if len(dates) else 0.0
+        out["benchmark_coverage"] = round(cov, 3)
+        if cov < selector.BENCHMARK_MIN_COVERAGE:
+            out["benchmark_status"] = "INCOMPLETE"
+            print(f"  Benchmark {stats_t} priced on {cov:.0%} of this portfolio's "
+                  f"days — benchmark-relative figures withheld.")
+        else:
+            out["benchmark_status"] = "ok"
+            px = c.reindex(c.index.union(dates)).ffill().reindex(dates)
+            b = (px / px.shift(1) - 1).reindex(r.index)
     except Exception as e:
-        print(f"  Risk metrics computation error (non-blocking): {e}")
+        out["benchmark_status"] = "INCOMPLETE"
+        print(f"  Benchmark fetch failed (non-blocking): {type(e).__name__}: {e}")
 
-    return result
+    # ── SHAPE tier: how bumpy ──
+    std = float(r.std() * np.sqrt(td))
+    if ok("annual_std") and math.isfinite(std):
+        out["annual_std"] = round(std, 4)
+    below = r[r < r.mean()]
+    if ok("semi_deviation") and len(below) > 1:
+        out["semi_deviation"] = round(float(below.std() * np.sqrt(td)), 4)
+    if b is not None and ok("portfolio_beta"):
+        fit = _regression_beta(r, b)
+        if fit:
+            out["portfolio_beta"] = round(fit[0], 3)
+            out["beta_low"], out["beta_high"] = round(fit[1], 3), round(fit[2], 3)
+            out["beta_days"] = fit[3]
+    if b is not None and ok("tracking_error"):
+        te = float((r - b).dropna().std() * np.sqrt(td))
+        if math.isfinite(te) and te > 0:
+            out["tracking_error"] = round(te, 4)
+
+    # ── RETURN tier: was it worth it ──
+    if ok("annual_return"):
+        ann = float(r.mean() * td)
+        out["annual_return"] = round(ann, 4)
+        if std > 0:
+            out["sharpe_ratio"] = round((ann - RFR) / std, 3)
+        rng_ = _series_ratio_range(
+            r.to_numpy(), lambda x: ((x.mean() * td - RFR) / (x.std() * np.sqrt(td))
+                                     if x.std() > 0 else float("nan")))
+        if rng_:
+            out["sharpe_low"], out["sharpe_high"] = rng_[0], rng_[1]
+        d_rfr = RFR / td
+        dn = r[r < d_rfr]
+        if len(dn):
+            ddev = float(((dn - d_rfr) ** 2).mean() ** 0.5 * np.sqrt(td))
+            if ddev > 0:
+                out["sortino_ratio"] = round((ann - RFR) / ddev, 3)
+
+        def _sortino(x):
+            d = x[x < d_rfr]
+            if not len(d):
+                return float("nan")
+            v = ((d - d_rfr) ** 2).mean() ** 0.5 * np.sqrt(td)
+            return (x.mean() * td - RFR) / v if v > 0 else float("nan")
+        rng_ = _series_ratio_range(r.to_numpy(), _sortino)
+        if rng_:
+            out["sortino_low"], out["sortino_high"] = rng_[0], rng_[1]
+        # CV = std / mean explodes as the mean nears zero (a synthetic check
+        # returned 1,940 on a ~0% year). Shown only while the annualised return
+        # is at least two standard errors above zero, i.e. reliably positive.
+        _se = std / np.sqrt(n / td) if n else float("inf")
+        if std > 0 and ann > 2 * _se:
+            out["coefficient_of_variation"] = round(std / ann, 3)
+
+        if b is not None:
+            bm = float(b.dropna().mean() * td)
+            bs = float(b.dropna().std() * np.sqrt(td))
+            out["market_return"] = round(bm, 4)
+            out["bench_annual_return"] = round(bm, 4)
+            out["bench_annual_std"] = round(bs, 4)
+            if out["tracking_error"]:
+                out["information_ratio"] = round((ann - bm) / out["tracking_error"], 3)
+            beta = out["portfolio_beta"]
+            if beta is not None:
+                out["jensen_alpha"] = round(ann - RFR - beta * (bm - RFR), 4)
+                out["capm_expected_return"] = round(RFR + beta * (bm - RFR), 4)
+                if beta != 0:
+                    out["treynor_ratio"] = round((ann - RFR) / beta, 4)
+                    tr = _beta_ratio_range(lambda bb: (ann - RFR) / bb if bb else None,
+                                           out["beta_low"], out["beta_high"],
+                                           divides_by_beta=True)
+                    if tr:
+                        out["treynor_low"], out["treynor_high"] = tr
+    return out
  
 def run_daily_tracker():
     print("Initiating Kordent Daily Portfolio Audit...")
@@ -1020,35 +935,19 @@ def run_daily_tracker():
               f"{_xirr_str} | Div {_div_label}{_div_score}")
         # Sprint 11: Portfolio risk & performance metrics (Reilly & Brown Ch 7, 18)
         try:
-            _risk = compute_portfolio_risk_metrics(
-                port_holdings, universe_df,
-                benchmark_ticker=port.get("benchmark_ticker"))
+            # Sprint 17: the portfolio's OWN history (net of SIP flows), not the
+            # current holdings priced over the prior year. Today's row was
+            # upserted above, so it is included.
+            _hist = supabase.table("portfolio_history").select(
+                "date, total_value, cash_balance, cumulative_invested, withdrawn"
+            ).eq("portfolio_id", port_id).order("date").execute().data or []
+            _risk = compute_own_risk_metrics(
+                _hist, benchmark_ticker=port.get("benchmark_ticker"))
             if _risk:
-                _risk_update = {}
-                for k in ["portfolio_beta", "sharpe_ratio", "sortino_ratio", "jensen_alpha",
-                           "treynor_ratio", "information_ratio", "max_drawdown",
-                           "capm_expected_return", "semi_deviation", "annual_return", "annual_std",
-                           # Sprint 12: honest ranges (band, not point) + history depth
-                           "sharpe_low", "sharpe_high", "sortino_low", "sortino_high",
-                           "treynor_low", "treynor_high", "metrics_history_days",
-                           # Sprint 17: in-house beta and its band; the benchmark
-                           # series statistics were computed against, whether it
-                           # was complete enough to use; tracking error (computed
-                           # for years, never stored); CML inputs; CV.
-                           "beta_low", "beta_high", "beta_days", "market_return",
-                           "benchmark_stats_ticker", "benchmark_coverage",
-                           "benchmark_status", "tracking_error",
-                           "bench_annual_return", "bench_annual_std",
-                           "coefficient_of_variation",
-                           # Sprint 16: WHICH risk-free rate produced these, and
-                           # whether it was a live reading or the fallback. The
-                           # rfr_used column and the PDF stamp that renders it
-                           # both already existed; nothing ever wrote the value,
-                           # so the stamp had never once appeared. A live rate
-                           # makes stamping it mandatory rather than merely nice.
-                           "rfr_used", "rfr_status"]:
-                    if k in _risk:
-                        _risk_update[k] = _risk[k]
+                # EVERY owned key, None included: a withheld metric CLEARS its
+                # column instead of leaving yesterday's — or the retired
+                # simulated method's — number standing.
+                _risk_update = {k: _risk.get(k) for k in OWN_RISK_KEYS}
                 if _risk_update:
                     supabase.table("portfolios").update(_json_safe(_risk_update)).eq("id", port_id).execute()
                 _rfr_str = (f"  RFR: {_risk.get('rfr_used', 0)*100:.3f}% "
@@ -1057,7 +956,10 @@ def run_daily_tracker():
                 _beta_str = f" | β={_risk.get('portfolio_beta', '?')}"
                 _sharpe_str = f" | Sharpe={_risk.get('sharpe_ratio', '?')}"
                 _alpha_str = f" | α={_risk.get('jensen_alpha', '?')}"
-                print(f"  Risk metrics: {_beta_str}{_sharpe_str}{_alpha_str}")
+                _hd = _risk.get("metrics_history_days") or 0
+                print(f"  Risk metrics ({_hd} days of own history; ratios need "
+                      f"{economics.RISK_SHAPE_MIN_DAYS}/{economics.RISK_RETURN_MIN_DAYS}):"
+                      f"{_beta_str}{_sharpe_str}{_alpha_str}")
         except Exception as e:
             print(f"  Risk metrics failed (non-blocking): {e}")
         _port_values[port_id] = (round(econ["total_assets"], 2), round(return_pct, 2), _p_xirr, _n_xirr)

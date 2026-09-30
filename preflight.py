@@ -529,6 +529,43 @@ def g2_wiring():
     check("surviving-cost-basis denominator is gone", not hits, str(hits))
 
 
+def g4_own_returns():
+    """The portfolio's own return series (Sprint 17). No DB, no network.
+
+    Pins the one property the whole display rests on: money moving in or out
+    is not a return. The 2026-09-16 SIP instalment roughly doubled both live
+    portfolios; counted as performance it is a +108% day.
+    """
+    section("G4. own-history returns and display gates")
+    row = lambda d, v, inv, cash=0.0, w=0.0: {"date": d, "total_value": v,
+                                               "cash_balance": cash,
+                                               "cumulative_invested": inv,
+                                               "withdrawn": w}
+    # SIP day: 4,609.04 -> 9,595.39 with 4,941.91 of new money = +0.96%, not +108%.
+    r = economics.daily_twr_returns([row("2026-09-15", 4609.04, 4922.42),
+                                     row("2026-09-16", 9595.39, 9864.33)])
+    check("a SIP instalment is not a return",
+          len(r) == 1 and abs(r[0][1] - 0.00964) < 1e-4, f"{r}")
+    # Withdrawal: 10,000 -> 5,000 because 5,000 left for the bank = 0%.
+    r = economics.daily_twr_returns([row("2026-01-01", 10000, 10000),
+                                     row("2026-01-02", 5000, 10000, w=5000)])
+    check("a withdrawal is not a loss", abs(r[0][1]) < 1e-12, f"{r}")
+    # Sell and hold cash: assets unchanged, external capital unchanged = 0%.
+    r = economics.daily_twr_returns([row("2026-01-01", 10000, 10000),
+                                     row("2026-01-02", 4000, 10000, cash=6000)])
+    check("a sale into cash is not a loss", abs(r[0][1]) < 1e-12, f"{r}")
+    check("return-tier gate is stricter than shape-tier",
+          economics.RISK_RETURN_MIN_DAYS > economics.RISK_SHAPE_MIN_DAYS >= 20)
+    check("sharpe withheld at 249 days, shown at 250",
+          economics.risk_days_left("sharpe_ratio", 249) == 1
+          and economics.risk_days_left("sharpe_ratio", 250) == 0)
+    # The retired simulated method must stay retired: nothing may call it.
+    src = open("portfolio_tracker.py", encoding="utf-8").read()
+    check("simulated prior-year risk method is gone",
+          "def compute_portfolio_risk_metrics" not in src
+          and "compute_own_risk_metrics(" in src)
+
+
 def g3_db(required=False):
     """Live reconciliation. Every rupee in holdings must have a ledger row.
 
@@ -789,6 +826,7 @@ def main():
     f_drift()
     g1_model()
     g2_wiring()
+    g4_own_returns()
     g3_db(required=args.db)
     h_costs_and_rates()
     print("\n" + ("ALL CHECKS PASSED" if not FAILS
