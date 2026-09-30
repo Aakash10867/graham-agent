@@ -464,3 +464,64 @@ def daily_twr_returns(history_rows):
             continue
         out.append((str(cur["date"]), (a1 - flow) / a0 - 1.0))
     return out
+
+# ══════════════════════════════════════════════════════════════════════════
+# GOAL ARITHMETIC (Sprint 17) — what rate the portfolio earns, what it needs
+# ══════════════════════════════════════════════════════════════════════════
+# The goal-drift alert used to compare (value_today / first_value)^(365/days)
+# against (target / value_today)^(12/months). Both sides ignored SIPs:
+#   - ACTUAL counted every instalment as growth. Portfolio 109 went from
+#     Rs 4,908 to Rs 9,630 in 44 days on its second instalment — "+26,000% a
+#     year" — while its real time-weighted return was -4.8%. The alert could
+#     therefore never fire: it would call a losing portfolio "on track".
+#   - NEEDED ignored every FUTURE instalment, overstating the rate required.
+# Both now come from here.
+
+def twr_annualised(twr, periods_per_year=252):
+    """Geometric annual rate from daily_twr_returns output, or None.
+    Geometric, not mean x 252: a goal compounds, so the rate that projects it
+    must be the compounding one."""
+    if not twr:
+        return None
+    growth = 1.0
+    for _, r in twr:
+        growth *= (1.0 + r)
+    if growth <= 0:
+        return -1.0
+    return growth ** (periods_per_year / len(twr)) - 1.0
+
+
+def sip_future_value(current_value, monthly_contribution, months, annual_rate):
+    """Value after `months`: today's value compounded, plus each monthly
+    instalment compounded from when it is paid (end of month)."""
+    i = (1.0 + annual_rate) ** (1.0 / 12.0) - 1.0
+    grow = (1.0 + i) ** months
+    annuity = months if abs(i) < 1e-12 else (grow - 1.0) / i
+    return current_value * grow + monthly_contribution * annuity
+
+
+REQUIRED_RATE_BOUNDS = (-0.50, 2.00)    # annual; outside this is not a plan
+
+
+def required_annual_return(current_value, monthly_contribution, months, target):
+    """Annual return at which today's value plus the remaining monthly SIPs
+    reaches `target` in `months`. Returns (rate, reachable):
+      - rate <= 0 means the goal is met even with no growth (SIPs alone do it);
+      - reachable=False means even +200% a year would not get there, and rate
+        is that ceiling — the alert says "more than", not a fake number.
+    Solved by bisection: future value is monotone in the rate."""
+    if months <= 0 or target <= 0:
+        return None, False
+    lo, hi = REQUIRED_RATE_BOUNDS
+    fv = lambda r: sip_future_value(current_value, monthly_contribution, months, r)
+    if fv(lo) >= target:
+        return lo, True
+    if fv(hi) < target:
+        return hi, False
+    for _ in range(100):
+        mid = (lo + hi) / 2.0
+        if fv(mid) >= target:
+            hi = mid
+        else:
+            lo = mid
+    return hi, True

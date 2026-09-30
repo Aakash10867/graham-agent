@@ -1291,50 +1291,69 @@ def run_daily_tracker():
         # because removing it CHANGES BEHAVIOUR: goal drift would start firing
         # for portfolios with no sector data. Separate decision, not this one.
         if held_sectors:
-            # ── Goal drift: trailing CAGR < 80% of needed CAGR ──
+            # ── Goal drift: actual rate vs the rate still needed (Sprint 17) ──
+            # Both sides were wrong before, in opposite directions: ACTUAL
+            # counted every SIP instalment as growth (portfolio 109: "+26,000%
+            # a year" on a -4.8% record, so the alert could never fire), and
+            # NEEDED ignored every future instalment (a Rs 1L portfolio with a
+            # Rs 10k SIP over 10 years "needed" 38% a year; the truth is 12%).
+            #   actual — the portfolio's own time-weighted rate, SIP flows
+            #            removed (economics.daily_twr_returns), compounded.
+            #   needed — the rate at which today's assets plus the remaining
+            #            monthly SIPs reach the target on the target date
+            #            (economics.required_annual_return).
+            # Judged only once the history clears the same gate as every other
+            # return figure (economics.RISK_RETURN_MIN_DAYS): a trajectory read
+            # off six months is ±27 points of noise, and an alert built on noise
+            # teaches the user to ignore alerts.
             target_amount = port.get("target_amount")
             target_date_str = port.get("target_date")
             if target_amount and target_date_str:
                 try:
                     target_dt = date.fromisoformat(str(target_date_str))
-                    months_remaining = max(1, (target_dt - date.today()).days / 30.44)
-    
-                    # Need 6+ months of history before judging trajectory
-                    hist_resp = supabase.table("portfolio_history").select("date, total_value").eq(
-                        "portfolio_id", port_id
-                    ).order("date").execute()
-                    hist_rows = hist_resp.data
-    
-                    if len(hist_rows) >= 180:  # ~6 months of weekday entries
-                        first_val = float(hist_rows[0]["total_value"])
-                        first_date = date.fromisoformat(hist_rows[0]["date"])
-                        days_active = max(1, (date.today() - first_date).days)
-    
-                        if first_val > 0:
-                            actual_cagr = (current_total_value / first_val) ** (365 / days_active) - 1
-    
-                            sip_monthly = port.get("sip_amount", 0) or 0
-                            # Approximate needed CAGR (ignoring SIP for simplicity — full math in goal tracker)
-                            if current_total_value > 0:
-                                needed_cagr = (float(target_amount) / current_total_value) ** (12 / months_remaining) - 1
-    
-                                if needed_cagr > 0 and actual_cagr < (0.8 * needed_cagr):
-                                    # Was: `"danger" if ... else "goal_drift"` —
-                                    # a ternary choosing between a severity and
-                                    # a TYPE for one column. Now the type is
-                                    # constant and only the severity varies.
-                                    _sev = "danger" if actual_cagr < (0.5 * needed_cagr) else "warning"
-                                    all_alerts.append(make_alert(
-                                        "goal_drift", "_portfolio",
-                                        f"{port['name']} trailing behind goal — actual {actual_cagr*100:.1f}% vs needed {needed_cagr*100:.1f}%",
-                                        {"reason": "goal_drift",
-                                         "actual_cagr_pct": round(actual_cagr * 100, 1),
-                                         "needed_cagr_pct": round(needed_cagr * 100, 1),
-                                         "target_amount": float(target_amount),
-                                         "months_remaining": round(months_remaining)},
-                                        "goal_drift", severity=_sev
-                                    ))
-                except (ValueError, TypeError) as e:
+                    months_remaining = max(1, round((target_dt - date.today()).days / 30.44))
+
+                    hist_rows = supabase.table("portfolio_history").select(
+                        "date, total_value, cash_balance, cumulative_invested, withdrawn"
+                    ).eq("portfolio_id", port_id).order("date").execute().data or []
+                    _twr = economics.daily_twr_returns(hist_rows)
+
+                    if economics.risk_days_left("annual_return", len(_twr)) == 0:
+                        actual_rate = economics.twr_annualised(_twr)
+                        sip_monthly = float(port.get("sip_amount") or 0)
+                        needed_rate, reachable = economics.required_annual_return(
+                            float(econ["total_assets"]), sip_monthly,
+                            months_remaining, float(target_amount))
+
+                        behind = (needed_rate is not None and needed_rate > 0
+                                  and actual_rate is not None
+                                  and (not reachable or actual_rate < 0.8 * needed_rate))
+                        if behind:
+                            # Type constant, severity varies (see make_alert).
+                            _sev = ("danger" if (not reachable or actual_rate < 0.5 * needed_rate)
+                                    else "warning")
+                            _needed_txt = (f"more than {needed_rate*100:.0f}%" if not reachable
+                                           else f"{needed_rate*100:.1f}%")
+                            all_alerts.append(make_alert(
+                                "goal_drift", "_portfolio",
+                                f"{port['name']} trailing behind goal — earning "
+                                f"{actual_rate*100:.1f}% a year vs {_needed_txt} needed "
+                                f"from here (with Rs {sip_monthly:,.0f}/month SIP)",
+                                # Field names kept: app.py renders actual_cagr_pct
+                                # and needed_cagr_pct. Only their meaning is fixed.
+                                {"reason": "goal_drift",
+                                 "actual_cagr_pct": round(actual_rate * 100, 1),
+                                 "needed_cagr_pct": round(needed_rate * 100, 1),
+                                 "needed_reachable": reachable,
+                                 "actual_basis": "time-weighted, own history, SIP flows removed",
+                                 "needed_basis": "includes remaining monthly SIPs",
+                                 "history_days": len(_twr),
+                                 "sip_monthly": sip_monthly,
+                                 "target_amount": float(target_amount),
+                                 "months_remaining": months_remaining},
+                                "goal_drift", severity=_sev
+                            ))
+                except (ValueError, TypeError, KeyError) as e:
                     print(f"Goal drift check failed for {port['name']}: {e}")
 
     # ══════════════════════════════════════

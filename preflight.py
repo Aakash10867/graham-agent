@@ -536,7 +536,7 @@ def g4_own_returns():
     is not a return. The 2026-09-16 SIP instalment roughly doubled both live
     portfolios; counted as performance it is a +108% day.
     """
-    section("G4. own-history returns and display gates")
+    section("G4. own-history returns, display gates, goal arithmetic")
     row = lambda d, v, inv, cash=0.0, w=0.0: {"date": d, "total_value": v,
                                                "cash_balance": cash,
                                                "cumulative_invested": inv,
@@ -559,6 +559,25 @@ def g4_own_returns():
     check("sharpe withheld at 249 days, shown at 250",
           economics.risk_days_left("sharpe_ratio", 249) == 1
           and economics.risk_days_left("sharpe_ratio", 250) == 0)
+    # Goal arithmetic. The old alert "needed" 38%/yr where 12% was the truth
+    # (future SIPs ignored), and "earned" +1,223%/yr on a 2% record (past SIPs
+    # counted as growth) — so it called a failing plan on track.
+    fv = economics.sip_future_value(100000, 10000, 120, 0.12)
+    rate, reach = economics.required_annual_return(100000, 10000, 120, fv)
+    check("required rate counts future SIPs (recovers 12%)",
+          reach and abs(rate - 0.12) < 1e-6, f"{rate}")
+    rate, reach = economics.required_annual_return(100000, 10000, 12, 200000)
+    check("goal met by SIPs alone needs no growth", reach and rate <= 0, f"{rate}")
+    rate, reach = economics.required_annual_return(1000, 0, 12, 1e9)
+    check("an impossible goal is flagged, not given a fake rate", reach is False)
+    check("actual rate is geometric and flow-free",
+          abs(economics.twr_annualised([("d", 0.01)] * 252) - (1.01 ** 252 - 1)) < 1e-9)
+    gsrc = open("portfolio_tracker.py", encoding="utf-8").read()
+    check("goal drift uses own-history rate and SIP-aware need",
+          "economics.required_annual_return(" in gsrc
+          and "economics.twr_annualised(" in gsrc
+          and "(current_total_value / first_val)" not in gsrc)
+
     # The retired simulated method must stay retired: nothing may call it.
     src = open("portfolio_tracker.py", encoding="utf-8").read()
     check("simulated prior-year risk method is gone",
