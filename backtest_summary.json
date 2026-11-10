@@ -1,11 +1,11 @@
 {
   "status": "OK",
-  "matured_cohorts": 21,
-  "snapshots_clean": 75,
+  "matured_cohorts": 22,
+  "snapshots_clean": 76,
   "min_required": 1,
   "horizon_trading_days": 63,
   "benchmark": "NIFTYBEES.NS",
-  "generated": "2026-11-09T16:45:11",
+  "generated": "2026-11-10T15:58:03",
   "caveats": [
     "Cross-sectional ladder: within a cohort all buckets share the same window, so a good/bad quarter lifts or sinks them together and cancels out of the high-minus-low spread.",
     "Daily cohorts overlap ~62/63 days \u2014 they sharpen the estimate but are NOT independent. The band uses effective N = calendar span / horizon, not the raw cohort count.",
@@ -27,81 +27,81 @@
   },
   "ladder": {
     "0": {
-      "cohorts": 21,
-      "mean_fwd_return": -0.0075,
-      "mean_fwd_return_net": -0.0127,
-      "mean_fwd_return_net_small": -0.0403,
-      "total_missing": 377,
+      "cohorts": 22,
+      "mean_fwd_return": -0.0076,
+      "mean_fwd_return_net": -0.0129,
+      "mean_fwd_return_net_small": -0.0405,
+      "total_missing": 392,
       "sampled": true,
       "mean_excess_vs": {
-        "nifty50": 0.037,
-        "midcap150": 0.0628,
-        "smallcap250": 0.0033
+        "nifty50": 0.034,
+        "midcap150": 0.0613,
+        "smallcap250": 0.0028
       }
     },
     "1": {
-      "cohorts": 21,
-      "mean_fwd_return": -0.0182,
-      "mean_fwd_return_net": -0.0235,
-      "mean_fwd_return_net_small": -0.0511,
-      "total_missing": 251,
+      "cohorts": 22,
+      "mean_fwd_return": -0.0177,
+      "mean_fwd_return_net": -0.023,
+      "mean_fwd_return_net_small": -0.0506,
+      "total_missing": 259,
       "sampled": true,
       "mean_excess_vs": {
-        "nifty50": 0.0263,
-        "midcap150": 0.0521,
-        "smallcap250": -0.0075
+        "nifty50": 0.0239,
+        "midcap150": 0.0512,
+        "smallcap250": -0.0074
       }
     },
     "2": {
-      "cohorts": 21,
-      "mean_fwd_return": -0.015,
-      "mean_fwd_return_net": -0.0203,
-      "mean_fwd_return_net_small": -0.0479,
-      "total_missing": 122,
+      "cohorts": 22,
+      "mean_fwd_return": -0.0149,
+      "mean_fwd_return_net": -0.0201,
+      "mean_fwd_return_net_small": -0.0477,
+      "total_missing": 133,
       "sampled": true,
       "mean_excess_vs": {
-        "nifty50": 0.0295,
-        "midcap150": 0.0553,
-        "smallcap250": -0.0042
+        "nifty50": 0.0268,
+        "midcap150": 0.0541,
+        "smallcap250": -0.0045
       }
     },
     "3": {
-      "cohorts": 21,
-      "mean_fwd_return": -0.0151,
-      "mean_fwd_return_net": -0.0204,
-      "mean_fwd_return_net_small": -0.048,
-      "total_missing": 288,
+      "cohorts": 22,
+      "mean_fwd_return": -0.0153,
+      "mean_fwd_return_net": -0.0206,
+      "mean_fwd_return_net_small": -0.0482,
+      "total_missing": 303,
       "sampled": false,
       "mean_excess_vs": {
-        "nifty50": 0.0294,
-        "midcap150": 0.0552,
-        "smallcap250": -0.0044
+        "nifty50": 0.0263,
+        "midcap150": 0.0536,
+        "smallcap250": -0.0049
       }
     },
     "4": {
-      "cohorts": 21,
-      "mean_fwd_return": -0.0464,
-      "mean_fwd_return_net": -0.0516,
-      "mean_fwd_return_net_small": -0.0792,
-      "total_missing": 47,
+      "cohorts": 22,
+      "mean_fwd_return": -0.046,
+      "mean_fwd_return_net": -0.0512,
+      "mean_fwd_return_net_small": -0.0788,
+      "total_missing": 50,
       "sampled": false,
       "mean_excess_vs": {
-        "nifty50": -0.0019,
-        "midcap150": 0.0239,
-        "smallcap250": -0.0357
+        "nifty50": -0.0043,
+        "midcap150": 0.023,
+        "smallcap250": -0.0356
       }
     },
     "5": {
-      "cohorts": 21,
-      "mean_fwd_return": -0.0172,
-      "mean_fwd_return_net": -0.0225,
-      "mean_fwd_return_net_small": -0.0501,
-      "total_missing": 9,
+      "cohorts": 22,
+      "mean_fwd_return": -0.0168,
+      "mean_fwd_return_net": -0.0221,
+      "mean_fwd_return_net_small": -0.0497,
+      "total_missing": 10,
       "sampled": false,
       "mean_excess_vs": {
-        "nifty50": 0.0273,
-        "midcap150": 0.0531,
-        "smallcap250": -0.0065
+        "nifty50": 0.0248,
+        "midcap150": 0.0521,
+        "smallcap250": -0.0064
       }
     }
   },
@@ -109,22 +109,22 @@
   "independent_quarters": 1,
   "spread_high_minus_low": {
     "definition": "mean(buckets 4,5) - mean(buckets 0,1) forward return",
-    "point": -0.019,
+    "point": -0.0187,
     "ci95": [
-      -0.0518,
-      0.0139
+      -0.0508,
+      0.0134
     ],
-    "n_cohorts": 21,
+    "n_cohorts": 22,
     "independent_quarters": 1
   },
   "spread_high_minus_low_net": {
     "definition": "same spread, net of costs at Rs 5,000 per position",
-    "point": -0.0189,
+    "point": -0.0187,
     "ci95": [
-      -0.0517,
-      0.0138
+      -0.0508,
+      0.0134
     ],
-    "n_cohorts": 21,
+    "n_cohorts": 22,
     "independent_quarters": 1
   }
 }
